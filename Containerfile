@@ -8,7 +8,10 @@
 # Inspect: podman run --rm -it <image> bash
 
 ARG BASE_IMAGE=quay.io/fedora/fedora-bootc
-ARG BASE_TAG=43
+ARG BASE_TAG=44
+
+# Release builds should pin BASE_TAG to a digest rather than a moving tag, so
+# that rebuilding an old release reproduces the OS it originally shipped.
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build the Corium agent.
