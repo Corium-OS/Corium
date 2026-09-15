@@ -63,13 +63,28 @@ jobs:
       - name: Build
         id: build
         run: |
+          # Retried because pulling the base image fails transiently often
+          # enough to matter -- a 502 from the registry is not a broken commit,
+          # and a red build for that reason erodes trust in the signal.
+          #
           # bootc container lint runs inside the build with --fatal-warnings,
-          # so a warning fails this step rather than scrolling past.
-          podman build \
-            --build-arg VERSION="${{ steps.plan.outputs.version }}" \
-            --build-arg COMMIT="${GITHUB_SHA::7}" \
-            --tag "localhost/corium:ci" \
-            --file Containerfile .
+          # so a genuine warning still fails this step rather than scrolling
+          # past; the retry does not hide it, since a lint failure is
+          # deterministic and fails every attempt.
+          for attempt in 1 2 3; do
+            if podman build \
+              --build-arg VERSION="${{ steps.plan.outputs.version }}" \
+              --build-arg COMMIT="${GITHUB_SHA::7}" \
+              --tag "localhost/corium:ci" \
+              --file Containerfile .
+            then
+              exit 0
+            fi
+
+            echo "build attempt ${attempt} failed" >&2
+            [ "${attempt}" = "3" ] && exit 1
+            sleep $((attempt * 20))
+          done
 
       - name: Inspect what was produced
         run: |
