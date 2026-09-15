@@ -1,14 +1,29 @@
 # Installation defaults for Corium.
 #
-# The base fedora-bootc image ships no install configuration at all, which
+# The base fedora-bootc image ships an empty /usr/lib/bootc/install/, which
 # leaves the root filesystem type undecided. That is a distribution's decision
-# to make, not the installer's, and leaving it unset makes every tool that
-# installs this image -- bootc install, bootc-image-builder -- fail or guess.
+# to make, and leaving it unset makes every tool that installs this image --
+# bootc install, bootc-image-builder -- fail outright.
 #
-# xfs is the choice: it is what the CoreOS and RHEL lineage use for container
-# hosts, it handles the many-small-files pattern of an overlayfs image store
-# well, and it can grow online, which matters when a node's disk is resized
-# under it.
+# ext4, not xfs, and the reason is about who can build this image rather than
+# how it performs.
+#
+# xfs is the conventional pick for a container host and was the first choice
+# here. But xfsprogs on Fedora 44 creates filesystems with incompatible
+# features (0xc0) that kernels older than 6.10 refuse to mount:
+#
+#   XFS: Superblock has unknown incompatible features (0xc0) enabled.
+#   XFS: Filesystem cannot be safely mounted by this kernel.
+#
+# bootc-image-builder mounts the root filesystem on the build host to populate
+# it, so the build fails on any host running an older kernel -- Proxmox 8 on
+# Debian 12 ships 6.8, and that is a very common place to build a node image.
+# The resulting disk would have booted fine, since the VM runs a current Fedora
+# kernel; it simply could not be produced.
+#
+# ext4 is mountable by every kernel in service, grows online with resize2fs,
+# and the difference for a Kubernetes node's workload is not worth trading
+# away the ability to build the image on the machine you already have.
 
 [install]
-root-fs-type = "xfs"
+root-fs-type = "ext4"
