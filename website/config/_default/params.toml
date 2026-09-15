@@ -130,7 +130,9 @@ mathEngine = "KaTeX" # "KaTeX" (default) or "MathJax"
     summaryFallback = "" # "" (default)
   [seo.favicons]
     icon = "favicon.png" # favicon.png (default)
-    svgIcon = "favicon.svg" # favicon.svg (default)
+    # No SVG icon: the mark exists only as a raster. The SEO partial skips it
+    # when empty rather than emitting a link to a file that is not there.
+    svgIcon = ""
   [seo.schemas]
     type = "Organization" # Organization (default) or Person
     logo = "favicon-512x512.png" # Logo of Organization — favicon-512x512.png (default)
