@@ -1,2 +1,5 @@
 # Overrides for production environment
-baseurl = "/"
+# No baseurl here on purpose. The template sets "/", which silently
+# overrides config/_default/hugo.toml -- Hugo builds with the production
+# environment by default -- and drops the subpath GitHub Pages serves
+# this site from, breaking every absolute link.

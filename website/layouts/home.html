@@ -6,7 +6,10 @@
     </div>
     <div class="col-lg-9 col-xl-8 text-center">
       <p class="lead">{{ .Params.lead | safeHTML }}</p>
-      <a class="btn btn-primary btn-cta rounded-pill btn-lg my-3" href="/docs/{{ if site.Params.doks.docsVersioning }}{{ site.Params.doks.docsVersion }}/{{ end }}guides/example-guide/" role="button">{{ i18n "get_started" }}</a>
+      {{/* relURL, not a bare path: GitHub Pages serves this site under a
+           subpath, and an absolute href would drop it and 404. */}}
+      <a class="btn btn-primary btn-cta rounded-pill btn-lg my-3"
+         href="{{ "docs/guides/quickstart/" | relURL }}" role="button">Get started</a>
       {{ .Content }}
     </div>
   </div>
@@ -19,41 +22,32 @@
     <div class="bg-dots"></div>
   </div>
   {{ end -}}
-  {{ if eq $.Site.Language.LanguageName "English" }}
   <section class="section section-md section-features">
     <div class="container">
       <div class="row justify-content-center text-center">
         <div class="col-lg-5">
-          <h2 class="h4">Update content</h2>
-          <p>Edit <code>content/_index.md</code> to see this page change.</p>
+          <h2 class="h4">The OS is a container image</h2>
+          <p>Built with a <code>Containerfile</code>, pushed to a registry, versioned by
+             digest. Inspect it, scan it and promote it with the tooling you already use.</p>
         </div>
         <div class="col-lg-5">
-          <h2 class="h4">Add new content</h2>
-          <p>Add Markdown files to <code>content</code> to create new pages.</p>
+          <h2 class="h4">Kubernetes ships with the OS</h2>
+          <p><a href="https://k0sproject.io/">k0s</a> lives in the read-only <code>/usr</code>.
+             Upgrading Kubernetes means booting a new image, with one rollback path.</p>
         </div>
         <div class="col-lg-5">
-          <h2 class="h4">Configure your site</h2>
-          <p>Edit your config in <code>config/_default/params.toml</code>.</p>
+          <h2 class="h4">Configured with cloud-init</h2>
+          <p>No bespoke API and no new configuration language. Where cloud-init does not
+             exist, the same schema is read from a file or the kernel command line.</p>
         </div>
         <div class="col-lg-5">
-          <h2 class="h4">Read the docs</h2>
-          <p>Learn more in the <a href="https://getdoks.org/">Docs</a>.</p>
+          <h2 class="h4">Every abstraction has an escape hatch</h2>
+          <p>A verbatim k0s patch, and an ordinary cloud-config underneath. Corium is a
+             guest in your configuration, not its owner.</p>
         </div>
       </div>
     </div>
   </section>
-  {{ end }}
 {{ end }}
 
-{{ define "sidebar-footer" }}
-{{ if site.Params.doks.sectionFooter -}}
-<section class="section section-md container-fluid bg-light">
-  <div class="row justify-content-center text-center">
-    <div class="col-lg-7">
-      <h2 class="mt-2">Start building with Doks today</h2>
-      <a class="btn btn-primary rounded-pill px-4 my-2" href="/docs/{{ if site.Params.doks.docsVersioning }}{{ site.Params.doks.docsVersion }}/{{ end }}prologue/introduction/" role="button">{{ i18n "get-started" }}</a>
-    </div>
-  </div>
-</section>
-{{ end -}}
-{{ end }}
+{{ define "sidebar-footer" }}{{ end }}

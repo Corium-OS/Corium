@@ -88,6 +88,14 @@ jobs:
           hugo --minify --gc \
             --baseURL "${{ steps.pages.outputs.base_url || 'https://corium-os.github.io/Corium/' }}"
 
+      # The site shipped with broken links twice, and neither was visible
+      # locally: a menu path that dropped the subpath GitHub Pages serves from,
+      # and a theme bug that prefixed an icon twice. Both only appear once the
+      # site is built with the real baseURL, which is exactly here.
+      - name: Check internal links
+        working-directory: website
+        run: python3 check-links.py
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: website/public

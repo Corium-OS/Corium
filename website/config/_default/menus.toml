@@ -1,6 +1,10 @@
+# pageRef, not url: Hugo resolves a pageRef against the site's baseURL, so the
+# link keeps working under the subpath GitHub Pages serves this site from. An
+# absolute url would drop the prefix and 404.
+
 [[main]]
   name = "Docs"
-  url = "/docs/guides/quickstart/"
+  pageRef = "/docs/guides/quickstart"
   weight = 10
 
 [[main]]
