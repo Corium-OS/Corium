@@ -107,6 +107,7 @@ node silently joins the wrong cluster.
 
 ## Documentation
 
+- [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions
 - [`docs/examples/`](docs/examples/) — annotated configuration examples
 - [`docs/adr/`](docs/adr/) — architecture decision records
