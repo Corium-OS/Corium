@@ -1,0 +1,61 @@
+#cloud-config
+#
+# Replacing the default CNI.
+#
+# Corium ships kube-router by default because that is what k0s defaults to: one
+# component covering networking, network policy and service proxying. Setting
+# `cni: custom` makes k0s deploy no CNI at all, leaving the choice entirely to
+# you.
+#
+# Be aware of what that means: with no CNI installed, the node stays NotReady
+# and pods that need cluster networking stay Pending. That is expected, not
+# broken -- the cluster is waiting for you. The add-on below fills the gap in
+# the same document, so the node converges on its own.
+
+corium:
+  role: single
+
+  cluster:
+    name: lab
+
+  network:
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+    # k0s installs nothing; the add-on below provides networking.
+    cni: custom
+
+  addons:
+    - name: cilium
+      chart: cilium/cilium
+      version: 1.18.1
+      namespace: kube-system
+      repository:
+        name: cilium
+        url: https://helm.cilium.io/
+      values:
+        # Must agree with network.podCIDR above. Corium does not reconcile
+        # add-on values against the rest of the configuration -- they are
+        # passed to the chart untouched, by design.
+        ipam:
+          mode: cluster-pool
+          operator:
+            clusterPoolIPv4PodCIDRList:
+              - 10.244.0.0/16
+
+        # Cilium can replace kube-proxy entirely. If you enable this, the API
+        # server address has to be reachable without a working cluster network,
+        # since Cilium is what provides that network.
+        kubeProxyReplacement: false
+
+        # k0s runs containerd from its own directory rather than the
+        # distribution default, so Cilium has to be told where the CNI
+        # configuration lives.
+        cni:
+          binPath: /opt/cni/bin
+          confPath: /etc/cni/net.d
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com

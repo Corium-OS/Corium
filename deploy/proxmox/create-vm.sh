@@ -23,6 +23,18 @@ DISK_SIZE="${DISK_SIZE:-32G}"
 #   IP_CONFIG="ip=192.168.0.190/24,gw=192.168.0.1"
 IP_CONFIG="${IP_CONFIG:-ip=dhcp}"
 
+# Proxmox's ipconfig0 carries an address and a gateway, and nothing else. A
+# statically addressed node therefore comes up with no resolver at all unless
+# one is set here, and the failure is confusing: the node is pingable, SSH
+# works, and Kubernetes hangs pulling images with "lookup quay.io: Try again".
+# DHCP supplies a resolver on its own, so this only matters for static setups.
+NAMESERVER="${NAMESERVER:-}"
+SEARCHDOMAIN="${SEARCHDOMAIN:-}"
+
+if [[ "${IP_CONFIG}" != *"ip=dhcp"* && -z "${NAMESERVER}" ]]; then
+	echo "warning: static IP_CONFIG with no NAMESERVER; the node will have no DNS" >&2
+fi
+
 if qm status "${VMID}" &>/dev/null; then
 	echo "VM ${VMID} already exists; destroy it first" >&2
 	exit 1
@@ -74,6 +86,14 @@ qm disk resize "${VMID}" scsi0 "${DISK_SIZE}"
 qm set "${VMID}" --ide2 "${STORAGE}:cloudinit"
 qm set "${VMID}" --cicustom "user=${SNIPPET_STORAGE}:snippets/${snippet_name}"
 qm set "${VMID}" --ipconfig0 "${IP_CONFIG}"
+
+if [[ -n "${NAMESERVER}" ]]; then
+	qm set "${VMID}" --nameserver "${NAMESERVER}"
+fi
+
+if [[ -n "${SEARCHDOMAIN}" ]]; then
+	qm set "${VMID}" --searchdomain "${SEARCHDOMAIN}"
+fi
 
 echo
 echo "VM ${VMID} (${VM_NAME}) created. Start it with:"
