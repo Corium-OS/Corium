@@ -27,3 +27,9 @@ kubeconfig
 .DS_Store
 .idea/
 .vscode/
+
+# Documentation site
+website/node_modules/
+website/public/
+website/resources/
+website/.hugo_build.lock

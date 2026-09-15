@@ -1,0 +1,104 @@
+# Build the documentation site and publish it to GitHub Pages.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - website/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one half-way: an interrupted
+# deployment can leave the site serving a partial build.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Pinned rather than "latest": a site that silently changes how it renders
+  # because a runner picked up a new Hugo is a bad surprise.
+  HUGO_VERSION: 0.166.0
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Doks shows a last-modified date derived from git history.
+          fetch-depth: 0
+
+      - name: Install Hugo extended
+        run: |
+          url="https://github.com/gohugoio/hugo/releases/download"
+          archive="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output /tmp/hugo.tar.gz \
+            "${url}/v${HUGO_VERSION}/${archive}"
+          tar -xzf /tmp/hugo.tar.gz -C /tmp hugo
+          sudo install -m 0755 /tmp/hugo /usr/local/bin/hugo
+          hugo version
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: website/package.json
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install theme dependencies
+        working-directory: website
+        run: npm ci
+
+      # The Markdown in docs/ is the source of truth. This regenerates the
+      # site's copies, so a documentation change reaches the site without
+      # anyone remembering to mirror it.
+      - name: Generate documentation pages
+        working-directory: website
+        run: python3 sync-docs.py
+
+      - name: Fail if the generated pages are out of date
+        working-directory: website
+        run: |
+          # Generated pages are committed so the site can be built and reviewed
+          # locally. If regenerating them here produces a diff, the commit
+          # forgot to run sync-docs.py.
+          if ! git diff --quiet -- content/docs; then
+            echo "Generated documentation pages are stale." >&2
+            echo "Run 'python3 website/sync-docs.py' and commit the result." >&2
+            git diff --stat -- content/docs >&2
+            exit 1
+          fi
+
+      - id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Build
+        working-directory: website
+        env:
+          HUGO_ENVIRONMENT: production
+        run: |
+          hugo --minify --gc \
+            --baseURL "${{ steps.pages.outputs.base_url || 'https://corium-os.github.io/Corium/' }}"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/public
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

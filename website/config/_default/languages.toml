@@ -1,0 +1,12 @@
+# English only. Everything in this project is written in English by policy, so
+# the theme's other languages are removed rather than left to generate empty
+# alternates and a language switcher with nothing behind it.
+
+[en]
+  languageName = "English"
+  contentDir = "content"
+  weight = 10
+  [en.params]
+    languageISO = "EN"
+    languageTag = "en-US"
+    footer = 'Built with <a class="text-muted" href="https://gohugo.io/">Hugo</a> and <a class="text-muted" href="https://getdoks.org/">Doks</a>. Source on <a class="text-muted" href="https://github.com/Corium-OS/Corium">GitHub</a>.'
