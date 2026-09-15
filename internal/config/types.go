@@ -58,6 +58,11 @@ type Config struct {
 	// HA configures a highly available control plane.
 	HA HA `yaml:"ha,omitempty" json:"ha,omitempty"`
 
+	// RAID declares software RAID arrays assembled from this node's spare
+	// disks. It does not cover the disk the OS booted from: see the RAIDArray
+	// documentation.
+	RAID []RAIDArray `yaml:"raid,omitempty" json:"raid,omitempty"`
+
 	// Upgrades controls whether the node updates itself.
 	Upgrades Upgrades `yaml:"upgrades,omitempty" json:"upgrades,omitempty"`
 
@@ -298,6 +303,87 @@ const (
 	// control plane has locally. A plain worker reboots undrained.
 	UpgradeApply UpgradePolicy = "apply"
 )
+
+// Filesystems a RAID array can be formatted with.
+const (
+	// RAIDFilesystemExt4 is the default, for the same reason the root
+	// filesystem is ext4: it mounts on every kernel in service and grows
+	// online. See docs/adr/0002-root-filesystem.md.
+	RAIDFilesystemExt4 = "ext4"
+
+	// RAIDFilesystemXFS is available for arrays that hold large files, where
+	// its allocator behaves better. The kernel incompatibility that rules it
+	// out for the root filesystem does not apply here: a data array is created
+	// on the running node, not mounted by a build host.
+	RAIDFilesystemXFS = "xfs"
+
+	// RAIDFilesystemNone leaves the array unformatted, for a workload that
+	// wants the raw block device.
+	RAIDFilesystemNone = "none"
+)
+
+// RAIDArray declares one software RAID array built from whole disks.
+//
+// This covers spare disks, not the disk the OS booted from. Putting the root
+// filesystem on an array is an install-time decision: by the time this code
+// runs the root is already deployed and mounted, and nothing here can move it.
+// A node that needs a redundant root is installed that way from the ISO, which
+// the RAID documentation describes.
+//
+// What this earns over writing mdadm into cloud-init's runcmd, which is the
+// honest alternative since cloud-init has no RAID support of its own:
+//
+//   - The array exists before k0s starts. A runcmd races the kubelet, and
+//     losing that race means containerd writes to the mount point before the
+//     array is mounted over it, where the data is invisible afterwards.
+//   - It refuses to destroy data. A device that already carries a filesystem,
+//     a partition table or another array's metadata stops the bootstrap
+//     instead of being overwritten.
+//   - It is idempotent. An array that already exists is adopted, not rebuilt.
+type RAIDArray struct {
+	// Name identifies the array. It becomes /dev/md/<name>, and must be unique
+	// on the node.
+	Name string `yaml:"name" json:"name"`
+
+	// Level is the RAID level: 0, 1, 5, 6 or 10.
+	//
+	// Level 0 is striping with no redundancy. It is accepted because it is
+	// occasionally what someone wants for scratch space, but losing any member
+	// loses the array.
+	Level int `yaml:"level" json:"level"`
+
+	// Devices are the block devices to build the array from, by path. Whole
+	// disks (/dev/sdb), not partitions.
+	//
+	// Prefer stable paths -- /dev/disk/by-id/... -- over kernel names. Kernel
+	// names are assigned in discovery order and can move between boots, which
+	// on a first boot means building an array out of whichever disks happened
+	// to enumerate first.
+	Devices []string `yaml:"devices" json:"devices"`
+
+	// Spares are devices kept idle and pulled in automatically when a member
+	// fails. Meaningless for level 0.
+	Spares []string `yaml:"spares,omitempty" json:"spares,omitempty"`
+
+	// Filesystem to create on the array: ext4 (default) or xfs. Set it to
+	// "none" to leave the array unformatted, for a workload that wants the raw
+	// block device.
+	Filesystem string `yaml:"filesystem,omitempty" json:"filesystem,omitempty"`
+
+	// MountPoint is where the array is mounted, and the entry written to
+	// /etc/fstab so later boots mount it too. Empty means the array is
+	// assembled but not mounted, which only makes sense with filesystem: none.
+	MountPoint string `yaml:"mountPoint,omitempty" json:"mountPoint,omitempty"`
+
+	// Wipe permits overwriting devices that already hold data.
+	//
+	// Off by default, and the default is the point: the failure mode of a disk
+	// provisioning tool is destroying something irreplaceable, and a node that
+	// refuses to boot is cheaper than one that silently erased a disk someone
+	// meant to keep. Setting this true is an explicit statement that the
+	// devices listed are expendable.
+	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
+}
 
 // Upgrades controls whether a node updates itself.
 type Upgrades struct {

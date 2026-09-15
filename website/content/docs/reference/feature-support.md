@@ -110,10 +110,21 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Feature | Field | Notes |
 |---|---|---|
 | Unattended staging | `upgrades.automatic: download` | Stages a new image, never reboots on its own |
-| Unattended reboot | `upgrades.automatic: apply` | Reboots without draining; for labs and single nodes |
+| Unattended reboot | `upgrades.automatic: apply` | Drains the node, reboots, uncordons. A drain a PDB refuses cancels the upgrade |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
 | Version ladder | — | `1.4.2`, `1.4`, `1`, `latest` published per release |
 | Automatic rollback on failure | — | greenboot health check; a node that cannot run k0s returns to its previous image |
+
+### Disks
+
+| Feature | Field | Notes |
+|---|---|---|
+| Software RAID on spare disks | `raid[]` | Levels 0, 1, 5, 6, 10; created before k0s starts |
+| Hot spares | `raid[].spares` | Pulled in automatically when a member fails |
+| Filesystem | `raid[].filesystem` | `ext4` (default), `xfs`, or `none` for a raw device |
+| Mount and persist | `raid[].mountPoint` | Written to `/etc/fstab` by UUID |
+| Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
+| Root filesystem on RAID | — | Install-time only, via Kickstart. Not declarable: see [software RAID](/docs/guides/raid/) |
 
 ### Where configuration comes from
 

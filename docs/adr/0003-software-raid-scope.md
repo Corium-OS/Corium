@@ -1,0 +1,93 @@
+# 3. Software RAID covers spare disks, not the root filesystem
+
+Status: accepted
+
+## Context
+
+[Issue #5](https://github.com/Corium-OS/Corium/issues/5) asked for a way to
+declare a software RAID array from the `corium:` block, with the explicit
+caveat that it should only be added if it earns its place over a plain
+cloud-init disk setup.
+
+There are two separate problems behind the one request.
+
+**Spare disks.** Extra disks on a node, to be mirrored or striped and mounted
+somewhere. This can be done at first boot.
+
+**The root filesystem.** By the time anything reads the `corium:` block, the
+root filesystem is deployed, mounted, and running the process doing the
+reading. Nothing at that point can move it onto an array. A redundant root has
+to be arranged by whatever laid the disk down, which means the installer.
+
+## Decision
+
+`raid[]` covers spare disks. Arrays are created by `corium-agent` at first boot,
+before k0s is installed.
+
+A RAID root filesystem is documented as an install-time Kickstart procedure,
+with its current upstream breakage stated plainly, and is not supported by
+Corium.
+
+## Why spare-disk RAID earns its place
+
+cloud-init has no RAID support. `disk_setup` does partitions and filesystems,
+and the documentation has said for years that mdadm support is anticipated. The
+honest alternative is therefore a `runcmd` block calling `mdadm`, and three
+things make that worse than a field:
+
+- **Ordering.** `runcmd` races the kubelet. Losing that race means containerd
+  writes its state into the directory on the root disk that the array is then
+  mounted over. The data is invisible afterwards while still consuming the root
+  disk, and the node reports a full disk with no apparent cause. Corium builds
+  arrays before k0s is installed and writes `RequiresMountsFor` into the k0s
+  unit, so Kubernetes refuses to start rather than run without its storage.
+- **Refusing to destroy data.** A device already carrying a filesystem, a
+  partition table, or another array's metadata stops the bootstrap.
+  `mdadm --create` by hand does not ask.
+- **Idempotency.** A second bootstrap adopts an existing array rather than
+  rebuilding it, and rewrites its own fstab line rather than appending another.
+
+## Why a RAID root is not supported
+
+Not a philosophical position — the upstream pieces do not currently hold
+together on bootc:
+
+- Anaconda permits `/boot/efi` on RAID1 with metadata 1.0, but `bootupd` derives
+  the ESP partition number from `/sys/class/block/<name>/partition`, which an md
+  device does not have. The install fails at `bootupctl backend install`
+  ([bootc#947](https://github.com/bootc-dev/bootc/discussions/947), open and
+  unanswered since December 2024).
+- The recommended alternative — one independent ESP per disk — leaves the
+  secondary ESP without `grub.cfg`, so the spare disk boots to a GRUB rescue
+  shell ([bootupd#1076](https://github.com/coreos/bootupd/issues/1076), open,
+  fix unmerged).
+- There is no published success report for a bootc install onto an mdraid root,
+  and no Anaconda or kickstart test covering `raid /` with `ostreecontainer`.
+
+Fedora CoreOS solves this declaratively with Ignition's `boot_device.mirror`,
+which builds the array in the initramfs and replicates `/boot` per disk. bootc
+has no equivalent. Modelling a field for something that does not work would be
+worse than the documentation, because a field implies it has been made to work.
+
+## Consequences
+
+A node whose root disk dies is reprovisioned rather than repaired. That is the
+model the rest of Corium is built around: the OS is an image, the node is
+cattle, and a replacement boots the same digest.
+
+Spare-disk arrays cover the case that is actually expensive — local state that
+is slow to rebuild — while the cluster covers the case of losing a whole node.
+
+If bootc grows a declarative equivalent of `boot_device.mirror`, this decision
+should be revisited; the schema has room for it.
+
+## Alternatives considered
+
+**Documentation only, no field.** Ship the mdadm recipe and add no permanent
+key. Rejected: it leaves the ordering problem unsolved, and the ordering problem
+is the one that silently corrupts a node.
+
+**Support a RAID root via Kickstart as a product feature.** Rejected on the
+evidence above. It would mean shipping an install path whose bootloader step is
+known to fail, and whose redundancy is not verifiable without physically pulling
+a disk.

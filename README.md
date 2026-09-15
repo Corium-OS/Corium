@@ -121,6 +121,7 @@ node silently joins the wrong cluster.
 - [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
+- [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
 - [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions

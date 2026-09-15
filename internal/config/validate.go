@@ -30,6 +30,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateAddons()...)
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
+	problems = append(problems, c.validateRAID()...)
 
 	return errors.Join(problems...)
 }
@@ -393,4 +394,129 @@ func (c *Config) validateUpgrades() []error {
 	}
 
 	return nil
+}
+
+// raidNamePattern keeps an array name usable as a device node under /dev/md/.
+var raidNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// raidMinimumDevices is the smallest number of members each RAID level can be
+// built from. mdadm will refuse anything below these, but it refuses at first
+// boot on a machine nobody is watching, so catch it here instead.
+var raidMinimumDevices = map[int]int{
+	0:  2,
+	1:  2,
+	5:  3,
+	6:  4,
+	10: 4,
+}
+
+func (c *Config) validateRAID() []error {
+	var problems []error
+
+	// Two arrays sharing a name would collide on /dev/md/<name>, and a device
+	// claimed twice would be pulled into whichever array is built first and
+	// silently corrupt the other.
+	seenNames := make(map[string]bool, len(c.RAID))
+	seenDevices := make(map[string]string, len(c.RAID))
+
+	for i, array := range c.RAID {
+		field := fmt.Sprintf("raid[%d]", i)
+
+		if array.Name == "" {
+			problems = append(problems, fmt.Errorf("%s.name: required", field))
+		} else {
+			if !raidNamePattern.MatchString(array.Name) {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q must be letters, digits, dashes or underscores",
+					field, array.Name))
+			}
+
+			if seenNames[array.Name] {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q is used by more than one array", field, array.Name))
+			}
+
+			seenNames[array.Name] = true
+		}
+
+		problems = append(problems, validateRAIDLevel(field, array)...)
+		problems = append(problems, validateRAIDDevices(field, array, seenDevices)...)
+		problems = append(problems, validateRAIDFilesystem(field, array)...)
+	}
+
+	return problems
+}
+
+func validateRAIDLevel(field string, array RAIDArray) []error {
+	minimum, ok := raidMinimumDevices[array.Level]
+	if !ok {
+		return []error{fmt.Errorf(
+			"%s.level: unsupported level %d; use 0, 1, 5, 6 or 10", field, array.Level)}
+	}
+
+	if len(array.Devices) < minimum {
+		return []error{fmt.Errorf(
+			"%s.devices: RAID %d needs at least %d devices, got %d",
+			field, array.Level, minimum, len(array.Devices))}
+	}
+
+	// A spare cannot be rebuilt into a stripe, so mdadm takes it but it never
+	// does anything. Say so rather than letting someone believe they have a
+	// safety margin they do not have.
+	if array.Level == 0 && len(array.Spares) > 0 {
+		return []error{fmt.Errorf(
+			"%s.spares: RAID 0 has no redundancy, so a spare can never be rebuilt into it", field)}
+	}
+
+	return nil
+}
+
+func validateRAIDDevices(field string, array RAIDArray, seen map[string]string) []error {
+	var problems []error
+
+	for _, device := range append(append([]string{}, array.Devices...), array.Spares...) {
+		if !strings.HasPrefix(device, "/dev/") {
+			problems = append(problems, fmt.Errorf(
+				"%s.devices: %q must be an absolute device path under /dev", field, device))
+
+			continue
+		}
+
+		if owner, taken := seen[device]; taken {
+			problems = append(problems, fmt.Errorf(
+				"%s.devices: %q is already claimed by %s", field, device, owner))
+
+			continue
+		}
+
+		seen[device] = field
+	}
+
+	return problems
+}
+
+func validateRAIDFilesystem(field string, array RAIDArray) []error {
+	var problems []error
+
+	switch array.Filesystem {
+	case "", RAIDFilesystemExt4, RAIDFilesystemXFS:
+	case RAIDFilesystemNone:
+		// An unformatted array cannot be mounted, and quietly ignoring the
+		// mount point would leave someone waiting for a filesystem that is
+		// never going to appear there.
+		if array.MountPoint != "" {
+			problems = append(problems, fmt.Errorf(
+				"%s.mountPoint: set but filesystem is none, so there is nothing to mount", field))
+		}
+	default:
+		problems = append(problems, fmt.Errorf(
+			"%s.filesystem: unknown value %q; use ext4, xfs or none", field, array.Filesystem))
+	}
+
+	if array.MountPoint != "" && !strings.HasPrefix(array.MountPoint, "/") {
+		problems = append(problems, fmt.Errorf(
+			"%s.mountPoint: %q must be an absolute path", field, array.MountPoint))
+	}
+
+	return problems
 }
