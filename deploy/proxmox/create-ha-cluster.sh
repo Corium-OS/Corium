@@ -37,7 +37,20 @@ VRRP_ROUTER_ID="${VRRP_ROUTER_ID:-51}"
 # keeps, and VRRP authentication exists to stop a stray host on the segment from
 # claiming the virtual IP. It is generated once here and used by all three
 # controllers, because they must agree on it.
-VRRP_PASS="${VRRP_PASS:-$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)}"
+# Written the long way on purpose. The obvious form,
+#
+#     tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8
+#
+# kills this script under `set -o pipefail`: head closes the pipe after eight
+# bytes, tr dies of SIGPIPE, and the non-zero status trips `set -e` before
+# anything is created. Reading a fixed block first lets both sides exit
+# normally.
+if [[ -z "${VRRP_PASS:-}" ]]; then
+	# LC_ALL=C on tr, not on head: BSD tr rejects the random bytes as an
+	# illegal sequence in a UTF-8 locale.
+	random="$(head -c 256 /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9')"
+	VRRP_PASS="${random:0:8}"
+fi
 
 if [[ ${#VRRP_PASS} -gt 8 ]]; then
 	echo "VRRP_PASS is ${#VRRP_PASS} characters; keepalived uses only 8" >&2
