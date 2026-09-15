@@ -275,6 +275,7 @@
       "TableOfContents",
       "add-ons",
       "anywhere-else",
+      "at-a-glance",
       "before-you-start",
       "buttonColorMode",
       "choosing-what-to-track",
@@ -304,6 +305,7 @@
       "only-the-difference-is-transferred",
       "out-of-scope",
       "passthrough",
+      "prior-art-worth-crediting",
       "proxmox",
       "query",
       "role",
@@ -319,6 +321,7 @@
       "the-filesystem-contract",
       "the-model",
       "the-operating-system-is-an-image",
+      "the-real-baseline-k0s-on-an-ordinary-distribution",
       "three-levels-of-support",
       "toTop",
       "toc",
@@ -330,11 +333,14 @@
       "upgrading-a-node",
       "upgrading-kubernetes-specifically",
       "verifying-what-you-are-about-to-boot",
+      "what-corium-is-betting-on",
       "what-corium-is-not",
       "what-lands-on-the-node",
       "what-survives",
+      "when-not-to-use-corium",
       "where-configuration-comes-from",
       "where-to-go-next",
+      "why-you-might-pick-each-one-instead",
       "without-cloud-init"
     ]
   }

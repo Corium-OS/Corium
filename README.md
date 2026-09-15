@@ -87,6 +87,9 @@ Corium's bet is narrower and specific: that for teams already living in OCI regi
 GitOps, an operating system that *is* an image — built, signed, scanned, and promoted like
 every other image they ship — is worth more than a bespoke mechanism, however good.
 
+The [comparison](docs/comparison.md) covers these and the rest properly, including the
+cases where you should pick something else.
+
 ## Where a node's configuration comes from
 
 Sources are tried in order, most specific first, and the first one that answers wins:
@@ -114,6 +117,7 @@ node silently joins the wrong cluster.
 
 ## Documentation
 
+- [**Comparison**](docs/comparison.md) — Talos, Kairos, Flatcar, and when not to use Corium
 - [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster

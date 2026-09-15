@@ -36,6 +36,9 @@ PAGES = [
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
+    ("comparison.md", "reference", "comparison", "Comparison", 201,
+     "How Corium compares to Talos, Kairos, Flatcar, Bottlerocket and running "
+     "k0s on an ordinary distribution -- and when not to use it."),
     ("features.md", "reference", "feature-support", "Feature support", 205,
      "What Corium models, what it passes through to k0s, and what it "
      "deliberately does not do."),
@@ -59,6 +62,7 @@ PAGE_URLS = {
     "quickstart.md": "/docs/guides/quickstart/",
     "concepts.md": "/docs/guides/concepts/",
     "features.md": "/docs/reference/feature-support/",
+    "comparison.md": "/docs/reference/comparison/",
     "upgrades.md": "/docs/guides/upgrades/",
     "reference.md": "/docs/reference/configuration/",
     "adr/0001-base-image.md": "/docs/reference/adr-0001-base-image/",
