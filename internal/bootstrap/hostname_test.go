@@ -109,3 +109,47 @@ func TestGenericHostnamesAreRecognised(t *testing.T) {
 		}
 	}
 }
+
+func TestVirtualAddressParsing(t *testing.T) {
+	addr, err := virtualAddress("192.168.0.200/24")
+	if err != nil {
+		t.Fatalf("virtualAddress() error = %v", err)
+	}
+
+	if addr.String() != "192.168.0.200" {
+		t.Errorf("virtualAddress() = %v, want 192.168.0.200", addr)
+	}
+
+	// No HA configured means nothing to exclude.
+	addr, err = virtualAddress("")
+	if err != nil {
+		t.Fatalf("virtualAddress(\"\") error = %v", err)
+	}
+
+	if addr.IsValid() {
+		t.Errorf("virtualAddress(\"\") = %v, want an invalid (absent) address", addr)
+	}
+
+	if _, err := virtualAddress("not-an-address"); err == nil {
+		t.Error("virtualAddress() accepted a malformed virtual IP")
+	}
+}
+
+func TestDetectNodeIPAvoidsTheVirtualIP(t *testing.T) {
+	// Whatever this machine's real address is, detection must never return the
+	// address it was told to exclude.
+	actual, err := detectNodeIP("")
+	if err != nil {
+		t.Skipf("no usable address on this host: %v", err)
+	}
+
+	got, err := detectNodeIP(actual + "/32")
+	if err != nil {
+		// A host with exactly one address legitimately has no alternative.
+		t.Skipf("host has only one usable address: %v", err)
+	}
+
+	if got == actual {
+		t.Errorf("detectNodeIP() returned the excluded virtual IP %q", got)
+	}
+}

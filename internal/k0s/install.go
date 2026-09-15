@@ -27,10 +27,15 @@ func ServiceName(role config.Role) string {
 
 // InstallArgs builds the k0s command line for a node.
 //
+// nodeIP, when set, is the address the kubelet registers with. It matters on an
+// HA controller: without it the kubelet may register the virtual IP, which
+// belongs to whichever controller currently wins the VRRP election rather than
+// to this node.
+//
 // It is pure and returns the arguments rather than running them, so that the
 // exact command can be asserted in tests and printed by --dry-run without any
 // risk of it differing from what actually runs.
-func InstallArgs(cfg *config.Config, hasToken bool) []string {
+func InstallArgs(cfg *config.Config, hasToken bool, nodeIP string) []string {
 	args := []string{"install"}
 
 	if cfg.Role.IsController() {
@@ -54,14 +59,18 @@ func InstallArgs(cfg *config.Config, hasToken bool) []string {
 		args = append(args, "--token-file", TokenPath)
 	}
 
-	args = append(args, nodeArgs(cfg)...)
+	args = append(args, nodeArgs(cfg, nodeIP)...)
 
 	return args
 }
 
 // nodeArgs renders the kubelet-level attributes for this machine.
-func nodeArgs(cfg *config.Config) []string {
+func nodeArgs(cfg *config.Config, nodeIP string) []string {
 	var args []string
+
+	if nodeIP != "" {
+		args = append(args, "--kubelet-extra-args", "--node-ip="+nodeIP)
+	}
 
 	if len(cfg.Node.Labels) > 0 {
 		// Sorted so that the command line is deterministic: identical input

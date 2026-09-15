@@ -185,7 +185,7 @@ func TestInstallArgs(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := InstallArgs(&tc.cfg, tc.hasToken)
+			got := InstallArgs(&tc.cfg, tc.hasToken, "")
 
 			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 				t.Errorf("InstallArgs() =\n  %v\nwant\n  %v", got, tc.want)
@@ -200,7 +200,7 @@ func TestInstallArgsSortsLabels(t *testing.T) {
 		Node: config.Node{Labels: map[string]string{"z": "1", "a": "2", "m": "3"}},
 	}
 
-	got := strings.Join(InstallArgs(cfg, true), " ")
+	got := strings.Join(InstallArgs(cfg, true, ""), " ")
 	if !strings.Contains(got, "a=2,m=3,z=1") {
 		t.Errorf("InstallArgs() = %q, want sorted labels", got)
 	}
@@ -325,5 +325,23 @@ func TestRenderHAIsIdenticalAcrossControllers(t *testing.T) {
 
 	if string(a) != string(b) {
 		t.Errorf("controllers rendered different configurations:\n--- first ---\n%s\n--- second ---\n%s", a, b)
+	}
+}
+
+func TestInstallArgsPinsNodeIP(t *testing.T) {
+	// A controller holding the virtual IP must not register it as its own
+	// address: the VIP moves to another machine on failover, and everything
+	// addressed to this node would follow it.
+	cfg := &config.Config{Role: config.RoleControllerWorker}
+
+	got := strings.Join(InstallArgs(cfg, false, "192.168.0.201"), " ")
+	if !strings.Contains(got, "--node-ip=192.168.0.201") {
+		t.Errorf("InstallArgs() = %q, want it to pin the node IP", got)
+	}
+
+	// Without HA there is no VIP to confuse the kubelet, so nothing is pinned.
+	got = strings.Join(InstallArgs(cfg, false, ""), " ")
+	if strings.Contains(got, "--node-ip") {
+		t.Errorf("InstallArgs() = %q, want no node IP when none was detected", got)
 	}
 }

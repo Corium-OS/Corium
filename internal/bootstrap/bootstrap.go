@@ -100,7 +100,7 @@ func Run(ctx context.Context, opts Options) error {
 	// mean contacting a secret store to produce output nobody applies, which is
 	// both a surprise and, on a shared network, a leak of intent.
 	if opts.DryRun {
-		return report(cfg, rendered, k0s.InstallArgs(cfg, cfg.Join.Required()))
+		return report(cfg, rendered, k0s.InstallArgs(cfg, cfg.Join.Required(), ""))
 	}
 
 	token, err := resolveToken(ctx, cfg)
@@ -124,7 +124,20 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	args := k0s.InstallArgs(cfg, token != "")
+	// Pin the address the kubelet registers with, so that a controller holding
+	// the virtual IP does not advertise an address that moves on failover.
+	var nodeIP string
+
+	if cfg.HA.Enabled {
+		if nodeIP, err = detectNodeIP(cfg.HA.VirtualIP); err != nil {
+			return err
+		}
+
+		slog.Info("registering with a fixed node address",
+			"nodeIP", nodeIP, "virtualIP", cfg.HA.VirtualIP)
+	}
+
+	args := k0s.InstallArgs(cfg, token != "", nodeIP)
 
 	return apply(ctx, cfg, rendered, args, token)
 }
