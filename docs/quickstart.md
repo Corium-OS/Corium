@@ -16,6 +16,9 @@ mistakes that cost the most time.
 
 ---
 
+If you would rather understand the model before typing anything, read
+[concepts](concepts.md) first.
+
 ## Before you start
 
 You need a **Linux host** with `podman` and about 20 GB of free disk.

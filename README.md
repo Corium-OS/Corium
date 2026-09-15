@@ -114,6 +114,7 @@ node silently joins the wrong cluster.
 
 ## Documentation
 
+- [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope

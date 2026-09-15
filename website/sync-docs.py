@@ -27,6 +27,9 @@ PAGES = [
     # Hugo derives a page's URL from its title unless a slug is given, and an
     # ADR heading like "1. Base the OS on fedora-bootc rather than Fedora
     # CoreOS" makes for an unusable one.
+    ("concepts.md", "guides", "concepts", "Concepts", 105,
+     "How Corium works and why it is shaped this way: the image, the "
+     "filesystem contract, first boot, and node identity."),
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From an empty machine to a working Kubernetes node in five steps, with "
      "the mistakes that cost the most time."),
@@ -54,6 +57,7 @@ PAGES = [
 # GitHub because the site does not serve the repository.
 PAGE_URLS = {
     "quickstart.md": "/docs/guides/quickstart/",
+    "concepts.md": "/docs/guides/concepts/",
     "features.md": "/docs/reference/feature-support/",
     "upgrades.md": "/docs/guides/upgrades/",
     "reference.md": "/docs/reference/configuration/",
