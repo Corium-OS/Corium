@@ -430,3 +430,49 @@ func TestVirtualRouterIDMayBeOmitted(t *testing.T) {
 		t.Errorf("Validate() with no virtualRouterID = %v, want nil", err)
 	}
 }
+
+func TestValidateUpgrades(t *testing.T) {
+	valid := []UpgradePolicy{UpgradeNone, UpgradeDownload, UpgradeApply, ""}
+
+	for _, policy := range valid {
+		cfg := Config{Role: RoleSingle, Upgrades: Upgrades{Automatic: policy}}
+		cfg.ApplyDefaults()
+
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() with automatic %q = %v, want nil", policy, err)
+		}
+	}
+
+	cfg := Config{Role: RoleSingle, Upgrades: Upgrades{Automatic: "yes"}}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "use none, download or apply") {
+		t.Errorf("Validate() with automatic \"yes\" = %v, want a clear rejection", err)
+	}
+}
+
+func TestUpgradesDefaultToOff(t *testing.T) {
+	// A node must never reboot itself unless someone asked for it.
+	cfg := &Config{Role: RoleSingle}
+	cfg.ApplyDefaults()
+
+	if cfg.Upgrades.Automatic != UpgradeNone {
+		t.Errorf("Upgrades.Automatic = %q, want %q by default",
+			cfg.Upgrades.Automatic, UpgradeNone)
+	}
+}
+
+func TestScheduleWithoutAutomaticIsRejected(t *testing.T) {
+	// Otherwise the setting silently does nothing.
+	cfg := &Config{
+		Role:     RoleSingle,
+		Upgrades: Upgrades{Automatic: UpgradeNone, Schedule: "hourly"},
+	}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "nothing is scheduled") {
+		t.Errorf("Validate() = %v, want it to flag a schedule that does nothing", err)
+	}
+}

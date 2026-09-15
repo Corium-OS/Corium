@@ -121,9 +121,28 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME}"
           tags="${{ steps.plan.outputs.version }}"
 
-          # A tagged release is also what :latest points at.
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            tags="${tags} latest"
+            # A release publishes a ladder of tags, so a node can choose how
+            # much movement it accepts:
+            #
+            #   1.4.2   never moves      -- pin to an exact release
+            #   1.4     follows patches  -- fixes, no new behaviour
+            #   1       follows minors   -- new features, no breaking changes
+            #   latest  follows releases -- whatever is newest
+            #
+            # Prereleases (1.4.0-rc.1) publish only their exact tag: a release
+            # candidate must never be picked up by a node following 1.4.
+            version="${{ github.ref_name }}"
+            version="${version#v}"
+
+            if [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              major="${BASH_REMATCH[1]}"
+              minor="${BASH_REMATCH[2]}"
+              tags="${version} ${major}.${minor} ${major} latest"
+            else
+              echo "::notice::${version} is not a plain semantic version; publishing that tag only"
+              tags="${version}"
+            fi
           elif [ "${{ github.ref_name }}" = "main" ]; then
             tags="${tags} main"
           fi

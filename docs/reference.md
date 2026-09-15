@@ -98,7 +98,7 @@ silently ignored key means a setting you carefully wrote never took effect.
 | Step | What happens |
 |---|---|
 | **Parse** | Locate the schema in the document and decode it strictly |
-| **Defaults** | Fill unset fields (§3.9). Idempotent |
+| **Defaults** | Fill unset fields (§3.10). Idempotent |
 | **Validate** | Report **every** problem at once, offline |
 | **Hostname** | Settle the node's name before anything reads it (§4) |
 | **Secrets** | Resolve `tokenFrom` / `authPassFrom` |
@@ -156,7 +156,8 @@ referred to indirectly in the journal.
 | `node` | object | no | Node attributes (§3.6) |
 | `addons` | list | no | Helm charts (§3.7) |
 | `ha` | object | no | Control plane load balancing (§3.8) |
-| `k0s` | object | no | Escape hatch (§3.10) |
+| `upgrades` | object | no | Unattended upgrades (§3.9) |
+| `k0s` | object | no | Escape hatch (§3.11) |
 
 ### `role`
 
@@ -251,7 +252,7 @@ an external cluster, is reachable through `k0s.patch`. See
 | Key | Type | Notes |
 |---|---|---|
 | `token` | string | Inline. Convenient for labs, a liability in production |
-| `tokenFrom` | object | Resolved at first boot (§3.11) |
+| `tokenFrom` | object | Resolved at first boot (§3.12) |
 
 Set exactly one. Required for `worker`; rejected for `single`, which bootstraps
 its own cluster.
@@ -341,7 +342,7 @@ one holds a virtual IP.
 | `interface` | string | no | Defaults to the interface holding the default route |
 | `virtualRouterID` | int | no | 1–255. Omit it and k0s assigns one starting at 51. Must be unique within the broadcast domain |
 | `authPass` | string | yes | **Eight characters or fewer** |
-| `authPassFrom` | object | — | Alternative to `authPass` (§3.11) |
+| `authPassFrom` | object | — | Alternative to `authPass` (§3.12) |
 | `unicastPeers` | list | no | The other controllers' addresses |
 
 `authPass` is capped because **keepalived silently truncates it to eight
@@ -380,7 +381,23 @@ and k0s documents it as incompatible with `spec.api.externalAddress` — which
 Corium sets from `cluster.endpoint`. See
 [k0s: node-local load balancing](https://docs.k0sproject.io/stable/nllb/).
 
-### 3.9 Defaults
+### 3.9 `upgrades`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `automatic` | enum | `none` | `none`, `download` or `apply` |
+| `schedule` | string | `daily` | systemd `OnCalendar` expression |
+
+`none` does nothing. `download` stages a newer image without rebooting, so the
+reboot you schedule is near-instant. `apply` reboots on its own, without
+draining, which suits a lab and not much else.
+
+A `schedule` with `automatic: none` is rejected: it would be a setting that
+silently does nothing.
+
+See [upgrades](upgrades.md#unattended-upgrades).
+
+### 3.10 Defaults
 
 | Field | Default |
 |---|---|
@@ -394,7 +411,7 @@ Corium sets from `cluster.endpoint`. See
 
 Applying defaults is idempotent and never overwrites an explicit value.
 
-### 3.10 `k0s.patch` — the escape hatch
+### 3.11 `k0s.patch` — the escape hatch
 
 A strategic merge patch applied to the rendered `k0s.yaml` **after** Corium has
 finished, passed through without interpretation. Every k0s setting stays
@@ -423,7 +440,7 @@ The second escape hatch is that the document remains an ordinary cloud-config:
 `write_files`, `runcmd` and every other module keep working. Corium is a guest
 in that document, not its owner.
 
-### 3.11 Secret sources
+### 3.12 Secret sources
 
 Used by `join.tokenFrom` and `ha.authPassFrom`, so credentials need not sit in
 instance metadata where anything reaching the metadata service can read them.

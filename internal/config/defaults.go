@@ -10,6 +10,10 @@ const (
 	DefaultServiceCIDR = "10.96.0.0/12"
 	DefaultCNI         = CNIKubeRouter
 	DefaultNamespace   = "default"
+
+	// DefaultUpgradeSchedule checks once a day. systemd applies a randomised
+	// delay on top, so a fleet does not converge on the registry at once.
+	DefaultUpgradeSchedule = "daily"
 )
 
 // ApplyDefaults fills in unset fields. It is idempotent.
@@ -32,6 +36,14 @@ func (c *Config) ApplyDefaults() {
 
 	if c.Storage.Type == "" {
 		c.Storage.Type = c.Role.defaultStorage()
+	}
+
+	if c.Upgrades.Automatic == "" {
+		c.Upgrades.Automatic = UpgradeNone
+	}
+
+	if c.Upgrades.Schedule == "" {
+		c.Upgrades.Schedule = DefaultUpgradeSchedule
 	}
 
 	for i := range c.Addons {

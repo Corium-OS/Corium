@@ -179,6 +179,13 @@ func apply(ctx context.Context, cfg *config.Config, rendered []byte, args []stri
 		return err
 	}
 
+	// After k0s is running: an upgrade policy is about the node's future, not
+	// about bringing it up, and failing here should not leave a cluster
+	// half-joined.
+	if err := applyUpgradePolicy(ctx, cfg); err != nil {
+		return err
+	}
+
 	if err := markBootstrapped(); err != nil {
 		return err
 	}

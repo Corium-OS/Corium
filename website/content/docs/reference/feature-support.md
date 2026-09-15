@@ -104,6 +104,15 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Chart repositories | `addons[].repository` | |
 | Chart values | `addons[].values` | Converted to the YAML string k0s expects |
 
+### Upgrades
+
+| Feature | Field | Notes |
+|---|---|---|
+| Unattended staging | `upgrades.automatic: download` | Stages a new image, never reboots on its own |
+| Unattended reboot | `upgrades.automatic: apply` | Reboots without draining; for labs and single nodes |
+| Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
+| Version ladder | — | `1.4.2`, `1.4`, `1`, `latest` published per release |
+
 ### Where configuration comes from
 
 | Feature | Notes |

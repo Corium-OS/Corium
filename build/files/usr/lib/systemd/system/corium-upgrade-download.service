@@ -1,0 +1,24 @@
+[Unit]
+Description=Stage a Corium upgrade without rebooting
+Documentation=https://github.com/Corium-OS/Corium
+
+# Nothing to do without a network, and no point racing the boot.
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/ostree-booted
+
+[Service]
+Type=oneshot
+
+# --download-only fetches and deploys the new image, then stops. The node keeps
+# running what it booted; the reboot stays the operator's decision, but becomes
+# near-instant because the work is already done.
+ExecStart=/usr/bin/bootc upgrade --download-only --quiet
+
+# A registry being unreachable is not a failure worth alerting on: the timer
+# will come round again.
+SuccessExitStatus=0
+Restart=no
+
+StandardOutput=journal
+StandardError=journal

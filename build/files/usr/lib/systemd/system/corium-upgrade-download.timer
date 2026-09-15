@@ -1,0 +1,16 @@
+[Unit]
+Description=Check for a Corium upgrade
+Documentation=https://github.com/Corium-OS/Corium
+
+[Timer]
+# Overridden by a drop-in when corium.upgrades.schedule is set.
+OnCalendar=daily
+
+# Spread a fleet out rather than having every node hit the registry at once.
+RandomizedDelaySec=1h
+
+# Catch up after a node has been off, instead of waiting a full day.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

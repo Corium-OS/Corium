@@ -142,22 +142,69 @@ Two things rollback does **not** undo:
 
 ## Choosing what to track
 
-| Tag | Moves | For |
+A release publishes a ladder of tags, so a node can choose how much movement it
+accepts.
+
+| Tag | Moves | You get |
 |---|---|---|
-| `ghcr.io/corium-os/corium:main` | On every push to `main` | Following development |
-| `ghcr.io/corium-os/corium:<commit>` | Never | Pinning a node to an exact build |
-| `ghcr.io/corium-os/corium@sha256:...` | Never | Pinning by digest, the strongest form |
+| `corium@sha256:...` | Never | Exactly one image. The strongest pin |
+| `corium:1.4.2` | Never | One release |
+| `corium:1.4` | On patch releases | Fixes, no new behaviour |
+| `corium:1` | On minor releases | New features, no breaking changes |
+| `corium:latest` | On every release | Whatever is newest, including major versions |
+| `corium:main` | On every push to `main` | Development builds, unreleased |
 
-Production nodes should track a tag that does not move under them, or a digest.
-`bootc status` always reports the digest actually booted, whatever the tag said
-at the time.
+Most clusters want `1.4` in production and `1` somewhere they can afford
+surprises. `latest` crosses major versions, which is where breaking changes
+live by definition.
 
-### Nothing updates itself
+Prereleases publish only their exact tag: `1.4.0-rc.1` never becomes `1.4` or
+`1`, so a node following a stable tag will not pick up a release candidate.
 
-Corium masks `bootc-fetch-apply-updates.timer`. A node will not pull a new
-image and reboot on its own, because a Kubernetes node that reboots unprompted
-is an outage nobody scheduled. Upgrades are something you do, drain-aware and
-in an order you chose.
+`bootc status` always reports the digest actually booted, whatever the tag
+said at the time — which is what you want in an incident.
+
+### Unattended upgrades
+
+A node does nothing on its own by default. A Kubernetes node that reboots
+unprompted is an outage nobody scheduled, so `bootc-fetch-apply-updates.timer`
+is masked in the image.
+
+Two levels are available when you want more:
+
+```yaml
+corium:
+  upgrades:
+    automatic: download      # none (default) | download | apply
+    schedule: "Mon *-*-* 03:00:00"   # systemd OnCalendar, default daily
+```
+
+| Policy | What the node does | Reboots itself |
+|---|---|---|
+| `none` | Nothing. The default | No |
+| `download` | Stages a newer image, leaves it queued for the next boot | **No** |
+| `apply` | Stages it and reboots | **Yes** |
+
+**`download` is the one most clusters want.** The fetch and the deployment
+happen unattended, so the reboot you schedule becomes near-instant — the
+expensive part is already done. You still choose the moment, drain first, and
+go one node at a time.
+
+`apply` reboots without draining, because nothing on the node knows how to
+drain it. That is reasonable for a single-node cluster or a lab, and a poor
+idea for anything carrying workloads you care about.
+
+`schedule` takes any [systemd OnCalendar](https://www.freedesktop.org/software/systemd/man/systemd.time.html)
+expression. A randomised delay of up to an hour is applied on top, so a fleet
+does not arrive at the registry in lockstep, and missed checks are caught up
+after a node has been off rather than waiting for the next window.
+
+Check what a node has staged:
+
+```bash
+sudo bootc status
+systemctl list-timers 'corium-upgrade-*' 'bootc-*'
+```
 
 ---
 
@@ -175,17 +222,27 @@ cosign verify ghcr.io/corium-os/corium:main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Two caveats, both stated plainly because a signature is exactly the kind of
-thing people assume more from than it delivers.
+Verified output looks like this:
 
-**The verification command above is not yet confirmed to work end to end.** The
-signature is definitely published — the registry holds a signature artefact for
-the current digest, as an OCI index under the referrers fallback tag — but
-`cosign verify` did not complete in our testing. Cosign v3 changed how
-signatures are stored, moving from the older `<digest>.sig` tag to OCI
-referrers, and consumers expecting the old layout need
-`--new-bundle-format=false` at signing time. If verification matters to you,
-test it before relying on it, and please report what you find.
+```
+Verification for ghcr.io/corium-os/corium:main --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - Existence of the claims in the transparency log was verified offline
+  - The code-signing certificate was verified using trusted certificate
+    authority certificates
+```
+
+If `cosign verify` hangs with no output at all, it is probably your registry
+credential helper waiting on something — a locked macOS keychain does this.
+Running it with an empty `DOCKER_CONFIG` is a quick way to tell:
+
+```bash
+mkdir -p /tmp/emptycfg && echo '{}' > /tmp/emptycfg/config.json
+DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:main \
+  --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 **Signing is not enforcing.** A stock Corium node ships the default
 `/etc/containers/policy.json`, which is `insecureAcceptAnything`: the image is

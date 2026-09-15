@@ -28,6 +28,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateNode()...)
 	problems = append(problems, c.validateAddons()...)
 	problems = append(problems, c.validateHA()...)
+	problems = append(problems, c.validateUpgrades()...)
 
 	return errors.Join(problems...)
 }
@@ -349,6 +350,26 @@ func (c *Config) validateAuthPass() []error {
 			"ha.authPass: keepalived uses only the first %d characters, and yours is %d long; "+
 				"shorten it so every controller agrees on the same value",
 			keepalivedAuthPassLimit, len(c.HA.AuthPass))}
+	}
+
+	return nil
+}
+
+func (c *Config) validateUpgrades() []error {
+	switch c.Upgrades.Automatic {
+	case UpgradeNone, UpgradeDownload, UpgradeApply, "":
+	default:
+		return []error{fmt.Errorf(
+			"upgrades.automatic: unknown value %q; use none, download or apply",
+			c.Upgrades.Automatic)}
+	}
+
+	// A schedule with nothing to schedule is a setting that silently does
+	// nothing, which is worth saying rather than ignoring.
+	if c.Upgrades.Automatic == UpgradeNone &&
+		c.Upgrades.Schedule != "" && c.Upgrades.Schedule != DefaultUpgradeSchedule {
+		return []error{errors.New(
+			"upgrades.schedule: set but upgrades.automatic is none, so nothing is scheduled")}
 	}
 
 	return nil

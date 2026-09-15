@@ -58,6 +58,9 @@ type Config struct {
 	// HA configures a highly available control plane.
 	HA HA `yaml:"ha,omitempty" json:"ha,omitempty"`
 
+	// Upgrades controls whether the node updates itself.
+	Upgrades Upgrades `yaml:"upgrades,omitempty" json:"upgrades,omitempty"`
+
 	// K0s is the escape hatch to the underlying k0s configuration.
 	K0s K0s `yaml:"k0s,omitempty" json:"k0s,omitempty"`
 }
@@ -256,6 +259,38 @@ type Addon struct {
 type Repository struct {
 	Name string `yaml:"name" json:"name"`
 	URL  string `yaml:"url" json:"url"`
+}
+
+// UpgradePolicy says how far a node goes on its own when a newer image exists.
+type UpgradePolicy string
+
+const (
+	// UpgradeNone leaves upgrades entirely to the operator. This is the
+	// default: a Kubernetes node that reboots unprompted is an outage nobody
+	// scheduled.
+	UpgradeNone UpgradePolicy = "none"
+
+	// UpgradeDownload stages a newer image without rebooting. The reboot stays
+	// yours to schedule, but it becomes near-instant because the download and
+	// the deployment already happened.
+	UpgradeDownload UpgradePolicy = "download"
+
+	// UpgradeApply downloads and reboots on its own.
+	//
+	// It does not drain the node first, because nothing on the node knows how
+	// to. Reasonable for a single-node cluster or a lab; on anything carrying
+	// workloads you care about, prefer download and drive the reboot yourself.
+	UpgradeApply UpgradePolicy = "apply"
+)
+
+// Upgrades controls whether a node updates itself.
+type Upgrades struct {
+	// Automatic selects how far the node goes unattended. Defaults to none.
+	Automatic UpgradePolicy `yaml:"automatic,omitempty" json:"automatic,omitempty"`
+
+	// Schedule is a systemd OnCalendar expression saying when to check.
+	// Defaults to daily. See systemd.time(7) for the syntax.
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 }
 
 // K0s is the escape hatch to the underlying k0s configuration.
