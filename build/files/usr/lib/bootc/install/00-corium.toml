@@ -1,0 +1,14 @@
+# Installation defaults for Corium.
+#
+# The base fedora-bootc image ships no install configuration at all, which
+# leaves the root filesystem type undecided. That is a distribution's decision
+# to make, not the installer's, and leaving it unset makes every tool that
+# installs this image -- bootc install, bootc-image-builder -- fail or guess.
+#
+# xfs is the choice: it is what the CoreOS and RHEL lineage use for container
+# hosts, it handles the many-small-files pattern of an overlayfs image store
+# well, and it can grow online, which matters when a node's disk is resized
+# under it.
+
+[install]
+root-fs-type = "xfs"
