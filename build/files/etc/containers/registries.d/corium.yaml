@@ -1,0 +1,9 @@
+# Look for sigstore signatures attached to Corium images.
+#
+# Without this the runtime never looks: it defaults to the older "lookaside"
+# mechanism, and a policy requiring a signature fails with
+# "A signature was required, but no signature exists" while the signature sits
+# in the registry, correctly attached and simply never consulted.
+docker:
+  ghcr.io/corium-os/corium:
+    use-sigstore-attachments: true

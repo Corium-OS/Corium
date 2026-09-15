@@ -1,0 +1,27 @@
+{
+    "default": [
+        {
+            "type": "insecureAcceptAnything"
+        }
+    ],
+    "transports": {
+        "docker": {
+            "ghcr.io/corium-os/corium": [
+                {
+                    "type": "sigstoreSigned",
+                    "keyPath": "/usr/share/corium/cosign.pub",
+                    "signedIdentity": {
+                        "type": "matchRepoDigestOrExact"
+                    }
+                }
+            ]
+        },
+        "docker-daemon": {
+            "": [
+                {
+                    "type": "insecureAcceptAnything"
+                }
+            ]
+        }
+    }
+}

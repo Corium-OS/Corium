@@ -182,13 +182,27 @@ jobs:
       - name: Sign the image
         if: steps.plan.outputs.publish == 'true'
         run: |
-          # The layout matters as much as the signature. A node enforcing
-          # signatures looks for the <digest>.sig tag; a signature published
-          # anywhere else is real and invisible, and the node reports
-          # "A signature was required, but no signature exists". The cosign
-          # version pinned above is what decides this.
-          cosign sign --yes "${{ steps.push.outputs.digest }}"
-          echo "signed ${{ steps.push.outputs.digest }}"
+          digest="${{ steps.push.outputs.digest }}"
+
+          # Signed twice, because the two signatures answer different questions.
+          #
+          # Keyless proves which workflow run produced this image, and is
+          # recorded in a public transparency log. It is what a human checks.
+          # But a node cannot enforce it: containers-policy.json matches the
+          # signer by subjectEmail, and a GitHub Actions certificate carries a
+          # URI instead -- enforcement fails with `Required email ... not found
+          # (got [])`. Verified on a node.
+          #
+          # The key signature is what nodes can actually require, because a
+          # policy can name a public key with no identity matching involved.
+          cosign sign --yes "${digest}"
+          echo "signed (keyless) ${digest}"
+
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${digest}"
+          echo "signed (key) ${digest}"
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
 
       - name: Summary
         run: |
