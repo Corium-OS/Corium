@@ -169,23 +169,25 @@ jobs:
         # narrower pin than the rest -- and cosign-installer publishes no v4
         # tag anyway, only full versions.
         uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # cosign v2, not the v3 default.
+          #
+          # v3 always attaches signatures as OCI referrers. containers-policy
+          # -- what a node consults to enforce a signature -- only looks for
+          # the <digest>.sig tag, and v3 offers no way to write it:
+          # --registry-referrers-mode controls fetching, not publishing. v2
+          # writes the layout enforcement can actually find.
+          cosign-release: v2.6.5
 
       - name: Sign the image
         if: steps.plan.outputs.publish == 'true'
         run: |
-          # --registry-referrers-mode=legacy writes the signature to the
-          # <digest>.sig tag rather than as an OCI referrer.
-          #
-          # This is not a stylistic choice. containers-policy.json -- what
-          # podman, skopeo and bootc use to enforce signatures on a node --
-          # only looks for the .sig tag. With cosign's newer default, a node
-          # configured to require a signature rejects the image with
-          # "A signature was required, but no signature exists", which is a
-          # confusing way to learn that the signature is real but in the wrong
-          # place. Verified on a node before changing this.
-          cosign sign --yes \
-            --registry-referrers-mode=legacy \
-            "${{ steps.push.outputs.digest }}"
+          # The layout matters as much as the signature. A node enforcing
+          # signatures looks for the <digest>.sig tag; a signature published
+          # anywhere else is real and invisible, and the node reports
+          # "A signature was required, but no signature exists". The cosign
+          # version pinned above is what decides this.
+          cosign sign --yes "${{ steps.push.outputs.digest }}"
           echo "signed ${{ steps.push.outputs.digest }}"
 
       - name: Summary
