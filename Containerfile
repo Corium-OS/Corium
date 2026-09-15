@@ -70,6 +70,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		socat \
 		ethtool \
 		qemu-guest-agent \
+		greenboot \
 	&& dnf clean all \
 	&& rm -rf /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
 
@@ -117,7 +118,8 @@ COPY build/files/etc /etc
 # into cloud-init-main.service and cloud-init-network.service. Enabling them by
 # name buys nothing and breaks on upgrade.
 RUN systemctl enable corium-bootstrap.service \
-	&& systemctl enable qemu-guest-agent.service
+	&& systemctl enable qemu-guest-agent.service \
+	&& systemctl enable greenboot-healthcheck.service
 
 # The image decides when it updates; it does not update itself behind the
 # operator's back. Upgrades are an explicit, orchestrated, drain-aware act.

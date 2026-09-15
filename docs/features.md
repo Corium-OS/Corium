@@ -104,6 +104,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Unattended reboot | `upgrades.automatic: apply` | Reboots without draining; for labs and single nodes |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
 | Version ladder | — | `1.4.2`, `1.4`, `1`, `latest` published per release |
+| Automatic rollback on failure | — | greenboot health check; a node that cannot run k0s returns to its previous image |
 
 ### Where configuration comes from
 

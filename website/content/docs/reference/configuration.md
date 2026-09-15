@@ -459,9 +459,34 @@ instance metadata where anything reaching the metadata service can read them.
 | `url` | string | **Must be `https`** |
 | `file` | string | Absolute path |
 | `authFile` | string | File holding a bearer token for `url` |
+| `waitFor` | duration | Retry until the secret appears, at most this long |
 
 Set exactly one of `url` or `file`. Plain HTTP is rejected without an opt-out: a
 token fetched over HTTP is a token handed to anyone on the path.
+
+### Waiting for a secret
+
+`waitFor` is what lets a cluster start all at once. A joining node can boot
+before the node that mints its token has finished, wait, and join when the
+token appears — instead of failing and needing an operator to sequence the
+machines by hand.
+
+```yaml
+join:
+  tokenFrom:
+    url: https://secrets.example.com/corium/controller-token
+    waitFor: 15m
+```
+
+Only **absence** is waited out — a missing file, a connection refused, or a
+`404`, `408`, `425`, `429`, `502`, `503`, `504`. A rejected or malformed
+request fails immediately: retrying a wrong credential for a quarter of an hour
+helps nobody and hides the mistake.
+
+Retries back off to 32 seconds and stop there. The maximum budget is one hour,
+because a node still waiting after that is a node nobody is watching.
+
+Omitting `waitFor` keeps the strict behaviour: one attempt, then fail.
 
 Fetches time out after 30 seconds and read at most 256 KiB. Errors never quote
 the response body, because the value being handled is a credential and a message
