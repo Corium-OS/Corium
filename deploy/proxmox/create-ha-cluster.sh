@@ -25,9 +25,21 @@ NODE_IPS=(${NODE_IPS:?set NODE_IPS, e.g. "192.168.0.201 192.168.0.202 192.168.0.
 VMIDS=(${VMIDS:?set VMIDS, e.g. "142 143 144"})
 
 VRRP_ROUTER_ID="${VRRP_ROUTER_ID:-51}"
-# Keepalived uses only the first eight characters; Corium rejects anything
-# longer rather than letting controllers disagree about a shared password.
-VRRP_PASS="${VRRP_PASS:-vrrp-pw1}"
+
+# Keepalived uses only the first eight characters, so this is generated at
+# exactly that length; Corium rejects anything longer rather than letting
+# controllers disagree about a password they all believe they set.
+#
+# Generated rather than defaulted: a shipped default password is one everybody
+# keeps, and VRRP authentication exists to stop a stray host on the segment from
+# claiming the virtual IP. It is generated once here and used by all three
+# controllers, because they must agree on it.
+VRRP_PASS="${VRRP_PASS:-$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)}"
+
+if [[ ${#VRRP_PASS} -gt 8 ]]; then
+	echo "VRRP_PASS is ${#VRRP_PASS} characters; keepalived uses only 8" >&2
+	exit 1
+fi
 
 MEMORY="${MEMORY:-4096}"
 CORES="${CORES:-2}"
