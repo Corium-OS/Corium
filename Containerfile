@@ -119,7 +119,8 @@ COPY build/files/etc /etc
 # name buys nothing and breaks on upgrade.
 RUN systemctl enable corium-bootstrap.service \
 	&& systemctl enable qemu-guest-agent.service \
-	&& systemctl enable greenboot-healthcheck.service
+	&& systemctl enable greenboot-healthcheck.service \
+	&& systemctl enable corium-uncordon.service
 
 # The image decides when it updates; it does not update itself behind the
 # operator's back. Upgrades are an explicit, orchestrated, drain-aware act.

@@ -234,9 +234,21 @@ happen unattended, so the reboot you schedule becomes near-instant — the
 expensive part is already done. You still choose the moment, drain first, and
 go one node at a time.
 
-`apply` reboots without draining, because nothing on the node knows how to
-drain it. That is reasonable for a single-node cluster or a lab, and a poor
-idea for anything carrying workloads you care about.
+`apply` drains the node before rebooting: it cordons, evicts the pods, reboots
+into the staged image, and uncordons once k0s is back. A node upgrading itself
+therefore reschedules its workloads rather than killing them.
+
+Two behaviours worth knowing, because both are deliberate:
+
+- **A drain that cannot finish cancels the upgrade.** A pod disruption budget
+  refusing an eviction is the system working, not a fault. The node uncordons
+  itself, stays on its current image with the new one still staged, and tries
+  again at the next tick. Forcing a reboot past a PDB would defeat the point of
+  having one.
+- **A plain worker reboots undrained.** Draining needs cluster admin
+  credentials, and only a node running a control plane has them locally. On
+  `worker` nodes, `apply` behaves as it did before. Use `download` there and
+  drive the reboot from somewhere that can talk to the API.
 
 `schedule` takes any [systemd OnCalendar](https://www.freedesktop.org/software/systemd/man/systemd.time.html)
 expression. A randomised delay of up to an hour is applied on top, so a fleet

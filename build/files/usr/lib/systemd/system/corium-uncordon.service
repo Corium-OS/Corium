@@ -1,0 +1,21 @@
+[Unit]
+Description=Return this node to service after an upgrade reboot
+Documentation=https://github.com/Corium-OS/Corium
+
+# k0s has to be running before the node can uncordon itself.
+After=k0scontroller.service k0sworker.service network-online.target
+Wants=network-online.target
+
+# Only meaningful if this node cordoned itself on the way down.
+ConditionPathExists=/var/lib/corium/cordoned-by-corium
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/corium/uncordon
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

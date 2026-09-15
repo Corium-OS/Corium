@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# Put a node back into service after an upgrade reboot.
+#
+# Corium cordons a node before rebooting it. Nothing else will undo that, so a
+# node that upgraded would sit there Ready and empty, which looks like a working
+# cluster with one machine mysteriously idle.
+set -euo pipefail
+
+readonly CORDON_MARKER=/var/lib/corium/cordoned-by-corium
+readonly TIMEOUT=300
+
+log() { echo "corium-uncordon: $*"; }
+
+if [[ ! -e "${CORDON_MARKER}" ]]; then
+    exit 0
+fi
+
+node="$(hostname)"
+
+# The API is not up the moment systemd starts this; wait for it rather than
+# failing and leaving the node cordoned forever.
+deadline=$((SECONDS + TIMEOUT))
+while ((SECONDS < deadline)); do
+    if k0s kubectl uncordon "${node}" &>/dev/null; then
+        log "${node} is back in service"
+        rm -f "${CORDON_MARKER}"
+        exit 0
+    fi
+
+    sleep 5
+done
+
+log "could not uncordon ${node} within ${TIMEOUT}s; it stays cordoned" >&2
+exit 1

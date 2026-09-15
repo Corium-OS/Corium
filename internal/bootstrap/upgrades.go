@@ -16,9 +16,12 @@ const (
 	// downloadTimer stages a new image without rebooting.
 	downloadTimer = "corium-upgrade-download.timer"
 
-	// bootcTimer is bootc's own unit, which downloads and reboots. The image
-	// masks it, so enabling it means unmasking first.
-	bootcTimer = "bootc-fetch-apply-updates.timer"
+	// applyTimer stages an upgrade, drains the node, then reboots.
+	//
+	// bootc ships its own timer for this, but it runs `bootc upgrade --apply`,
+	// which reboots immediately and evicts nothing. On a node carrying
+	// workloads that is an unplanned outage rather than an upgrade.
+	applyTimer = "corium-upgrade-apply.timer"
 
 	// dropInDir holds the schedule override. /etc rather than /usr, because
 	// this is a machine-local decision made at first boot.
@@ -38,13 +41,7 @@ func applyUpgradePolicy(ctx context.Context, cfg *config.Config) error {
 
 	timer := downloadTimer
 	if policy == config.UpgradeApply {
-		timer = bootcTimer
-
-		// The image masks this deliberately; enabling it is the operator
-		// explicitly asking for a node that reboots on its own.
-		if err := run(ctx, "systemctl", "unmask", timer); err != nil {
-			return err
-		}
+		timer = applyTimer
 	}
 
 	if err := writeSchedule(timer, cfg.Upgrades.Schedule); err != nil {

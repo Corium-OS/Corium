@@ -1,0 +1,18 @@
+[Unit]
+Description=Apply a Corium upgrade, draining the node first
+Documentation=https://github.com/Corium-OS/Corium
+
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/run/ostree-booted
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/corium/upgrade-apply
+
+# A drain that could not finish is not a failure to alert on: a pod disruption
+# budget said no, which is the system working. The timer comes round again.
+SuccessExitStatus=0 1
+
+StandardOutput=journal
+StandardError=journal

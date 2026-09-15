@@ -288,11 +288,14 @@ const (
 	// the deployment already happened.
 	UpgradeDownload UpgradePolicy = "download"
 
-	// UpgradeApply downloads and reboots on its own.
+	// UpgradeApply downloads, drains the node, and reboots on its own.
 	//
-	// It does not drain the node first, because nothing on the node knows how
-	// to. Reasonable for a single-node cluster or a lab; on anything carrying
-	// workloads you care about, prefer download and drive the reboot yourself.
+	// A drain that cannot finish -- a pod disruption budget refusing an
+	// eviction -- cancels the upgrade rather than forcing it, and the node
+	// tries again later.
+	//
+	// Draining needs cluster admin credentials, which only a node running a
+	// control plane has locally. A plain worker reboots undrained.
 	UpgradeApply UpgradePolicy = "apply"
 )
 

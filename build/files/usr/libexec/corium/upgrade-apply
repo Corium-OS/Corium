@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# Stage an upgrade, move the workloads off, then reboot.
+#
+# This exists because bootc's own timer runs `bootc upgrade --apply`, which
+# reboots immediately. On a machine running workloads that is an unplanned
+# eviction: pods are killed rather than rescheduled, and anything without a
+# controller behind it simply disappears.
+set -euo pipefail
+
+readonly CORDON_MARKER=/var/lib/corium/cordoned-by-corium
+readonly DRAIN_TIMEOUT=5m
+
+log() { echo "corium-upgrade: $*"; }
+
+# 1. Fetch and deploy, without rebooting. If nothing new exists, stop here
+#    rather than draining a node for no reason.
+bootc upgrade --download-only --quiet
+
+staged="$(bootc status --format json 2>/dev/null |
+    python3 -c 'import json,sys; print(bool((json.load(sys.stdin).get("status") or {}).get("staged")))' 2>/dev/null || echo False)"
+
+if [[ "${staged}" != "True" ]]; then
+    log "no new image staged, nothing to do"
+    exit 0
+fi
+
+log "a new image is staged"
+
+# 2. Drain, if this node can talk to its own cluster.
+#
+# Only a node running a control plane has admin credentials locally. A plain
+# worker has kubelet credentials, which cannot evict pods, so it reboots
+# undrained -- the same behaviour as before, and documented as such.
+node="$(hostname)"
+
+if k0s kubectl get node "${node}" &>/dev/null; then
+    log "draining ${node}"
+
+    # The marker is written before draining, not after: if the reboot happens
+    # between the two, the node must still know to uncordon itself.
+    mkdir -p "$(dirname "${CORDON_MARKER}")"
+    touch "${CORDON_MARKER}"
+
+    if ! k0s kubectl drain "${node}" \
+        --ignore-daemonsets \
+        --delete-emptydir-data \
+        --timeout="${DRAIN_TIMEOUT}"; then
+
+        # Deliberately not rebooting. A drain usually fails because a pod
+        # disruption budget says this workload cannot lose a replica right now
+        # -- which is exactly the situation where forcing a reboot is wrong.
+        # The timer will try again later.
+        log "drain did not finish; leaving the node up and the image staged" >&2
+        k0s kubectl uncordon "${node}" || true
+        rm -f "${CORDON_MARKER}"
+        exit 1
+    fi
+
+    log "drained"
+else
+    log "no cluster admin access on this node; rebooting without draining"
+fi
+
+# 3. Boot into what was staged.
+log "rebooting into the staged image"
+systemctl reboot
