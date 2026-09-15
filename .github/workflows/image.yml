@@ -126,7 +126,11 @@ jobs:
 
       - name: Install cosign
         if: steps.plan.outputs.publish == 'true'
-        uses: sigstore/cosign-installer@v4
+        # Pinned to an exact version rather than a floating major tag. This
+        # action is what signs the images nodes will trust, so it gets a
+        # narrower pin than the rest -- and cosign-installer publishes no v4
+        # tag anyway, only full versions.
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign the image
         if: steps.plan.outputs.publish == 'true'
