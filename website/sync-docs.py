@@ -97,10 +97,31 @@ def rewrite_links(text: str, source: str) -> str:
     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, text)
 
 
+def sync_logo() -> None:
+    """Copy the project mark into the site's asset tree.
+
+    docs/assets/logo.png is the one canonical copy; the theme generates every
+    favicon size from website/assets/favicon.png, so it has to live there too.
+    Copying rather than committing twice means the two cannot drift.
+    """
+    source = SOURCE / "assets" / "logo.png"
+    if not source.is_file():
+        return
+
+    destination = pathlib.Path(__file__).resolve().parent / "assets" / "favicon.png"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if not destination.is_file() or destination.read_bytes() != source.read_bytes():
+        destination.write_bytes(source.read_bytes())
+        print("docs/assets/logo.png -> assets/favicon.png")
+
+
 def main() -> int:
     if not SOURCE.is_dir():
         print(f"no docs directory at {SOURCE}", file=sys.stderr)
         return 1
+
+    sync_logo()
 
     written = 0
 

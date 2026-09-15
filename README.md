@@ -1,6 +1,13 @@
-# Corium
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Corium-OS/Corium/main/docs/assets/logo.png"
+       alt="Corium" width="120" height="120">
+</p>
 
-An immutable, container-native Linux distribution that boots into a Kubernetes node.
+<h1 align="center">Corium</h1>
+
+<p align="center">
+  An immutable, container-native Linux distribution that boots into a Kubernetes node.
+</p>
 
 Corium is [Fedora bootc](https://docs.fedoraproject.org/en-US/bootc/) with
 [k0s](https://k0sproject.io/) baked into the read-only system and a small declarative
