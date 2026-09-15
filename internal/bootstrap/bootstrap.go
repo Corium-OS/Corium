@@ -71,7 +71,20 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// The hostname must be final before k0s starts: k0s registers the node
+	// under whatever it reads at startup, and renaming afterwards leaves the
+	// old Node object behind. A dry run must not rename the machine, so it is
+	// skipped there.
+	hostname := cfg.Node.Name
+
+	if !opts.DryRun {
+		if hostname, err = ensureHostname(ctx, cfg.Node.Name); err != nil {
+			return err
+		}
+	}
+
 	slog.Info("configuration accepted",
+		"hostname", hostname,
 		"role", cfg.Role,
 		"cluster", cfg.Cluster.Name,
 		"cni", cfg.Network.CNI,

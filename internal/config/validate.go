@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -171,8 +172,25 @@ func (t *SecretSource) validate() []error {
 	return problems
 }
 
+// hostnamePattern is the RFC 1123 subset Kubernetes accepts for a node name.
+var hostnamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
 func (c *Config) validateNode() []error {
 	var problems []error
+
+	if name := c.Node.Name; name != "" {
+		// Kubernetes lowercases node names, so an uppercase one here would
+		// register as something other than what was written.
+		switch {
+		case len(name) > 63:
+			problems = append(problems, fmt.Errorf(
+				"node.name: %q is %d characters, the limit is 63", name, len(name)))
+		case !hostnamePattern.MatchString(name):
+			problems = append(problems, fmt.Errorf(
+				"node.name: %q must be lowercase letters, digits and hyphens, "+
+					"starting and ending with a letter or digit", name))
+		}
+	}
 
 	for i, taint := range c.Node.Taints {
 		if taint.Key == "" {

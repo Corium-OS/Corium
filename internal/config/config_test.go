@@ -376,3 +376,32 @@ func TestValidateHA(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateNodeName(t *testing.T) {
+	for name, wantErr := range map[string]string{
+		"ctrl-1":          "",
+		"corium-12db8c05": "",
+		"Ctrl-1":          "must be lowercase",
+		"-leading":        "must be lowercase",
+		"trailing-":       "must be lowercase",
+		"under_score":     "must be lowercase",
+		strings.Repeat("a", 64): "the limit is 63",
+	} {
+		cfg := Config{Role: RoleSingle, Node: Node{Name: name}}
+		cfg.ApplyDefaults()
+
+		err := cfg.Validate()
+
+		if wantErr == "" {
+			if err != nil {
+				t.Errorf("Validate() with node.name %q = %v, want nil", name, err)
+			}
+
+			continue
+		}
+
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("Validate() with node.name %q = %v, want it to contain %q", name, err, wantErr)
+		}
+	}
+}

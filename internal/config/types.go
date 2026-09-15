@@ -205,6 +205,15 @@ type SecretSource struct {
 
 // Node carries kubelet-level attributes for this machine.
 type Node struct {
+	// Name is this node's hostname, and therefore the name it registers under
+	// in Kubernetes.
+	//
+	// Leave it empty and Corium derives a stable name from the machine ID
+	// unless something has already set a real hostname. It must be unique
+	// within the cluster: two nodes sharing a name do not fail loudly, they
+	// take turns overwriting each other's Node object.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+
 	// Labels are applied to the Kubernetes node object.
 	Labels map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
 
