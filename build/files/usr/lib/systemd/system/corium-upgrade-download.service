@@ -10,10 +10,16 @@ ConditionPathExists=/run/ostree-booted
 [Service]
 Type=oneshot
 
-# --download-only fetches and deploys the new image, then stops. The node keeps
-# running what it booted; the reboot stays the operator's decision, but becomes
-# near-instant because the work is already done.
-ExecStart=/usr/bin/bootc upgrade --download-only --quiet
+# Plain `bootc upgrade` fetches and stages the new image, then stops. The node
+# keeps running what it booted; the reboot stays the operator's decision, but
+# becomes near-instant because the work is already done.
+#
+# Deliberately not --download-only. That flag stages the deployment locked, so
+# the operator's eventual reboot would come back up on the old image and the
+# download would be garbage-collected -- the opposite of what this policy
+# promises. --download-only belongs in the apply path, which unlocks it itself
+# after draining.
+ExecStart=/usr/bin/bootc upgrade --quiet
 
 # A registry being unreachable is not a failure worth alerting on: the timer
 # will come round again.
