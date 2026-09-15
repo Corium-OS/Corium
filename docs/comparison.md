@@ -35,11 +35,9 @@ so you can buy support. Pick Talos if you want the smallest attack surface
 available and are willing to give up shell-based operations.
 
 Two honest caveats. The no-shell model is the most common source of friction
-for newcomers, and its upgrade tooling has produced real incidents — issues
-about upgrades failing without a clear cause, and Secure Boot images bricking
-nodes into physical recovery. Also note that Omni, the fleet manager that makes
-Talos pleasant at scale, is BUSL-licensed: free self-hosting is non-production
-only.
+for newcomers, and it is a commitment rather than a setting you can relax
+later. And Omni, the fleet manager that makes Talos pleasant at scale, is
+BUSL-licensed: free self-hosting is non-production only.
 
 **Kairos** is the closest neighbour and a CNCF Sandbox project, which means
 neutral governance that Corium does not have. It supports k3s, k0s, kubeadm and
