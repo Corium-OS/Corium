@@ -69,6 +69,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		conntrack-tools \
 		socat \
 		ethtool \
+		qemu-guest-agent \
 	&& dnf clean all \
 	&& rm -rf /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
 
@@ -79,6 +80,21 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 COPY build/scripts/install-k0s.sh /tmp/install-k0s.sh
 RUN --mount=type=bind,source=build/k0s.lock,target=/run/corium-build/k0s.lock \
 	/tmp/install-k0s.sh && rm -f /tmp/install-k0s.sh
+
+# --- Writable /opt ---------------------------------------------------------
+#
+# Kubernetes expects /opt/cni/bin to be writable: k0s, like every other
+# distribution, ships the CNI plugin binaries into it at runtime. On an OSTree
+# system /opt is part of the read-only image, so the CNI DaemonSet fails to
+# start and the node never leaves NotReady:
+#
+#   MountVolume.SetUp failed for volume "cni-bin":
+#     mkdir /opt/cni: read-only file system
+#
+# Pointing /opt at /var/opt makes it machine state, which is what /opt has
+# always meant. The link is relative, as OSTree requires for links out of the
+# root into /var.
+RUN rm -rf /opt && ln -s var/opt /opt
 
 # --- Corium agent ----------------------------------------------------------
 COPY --from=agent-builder /out/corium-agent /usr/bin/corium-agent
@@ -100,7 +116,8 @@ COPY build/files/etc /etc
 # cloud-init 26.1 on Fedora 44 has no cloud-init.service at all, having split it
 # into cloud-init-main.service and cloud-init-network.service. Enabling them by
 # name buys nothing and breaks on upgrade.
-RUN systemctl enable corium-bootstrap.service
+RUN systemctl enable corium-bootstrap.service \
+	&& systemctl enable qemu-guest-agent.service
 
 # The image decides when it updates; it does not update itself behind the
 # operator's back. Upgrades are an explicit, orchestrated, drain-aware act.

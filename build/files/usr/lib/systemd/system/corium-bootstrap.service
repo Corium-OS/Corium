@@ -3,12 +3,11 @@ Description=Corium node bootstrap
 Documentation=https://github.com/qjoly/corium
 
 # The agent reads the `corium:` block from the cloud-config document that
-# cloud-init has already fetched and merged, so it must run after cloud-init has
-# finished. Running earlier would mean parsing a document that may still be
+# cloud-init has already fetched and merged, so it must run after cloud-init
+# has finished. Running earlier would mean parsing a document that may still be
 # incomplete.
-After=cloud-final.service network-online.target
-Wants=network-online.target
-Requires=cloud-final.service
+After=cloud-final.service
+Wants=cloud-final.service
 
 # Bootstrapping is a first-boot concern. The agent is idempotent and exits early
 # on an already-bootstrapped node, but not starting at all is cheaper and makes
@@ -29,4 +28,16 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+# cloud-init.target, not multi-user.target. cloud-final.service declares
+# After=multi-user.target, so wanting this unit from multi-user.target while
+# ordering it after cloud-final.service forms a cycle -- and systemd resolves a
+# cycle by deleting a job, which silently means this one never runs at all:
+#
+#   multi-user.target: Found ordering cycle:
+#     corium-bootstrap.service/start after cloud-final.service/start
+#     after multi-user.target/start - after corium-bootstrap.service
+#   Job corium-bootstrap.service/start deleted to break ordering cycle
+#
+# cloud-init.target is reached after cloud-final.service and after
+# multi-user.target, which is exactly where this belongs.
+WantedBy=cloud-init.target
