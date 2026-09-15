@@ -1,0 +1,218 @@
+// Package config defines the Corium configuration surface: the `corium:` block
+// embedded in a cloud-config document, its defaults, and its validation rules.
+//
+// The schema is deliberately small. It covers the configurations that most
+// operators need most of the time; anything beyond that is reached through the
+// escape hatches (K0s.Patch, and raw cloud-init modules) rather than by growing
+// another key here. A configuration key added to this file is permanent, ships
+// to every node, and must be supported forever — add them reluctantly.
+package config
+
+// Role describes what a node does in the cluster.
+type Role string
+
+const (
+	// RoleSingle is a self-contained, single-node cluster. It cannot be
+	// expanded later: k0s provisions it with SQLite storage and without the
+	// machinery multi-node clusters need.
+	RoleSingle Role = "single"
+
+	// RoleController runs the control plane only. It schedules no workloads.
+	RoleController Role = "controller"
+
+	// RoleControllerWorker runs the control plane and also accepts workloads.
+	// This is the pragmatic choice for small clusters that must remain
+	// expandable.
+	RoleControllerWorker Role = "controller+worker"
+
+	// RoleWorker runs workloads and joins an existing control plane.
+	RoleWorker Role = "worker"
+)
+
+// Config is the root of the `corium:` block.
+type Config struct {
+	// Role determines what this node becomes. It is the only required field.
+	Role Role `yaml:"role" json:"role"`
+
+	// Cluster carries cluster-wide identity and reachability settings.
+	Cluster Cluster `yaml:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Network configures pod and service addressing and the CNI.
+	Network Network `yaml:"network,omitempty" json:"network,omitempty"`
+
+	// Storage selects the control plane datastore. Ignored for workers.
+	Storage Storage `yaml:"storage,omitempty" json:"storage,omitempty"`
+
+	// Join describes how this node authenticates to an existing cluster.
+	// Required for workers and for controllers joining an existing control
+	// plane; meaningless for the node that bootstraps the cluster.
+	Join Join `yaml:"join,omitempty" json:"join,omitempty"`
+
+	// Node carries kubelet-level attributes for this machine.
+	Node Node `yaml:"node,omitempty" json:"node,omitempty"`
+
+	// Addons are Helm charts installed at bootstrap through the k0s Helm
+	// extensions mechanism. No Helm binary or in-cluster operator is involved.
+	Addons []Addon `yaml:"addons,omitempty" json:"addons,omitempty"`
+
+	// K0s is the escape hatch to the underlying k0s configuration.
+	K0s K0s `yaml:"k0s,omitempty" json:"k0s,omitempty"`
+}
+
+// Cluster carries cluster-wide identity and reachability settings.
+type Cluster struct {
+	// Name identifies the cluster. It is cosmetic but ends up in generated
+	// kubeconfig contexts, so it is worth setting.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+
+	// Endpoint is the address other nodes and kubectl use to reach the control
+	// plane: a load balancer, a VIP, or the single controller's own address.
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+
+	// SubjectAltNames are additional names and addresses included in the API
+	// server certificate. Endpoint is included automatically.
+	SubjectAltNames []string `yaml:"subjectAltNames,omitempty" json:"subjectAltNames,omitempty"`
+}
+
+// CNI identifies the container network interface plugin.
+type CNI string
+
+const (
+	// CNIKubeRouter is the k0s default: a single, low-overhead component
+	// providing networking, network policy and service proxying.
+	CNIKubeRouter CNI = "kuberouter"
+
+	// CNICalico offers a richer network policy implementation.
+	CNICalico CNI = "calico"
+
+	// CNICustom installs nothing. The operator is responsible for deploying a
+	// CNI before the cluster becomes usable.
+	CNICustom CNI = "custom"
+)
+
+// Network configures cluster addressing.
+type Network struct {
+	// PodCIDR is the address range allocated to pods.
+	PodCIDR string `yaml:"podCIDR,omitempty" json:"podCIDR,omitempty"`
+
+	// ServiceCIDR is the address range allocated to services.
+	ServiceCIDR string `yaml:"serviceCIDR,omitempty" json:"serviceCIDR,omitempty"`
+
+	// CNI selects the network plugin.
+	CNI CNI `yaml:"cni,omitempty" json:"cni,omitempty"`
+}
+
+// StorageType identifies the control plane datastore backend.
+type StorageType string
+
+const (
+	// StorageEtcd is the embedded etcd cluster. It is the only backend that
+	// supports multiple controllers.
+	StorageEtcd StorageType = "etcd"
+
+	// StorageSQLite backs the control plane with SQLite through kine. It is
+	// limited to a single controller.
+	StorageSQLite StorageType = "sqlite"
+)
+
+// Storage selects the control plane datastore.
+type Storage struct {
+	// Type selects the backend.
+	Type StorageType `yaml:"type,omitempty" json:"type,omitempty"`
+}
+
+// Join describes how a node authenticates to an existing cluster.
+//
+// Exactly one of Token or TokenFrom may be set. Inline tokens are convenient
+// for labs and a liability in production: anything that can read the instance
+// metadata can join the cluster. Prefer TokenFrom, and prefer short-lived
+// tokens over long-lived ones.
+type Join struct {
+	// Token is a k0s join token supplied inline.
+	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+
+	// TokenFrom resolves the join token at first boot.
+	TokenFrom *TokenSource `yaml:"tokenFrom,omitempty" json:"tokenFrom,omitempty"`
+}
+
+// TokenSource resolves a join token at first boot. Exactly one field may be set.
+type TokenSource struct {
+	// URL is fetched over HTTPS. Plain HTTP is rejected.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+
+	// File is read from the local filesystem, typically placed there by a
+	// cloud-init write_files entry or by an out-of-band provisioning step.
+	File string `yaml:"file,omitempty" json:"file,omitempty"`
+
+	// AuthFile contains a bearer token presented when fetching URL. Its
+	// contents are never logged.
+	AuthFile string `yaml:"authFile,omitempty" json:"authFile,omitempty"`
+}
+
+// Node carries kubelet-level attributes for this machine.
+type Node struct {
+	// Labels are applied to the Kubernetes node object.
+	Labels map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
+
+	// Taints are applied to the Kubernetes node object.
+	Taints []Taint `yaml:"taints,omitempty" json:"taints,omitempty"`
+}
+
+// Taint is a Kubernetes node taint.
+type Taint struct {
+	Key    string `yaml:"key" json:"key"`
+	Value  string `yaml:"value,omitempty" json:"value,omitempty"`
+	Effect string `yaml:"effect" json:"effect"`
+}
+
+// Addon is a Helm chart installed at bootstrap.
+type Addon struct {
+	// Name is the Helm release name.
+	Name string `yaml:"name" json:"name"`
+
+	// Chart is the qualified chart reference, such as "jetstack/cert-manager".
+	Chart string `yaml:"chart" json:"chart"`
+
+	// Version pins the chart version. Leaving it empty resolves to the latest
+	// available version, which makes the node's outcome depend on when it
+	// booted — pin it.
+	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+
+	// Namespace is where the release is installed. Defaults to "default".
+	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// Repository declares the chart repository. It may be omitted when another
+	// addon already declares the same repository.
+	Repository *Repository `yaml:"repository,omitempty" json:"repository,omitempty"`
+
+	// Values are the chart values, passed through unmodified.
+	Values map[string]any `yaml:"values,omitempty" json:"values,omitempty"`
+}
+
+// Repository is a Helm chart repository.
+type Repository struct {
+	Name string `yaml:"name" json:"name"`
+	URL  string `yaml:"url" json:"url"`
+}
+
+// K0s is the escape hatch to the underlying k0s configuration.
+type K0s struct {
+	// Patch is a strategic merge patch applied to the rendered k0s.yaml after
+	// Corium has finished with it. It is passed through without interpretation,
+	// so every k0s setting remains reachable — including ones Corium has never
+	// heard of.
+	//
+	// Corium validates that the result is syntactically valid YAML and nothing
+	// more. A patch that breaks the cluster is the operator's to own.
+	Patch map[string]any `yaml:"patch,omitempty" json:"patch,omitempty"`
+}
+
+// IsController reports whether the role runs a control plane.
+func (r Role) IsController() bool {
+	return r == RoleSingle || r == RoleController || r == RoleControllerWorker
+}
+
+// IsWorker reports whether the role runs workloads.
+func (r Role) IsWorker() bool {
+	return r == RoleSingle || r == RoleControllerWorker || r == RoleWorker
+}
