@@ -388,6 +388,11 @@ Corium sets from `cluster.endpoint`. See
 | `automatic` | enum | `none` | `none`, `download` or `apply` |
 | `schedule` | string | `daily` | systemd `OnCalendar` expression |
 
+Setting `schedule` also clears the randomised delay. The default daily run
+carries up to an hour of jitter so a fleet does not hit the registry together;
+an explicit schedule is a maintenance window, and moving it by up to an hour
+would defeat the point of writing one.
+
 `none` does nothing. `download` stages a newer image without rebooting, so the
 reboot you schedule is near-instant. `apply` reboots on its own, without
 draining, which suits a lab and not much else.

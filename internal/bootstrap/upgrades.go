@@ -81,10 +81,17 @@ func writeSchedule(timer, schedule string) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
+	// RandomizedDelaySec is cleared along with the calendar.
+	//
+	// The built-in hour of jitter exists so that a fleet on the default daily
+	// schedule does not arrive at the registry together. An operator who wrote
+	// an explicit schedule is expressing a maintenance window, and silently
+	// moving the run by up to an hour contradicts it.
 	content := "# Written by corium-agent from corium.upgrades.schedule.\n" +
 		"[Timer]\n" +
 		"OnCalendar=\n" +
-		"OnCalendar=" + schedule + "\n"
+		"OnCalendar=" + schedule + "\n" +
+		"RandomizedDelaySec=0\n"
 
 	// 0644 for the same reason as the directory: a systemd drop-in holding a
 	// cron-like expression is configuration, not a credential, and the files
