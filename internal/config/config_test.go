@@ -122,7 +122,7 @@ func TestValidate(t *testing.T) {
 			name: "join token over plain http",
 			cfg: Config{
 				Role: RoleWorker,
-				Join: Join{TokenFrom: &TokenSource{URL: "http://example.com/t"}},
+				Join: Join{TokenFrom: &SecretSource{URL: "http://example.com/t"}},
 			},
 			wantErr: "scheme must be https",
 		},
@@ -130,7 +130,7 @@ func TestValidate(t *testing.T) {
 			name: "both token and tokenFrom",
 			cfg: Config{
 				Role: RoleWorker,
-				Join: Join{Token: "x", TokenFrom: &TokenSource{URL: "https://e.com/t"}},
+				Join: Join{Token: "x", TokenFrom: &SecretSource{URL: "https://e.com/t"}},
 			},
 			wantErr: "not both",
 		},
@@ -262,5 +262,117 @@ func TestParseIgnoresUnrelatedDocuments(t *testing.T) {
 		if _, err := Parse([]byte(doc)); !errors.Is(err, ErrNoCoriumBlock) {
 			t.Errorf("Parse(%q) error = %v, want ErrNoCoriumBlock", doc, err)
 		}
+	}
+}
+
+func TestValidateHA(t *testing.T) {
+	base := func() Config {
+		return Config{
+			Role:    RoleController,
+			Cluster: Cluster{Endpoint: "192.168.0.200"},
+			Join:    Join{Token: "x"},
+			HA: HA{
+				Enabled:   true,
+				VirtualIP: "192.168.0.200/24",
+				AuthPass:  "s3cret",
+			},
+		}
+	}
+
+	t.Run("accepts a well-formed HA controller", func(t *testing.T) {
+		cfg := base()
+		cfg.ApplyDefaults()
+
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() = %v, want nil", err)
+		}
+	})
+
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{
+			name:    "single node cannot be HA",
+			mutate:  func(c *Config) { c.Role = RoleSingle; c.Join = Join{} },
+			wantErr: "one node by definition",
+		},
+		{
+			name:    "workers cannot run CPLB",
+			mutate:  func(c *Config) { c.Role = RoleWorker },
+			wantErr: "only a controller can run control plane load balancing",
+		},
+		{
+			name:    "virtual IP needs a prefix length",
+			mutate:  func(c *Config) { c.HA.VirtualIP = "192.168.0.200" },
+			wantErr: "must be an address with a prefix length",
+		},
+		{
+			name:    "virtual IP is required",
+			mutate:  func(c *Config) { c.HA.VirtualIP = "" },
+			wantErr: "ha.virtualIP: required",
+		},
+		{
+			// keepalived silently truncates to 8 characters, so a longer value
+			// means two controllers can believe they share a password they do
+			// not actually share.
+			name:    "auth password longer than keepalived honours",
+			mutate:  func(c *Config) { c.HA.AuthPass = "this-is-far-too-long" },
+			wantErr: "keepalived uses only the first 8 characters",
+		},
+		{
+			name:    "auth password is required",
+			mutate:  func(c *Config) { c.HA.AuthPass = "" },
+			wantErr: "ha.authPass: required",
+		},
+		{
+			name: "auth password cannot be given twice",
+			mutate: func(c *Config) {
+				c.HA.AuthPassFrom = &SecretSource{URL: "https://e.com/p"}
+			},
+			wantErr: "not both",
+		},
+		{
+			name:    "router ID out of range",
+			mutate:  func(c *Config) { c.HA.VirtualRouterID = 300 },
+			wantErr: "out of range",
+		},
+		{
+			name:    "unicast peers must be addresses",
+			mutate:  func(c *Config) { c.HA.UnicastPeers = []string{"controller-2"} },
+			wantErr: "is not an IP address",
+		},
+		{
+			// Without an endpoint, clients would be told to use a single
+			// controller's address and the virtual IP would buy nothing.
+			name:    "endpoint is required",
+			mutate:  func(c *Config) { c.Cluster.Endpoint = "" },
+			wantErr: "cluster.endpoint: required when ha is enabled",
+		},
+		{
+			name: "settings without enabled do nothing",
+			mutate: func(c *Config) {
+				c.HA = HA{VirtualIP: "192.168.0.200/24", AuthPass: "x"}
+			},
+			wantErr: "ha.enabled is false",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			tc.mutate(&cfg)
+			cfg.ApplyDefaults()
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want an error containing %q", tc.wantErr)
+			}
+
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Validate() = %q, want it to contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }

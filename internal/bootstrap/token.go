@@ -13,15 +13,36 @@ import (
 	"github.com/qjoly/corium/internal/config"
 )
 
-// tokenFetchTimeout bounds how long first boot waits for a token service.
+// secretFetchTimeout bounds how long first boot waits for a token service.
 // Long enough to tolerate a slow network coming up, short enough that a node
 // pointed at a dead endpoint fails visibly instead of hanging forever.
-const tokenFetchTimeout = 30 * time.Second
+const secretFetchTimeout = 30 * time.Second
 
-// maxTokenSize caps how much is read from a token source. A k0s join token is a
+// maxSecretSize caps how much is read from a token source. A k0s join token is a
 // few kilobytes; anything larger is a misconfiguration or a wrong URL, and
 // reading it into memory unbounded would be the wrong response either way.
-const maxTokenSize = 256 << 10
+const maxSecretSize = 256 << 10
+
+// resolveAuthPass produces the VRRP password shared between controllers.
+//
+// It is resolved the same way as a join token and for the same reason: a shared
+// secret in instance metadata is readable by anything that can reach the
+// metadata service.
+func resolveAuthPass(ctx context.Context, cfg *config.Config) (string, error) {
+	switch {
+	case cfg.HA.AuthPass != "":
+		return cfg.HA.AuthPass, nil
+	case cfg.HA.AuthPassFrom == nil:
+		return "", nil
+	}
+
+	secret, err := resolveSecret(ctx, cfg.HA.AuthPassFrom, "VRRP password")
+	if err != nil {
+		return "", err
+	}
+
+	return secret, nil
+}
 
 // resolveToken produces the join token for this node, if it needs one.
 //
@@ -36,29 +57,32 @@ func resolveToken(ctx context.Context, cfg *config.Config) (string, error) {
 		return "", nil
 	}
 
-	source := cfg.Join.TokenFrom
+	return resolveSecret(ctx, cfg.Join.TokenFrom, "join token")
+}
 
-	if source.File != "" {
-		data, err := os.ReadFile(source.File)
+// resolveSecret reads a secret from a file or fetches it over HTTPS.
+func resolveSecret(ctx context.Context, src *config.SecretSource, what string) (string, error) {
+	if src.File != "" {
+		data, err := os.ReadFile(src.File)
 		if err != nil {
-			return "", fmt.Errorf("reading join token from %s: %w", source.File, err)
+			return "", fmt.Errorf("reading %s from %s: %w", what, src.File, err)
 		}
 
-		slog.Info("read join token from file", "path", source.File)
+		slog.Info("read secret from file", "what", what, "path", src.File)
 
 		return strings.TrimSpace(string(data)), nil
 	}
 
-	return fetchToken(ctx, source)
+	return fetchSecret(ctx, src, what)
 }
 
-func fetchToken(ctx context.Context, source *config.TokenSource) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, tokenFetchTimeout)
+func fetchSecret(ctx context.Context, source *config.SecretSource, what string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
 	if err != nil {
-		return "", fmt.Errorf("building token request: %w", err)
+		return "", fmt.Errorf("building request for %s: %w", what, err)
 	}
 
 	if source.AuthFile != "" {
@@ -71,28 +95,27 @@ func fetchToken(ctx context.Context, source *config.TokenSource) (string, error)
 			"Bearer "+strings.TrimSpace(string(credential)))
 	}
 
-	slog.Info("fetching join token", "url", source.URL)
+	slog.Info("fetching secret", "what", what, "url", source.URL)
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("fetching join token: %w", err)
+		return "", fmt.Errorf("fetching %s: %w", what, err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetching join token: unexpected status %s",
-			response.Status)
+		return "", fmt.Errorf("fetching %s: unexpected status %s", what, response.Status)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenSize))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxSecretSize))
 	if err != nil {
-		return "", fmt.Errorf("reading join token response: %w", err)
+		return "", fmt.Errorf("reading %s response: %w", what, err)
 	}
 
-	token := strings.TrimSpace(string(body))
-	if token == "" {
-		return "", fmt.Errorf("fetching join token: empty response from %s", source.URL)
+	secret := strings.TrimSpace(string(body))
+	if secret == "" {
+		return "", fmt.Errorf("fetching %s: empty response from %s", what, source.URL)
 	}
 
-	return token, nil
+	return secret, nil
 }

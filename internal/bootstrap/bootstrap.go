@@ -95,6 +95,22 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	// The VRRP password is resolved after validation and before rendering the
+	// final configuration, because the rendered file has to carry it.
+	authPass, err := resolveAuthPass(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
+	if authPass != "" {
+		cfg.HA.AuthPass = authPass
+
+		// Re-render: the first pass ran before the secret was available.
+		if rendered, err = k0s.Render(cfg); err != nil {
+			return err
+		}
+	}
+
 	args := k0s.InstallArgs(cfg, token != "")
 
 	return apply(ctx, cfg, rendered, args, token)

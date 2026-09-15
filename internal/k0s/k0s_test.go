@@ -218,3 +218,112 @@ func TestServiceName(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderControlPlaneLoadBalancing(t *testing.T) {
+	doc := render(t, &config.Config{
+		Role:    config.RoleController,
+		Cluster: config.Cluster{Endpoint: "192.168.0.200"},
+		Join:    config.Join{Token: "x"},
+		HA: config.HA{
+			Enabled:         true,
+			VirtualIP:       "192.168.0.200/24",
+			AuthPass:        "s3cret",
+			VirtualRouterID: 51,
+			Interface:       "eth0",
+			UnicastPeers:    []string{"192.168.0.201", "192.168.0.202"},
+		},
+	})
+
+	network, ok := spec(t, doc)["network"].(map[string]any)
+	if !ok {
+		t.Fatal("rendered config has no spec.network")
+	}
+
+	cplb, ok := network["controlPlaneLoadBalancing"].(map[string]any)
+	if !ok {
+		t.Fatalf("spec.network.controlPlaneLoadBalancing = %v, want a mapping",
+			network["controlPlaneLoadBalancing"])
+	}
+
+	if cplb["type"] != "Keepalived" {
+		t.Errorf("type = %v, want Keepalived", cplb["type"])
+	}
+
+	keepalived, ok := cplb["keepalived"].(map[string]any)
+	if !ok {
+		t.Fatal("no keepalived block")
+	}
+
+	instances, ok := keepalived["vrrpInstances"].([]any)
+	if !ok || len(instances) != 1 {
+		t.Fatalf("vrrpInstances = %v, want exactly one", keepalived["vrrpInstances"])
+	}
+
+	instance, ok := instances[0].(map[string]any)
+	if !ok {
+		t.Fatal("vrrpInstance is not a mapping")
+	}
+
+	for key, want := range map[string]any{
+		"authPass":        "s3cret",
+		"virtualRouterID": 51,
+		"interface":       "eth0",
+	} {
+		if instance[key] != want {
+			t.Errorf("vrrpInstance[%q] = %v, want %v", key, instance[key], want)
+		}
+	}
+
+	if peers, ok := instance["unicastPeers"].([]any); !ok || len(peers) != 2 {
+		t.Errorf("unicastPeers = %v, want two entries", instance["unicastPeers"])
+	}
+}
+
+func TestRenderNoLoadBalancingWhenDisabled(t *testing.T) {
+	doc := render(t, &config.Config{Role: config.RoleSingle})
+
+	network, ok := spec(t, doc)["network"].(map[string]any)
+	if !ok {
+		t.Fatal("rendered config has no spec.network")
+	}
+
+	if _, present := network["controlPlaneLoadBalancing"]; present {
+		t.Error("controlPlaneLoadBalancing present although HA is disabled")
+	}
+}
+
+func TestRenderHAIsIdenticalAcrossControllers(t *testing.T) {
+	// Every controller in an HA cluster must render the same file: the virtual
+	// IP, router ID and password are a shared agreement, and a disagreement
+	// means two controllers claiming the same address.
+	controller := func(token string) *config.Config {
+		return &config.Config{
+			Role:    config.RoleController,
+			Cluster: config.Cluster{Name: "prod", Endpoint: "192.168.0.200"},
+			Join:    config.Join{Token: token},
+			HA: config.HA{
+				Enabled: true, VirtualIP: "192.168.0.200/24",
+				AuthPass: "s3cret", VirtualRouterID: 51,
+			},
+		}
+	}
+
+	first := controller("")
+	second := controller("join-token-for-node-2")
+	first.ApplyDefaults()
+	second.ApplyDefaults()
+
+	a, err := Render(first)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	b, err := Render(second)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	if string(a) != string(b) {
+		t.Errorf("controllers rendered different configurations:\n--- first ---\n%s\n--- second ---\n%s", a, b)
+	}
+}

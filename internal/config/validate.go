@@ -26,6 +26,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateJoin()...)
 	problems = append(problems, c.validateNode()...)
 	problems = append(problems, c.validateAddons()...)
+	problems = append(problems, c.validateHA()...)
 
 	return errors.Join(problems...)
 }
@@ -133,7 +134,7 @@ func (c *Config) validateJoin() []error {
 	return problems
 }
 
-func (t *TokenSource) validate() []error {
+func (t *SecretSource) validate() []error {
 	var problems []error
 
 	hasURL := t.URL != ""
@@ -236,4 +237,97 @@ func (c *Config) validateAddons() []error {
 	}
 
 	return problems
+}
+
+// keepalivedAuthPassLimit is how many characters of a VRRP password keepalived
+// actually uses. Longer values are silently truncated, which is how two
+// controllers end up disagreeing about a password they both believe they set.
+const keepalivedAuthPassLimit = 8
+
+func (c *Config) validateHA() []error {
+	if !c.HA.Enabled {
+		// Configuring HA without enabling it is almost always a mistake worth
+		// reporting: the operator wrote settings that do nothing.
+		if c.HA.VirtualIP != "" || c.HA.AuthPass != "" || c.HA.AuthPassFrom != nil {
+			return []error{errors.New(
+				"ha: settings given but ha.enabled is false, so none of them take effect")}
+		}
+
+		return nil
+	}
+
+	var problems []error
+
+	// Control plane load balancing elects a leader among controllers. With one
+	// controller there is no election, and with a worker there is no control
+	// plane to balance.
+	switch c.Role {
+	case RoleController, RoleControllerWorker:
+	case RoleSingle:
+		problems = append(problems, errors.New(
+			"ha: role single cannot be highly available; it is one node by definition"))
+	default:
+		problems = append(problems, fmt.Errorf(
+			"ha: only a controller can run control plane load balancing, but role is %q", c.Role))
+	}
+
+	if c.HA.VirtualIP == "" {
+		problems = append(problems, errors.New("ha.virtualIP: required when ha is enabled"))
+	} else if _, err := netip.ParsePrefix(c.HA.VirtualIP); err != nil {
+		// The prefix length is not decoration: keepalived needs it to add the
+		// address to the interface.
+		problems = append(problems, fmt.Errorf(
+			"ha.virtualIP: %q must be an address with a prefix length, such as 192.168.0.200/24",
+			c.HA.VirtualIP))
+	}
+
+	if c.HA.VirtualRouterID < 0 || c.HA.VirtualRouterID > 255 {
+		problems = append(problems, fmt.Errorf(
+			"ha.virtualRouterID: %d is out of range, must be 1-255", c.HA.VirtualRouterID))
+	}
+
+	problems = append(problems, c.validateAuthPass()...)
+
+	for i, peer := range c.HA.UnicastPeers {
+		if _, err := netip.ParseAddr(peer); err != nil {
+			problems = append(problems, fmt.Errorf(
+				"ha.unicastPeers[%d]: %q is not an IP address", i, peer))
+		}
+	}
+
+	// The virtual IP only helps if clients are told to use it and the API
+	// server certificate covers it.
+	if c.Cluster.Endpoint == "" {
+		problems = append(problems, errors.New(
+			"cluster.endpoint: required when ha is enabled; set it to the virtual IP so "+
+				"clients and joining nodes use the address that survives a controller failing"))
+	}
+
+	return problems
+}
+
+func (c *Config) validateAuthPass() []error {
+	hasInline := c.HA.AuthPass != ""
+	hasSource := c.HA.AuthPassFrom != nil
+
+	switch {
+	case hasInline && hasSource:
+		return []error{errors.New("ha: set either authPass or authPassFrom, not both")}
+	case !hasInline && !hasSource:
+		return []error{errors.New(
+			"ha.authPass: required when ha is enabled; it must be identical on every controller")}
+	}
+
+	if hasSource {
+		return c.HA.AuthPassFrom.validate()
+	}
+
+	if len(c.HA.AuthPass) > keepalivedAuthPassLimit {
+		return []error{fmt.Errorf(
+			"ha.authPass: keepalived uses only the first %d characters, and yours is %d long; "+
+				"shorten it so every controller agrees on the same value",
+			keepalivedAuthPassLimit, len(c.HA.AuthPass))}
+	}
+
+	return nil
 }

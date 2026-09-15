@@ -55,8 +55,60 @@ type Config struct {
 	// extensions mechanism. No Helm binary or in-cluster operator is involved.
 	Addons []Addon `yaml:"addons,omitempty" json:"addons,omitempty"`
 
+	// HA configures a highly available control plane.
+	HA HA `yaml:"ha,omitempty" json:"ha,omitempty"`
+
 	// K0s is the escape hatch to the underlying k0s configuration.
 	K0s K0s `yaml:"k0s,omitempty" json:"k0s,omitempty"`
+}
+
+// HA configures a highly available control plane.
+//
+// The hard part of an HA control plane is not running three API servers, it is
+// giving clients one address that survives losing any one of them. The usual
+// answer is an external load balancer, which is a second thing to build and
+// keep alive before the cluster exists.
+//
+// Corium uses k0s's built-in control plane load balancing instead: the
+// controllers elect a leader over VRRP and one of them holds a virtual IP. No
+// external load balancer, and nothing to provision ahead of the cluster.
+//
+// Note what is deliberately absent: certificates. Controllers two and three
+// join with a token, and k0s ships them the cluster CA over its join API. No
+// PKI material ever appears in a Corium configuration.
+type HA struct {
+	// Enabled turns on control plane load balancing.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// VirtualIP is the address clients use to reach the control plane,
+	// in CIDR form: "192.168.0.200/24". Whichever controller currently holds
+	// the VRRP election answers on it.
+	VirtualIP string `yaml:"virtualIP,omitempty" json:"virtualIP,omitempty"`
+
+	// Interface carries the VRRP advertisements. Left empty, k0s picks the
+	// interface holding the default route, which is right on most machines.
+	Interface string `yaml:"interface,omitempty" json:"interface,omitempty"`
+
+	// VirtualRouterID identifies this VRRP group, 1-255. It must be unique
+	// within the broadcast domain: two clusters sharing an ID on the same
+	// segment will fight over each other's elections.
+	VirtualRouterID int `yaml:"virtualRouterID,omitempty" json:"virtualRouterID,omitempty"`
+
+	// AuthPass authenticates VRRP advertisements between controllers. It must
+	// be identical on every controller. Keepalived truncates it to eight
+	// characters, so anything longer is silently shortened -- Corium rejects
+	// it rather than letting two nodes disagree about a password they both
+	// think they set.
+	AuthPass string `yaml:"authPass,omitempty" json:"authPass,omitempty"`
+
+	// AuthPassFrom resolves AuthPass at first boot, so the shared secret need
+	// not sit in instance metadata.
+	AuthPassFrom *SecretSource `yaml:"authPassFrom,omitempty" json:"authPassFrom,omitempty"`
+
+	// UnicastPeers lists the other controllers' addresses. Set this when the
+	// controllers cannot reach each other by multicast -- most clouds block
+	// it, so on anything but a flat L2 network this is required.
+	UnicastPeers []string `yaml:"unicastPeers,omitempty" json:"unicastPeers,omitempty"`
 }
 
 // Cluster carries cluster-wide identity and reachability settings.
@@ -132,11 +184,13 @@ type Join struct {
 	Token string `yaml:"token,omitempty" json:"token,omitempty"`
 
 	// TokenFrom resolves the join token at first boot.
-	TokenFrom *TokenSource `yaml:"tokenFrom,omitempty" json:"tokenFrom,omitempty"`
+	TokenFrom *SecretSource `yaml:"tokenFrom,omitempty" json:"tokenFrom,omitempty"`
 }
 
-// TokenSource resolves a join token at first boot. Exactly one field may be set.
-type TokenSource struct {
+// SecretSource resolves a secret at first boot, so that credentials need not be
+// written into a configuration that is often readable by anything that can
+// reach the instance metadata. Exactly one of URL or File may be set.
+type SecretSource struct {
 	// URL is fetched over HTTPS. Plain HTTP is rejected.
 	URL string `yaml:"url,omitempty" json:"url,omitempty"`
 

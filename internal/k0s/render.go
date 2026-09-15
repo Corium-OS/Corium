@@ -26,6 +26,10 @@ type object = map[string]any
 // The operator's patch is applied last, so any value Corium computed can be
 // overridden — including ones Corium considers load-bearing. That is the point
 // of an escape hatch.
+//
+// The result must be byte-identical on every controller of an HA cluster: the
+// VRRP password, router ID and virtual IP are a shared agreement, and two
+// controllers rendering different files disagree about who owns the address.
 func Render(cfg *config.Config) ([]byte, error) {
 	doc := object{
 		"apiVersion": "k0s.k0sproject.io/v1beta1",
@@ -103,6 +107,10 @@ func renderNetwork(cfg *config.Config) object {
 		"serviceCIDR": cfg.Network.ServiceCIDR,
 	}
 
+	if cplb := renderControlPlaneLoadBalancing(cfg); cplb != nil {
+		network["controlPlaneLoadBalancing"] = cplb
+	}
+
 	switch cfg.Network.CNI {
 	case config.CNIKubeRouter:
 		network["provider"] = "kuberouter"
@@ -177,6 +185,46 @@ func renderExtensions(cfg *config.Config) object {
 	}
 
 	return object{"helm": helm}
+}
+
+// renderControlPlaneLoadBalancing gives the control plane one address that
+// outlives any single controller.
+//
+// The controllers run VRRP between themselves and one of them holds the virtual
+// IP; when it fails, another takes over. This replaces the external load
+// balancer an HA control plane would otherwise need — which matters because
+// that load balancer would have to exist before the cluster it fronts.
+func renderControlPlaneLoadBalancing(cfg *config.Config) object {
+	if !cfg.HA.Enabled {
+		return nil
+	}
+
+	instance := object{
+		"virtualIPs": []string{cfg.HA.VirtualIP},
+		"authPass":   cfg.HA.AuthPass,
+	}
+
+	if cfg.HA.Interface != "" {
+		instance["interface"] = cfg.HA.Interface
+	}
+
+	if cfg.HA.VirtualRouterID != 0 {
+		instance["virtualRouterID"] = cfg.HA.VirtualRouterID
+	}
+
+	if len(cfg.HA.UnicastPeers) > 0 {
+		// Most clouds drop multicast, so VRRP has to be told explicitly who its
+		// peers are.
+		instance["unicastPeers"] = cfg.HA.UnicastPeers
+	}
+
+	return object{
+		"enabled": true,
+		"type":    "Keepalived",
+		"keepalived": object{
+			"vrrpInstances": []object{instance},
+		},
+	}
 }
 
 // merge recursively merges src into dst and returns the result.
