@@ -180,10 +180,20 @@ Controllers carry the labels `node-role.kubernetes.io/control-plane=true` and
 `node.k0sproject.io/role=control-plane`, which is how you tell them apart in
 `kubectl get nodes`.
 
+Without `--no-taints`, k0s taints a `controller+worker` node
+`node-role.kubernetes.io/control-plane:NoSchedule`. Corium always passes the
+flag, because a role named "controller+worker" that schedules nothing is a
+trap. Add the taint back through `node.taints` if you want it.
+
 `single` is the one irreversible choice in the schema. Everything else can be
 changed by reprovisioning a node; a single-node cluster has to be rebuilt to
 become anything else. Use `controller+worker` if you might ever add a machine —
 it costs nothing today and keeps the door open.
+
+`single` also turns off more than storage: k0s disables konnectivity and
+refuses control plane load balancing outright in this mode. Corium rejects
+`ha.enabled` with `role: single` for the same reason, before the node boots
+rather than after.
 
 See [k0s: configuration](https://docs.k0sproject.io/stable/configuration/).
 
@@ -227,8 +237,14 @@ misroutes traffic in ways that are miserable to diagnose.
 | `type` | enum | role-dependent | `etcd` or `sqlite` |
 
 Defaults to `sqlite` for `single`, `etcd` otherwise. `sqlite` is rejected with
-`role: controller`: it cannot be shared, so the combination would work until the
-second controller joined and then fail in a way that looks like a network fault.
+`role: controller` because k0s treats a file-backed datastore as non-joinable:
+a second controller does not error, it quietly runs as its own single-controller
+cluster with its own state. Two machines that each believe they are the cluster
+is a worse failure than a refusal, so Corium refuses.
+
+Multiple controllers on kine are possible, but only against a network datastore
+(MySQL, PostgreSQL). That is reachable through `k0s.patch`
+(`spec.storage.kine.dataSource`), not through `storage.type`.
 
 Corium's `sqlite` renders as k0s's `kine`, which is the mechanism; `sqlite` is
 what you are actually choosing.
@@ -281,6 +297,12 @@ starting and ending with a letter or digit. `effect` must be `NoSchedule`,
 Labels are sorted before reaching the command line, so identical input produces
 an identical command.
 
+**Labels only take effect when the node first registers.** k0s passes them to
+the kubelet, which applies them at registration and ignores them afterwards, so
+editing `node.labels` and rebooting changes nothing — the node is already
+registered and Corium will not bootstrap it twice. Change labels on a running
+node with `kubectl label`, or reprovision it. The same applies to `node.taints`.
+
 ### 3.7 `addons`
 
 Helm charts installed at bootstrap through k0s's Helm extensions. No Helm binary
@@ -306,8 +328,14 @@ them elsewhere expresses an intent that will never be carried out.
 
 Charts are installed once at bootstrap. Corium does not model removing one:
 deleting an add-on from the configuration of an already-bootstrapped node does
-nothing, because the node will not bootstrap again. See
-[k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/).
+nothing, because the node will not bootstrap again. Remove a release by
+deleting the k0s Chart resource it created:
+
+```bash
+kubectl delete chart <name> -n kube-system
+```
+
+See [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/).
 
 ### 3.8 `ha`
 
@@ -320,7 +348,7 @@ one holds a virtual IP.
 | `enabled` | bool | — | |
 | `virtualIP` | CIDR | yes | **With a prefix length**: keepalived needs it to add the address |
 | `interface` | string | no | Defaults to the interface holding the default route |
-| `virtualRouterID` | int | no | 1–255. Unique within the broadcast domain |
+| `virtualRouterID` | int | no | 1–255. Omit it and k0s assigns one starting at 51. Must be unique within the broadcast domain |
 | `authPass` | string | yes | **Eight characters or fewer** |
 | `authPassFrom` | object | — | Alternative to `authPass` (§3.11) |
 | `unicastPeers` | list | no | The other controllers' addresses |
@@ -331,6 +359,14 @@ they do not, so Corium rejects it rather than allowing that.
 
 `unicastPeers` is required on any network without multicast, which includes most
 clouds. It is harmless on a flat L2 segment.
+
+The eight-character cap is not Corium being cautious: k0s itself rejects a
+longer value with `AuthPass must be 8 characters or less`. Corium catches it
+during validation instead, so the node never gets as far as failing to start.
+
+If you put an external load balancer in front of the controllers instead of
+using the virtual IP, it has to carry three ports to every controller: **6443**
+(Kubernetes API), **8132** (konnectivity) and **9443** (the join API).
 
 `cluster.endpoint` is required when HA is enabled, and should be the virtual IP:
 without it, clients would be pointed at one controller and the VIP would buy

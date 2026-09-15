@@ -299,9 +299,13 @@ func (c *Config) validateHA() []error {
 			c.HA.VirtualIP))
 	}
 
+	// Zero means "unset": Corium omits the field and k0s assigns an ID starting
+	// at 51. Saying "must be 1-255" would be wrong, since leaving it out is
+	// both valid and the common case.
 	if c.HA.VirtualRouterID < 0 || c.HA.VirtualRouterID > 255 {
 		problems = append(problems, fmt.Errorf(
-			"ha.virtualRouterID: %d is out of range, must be 1-255", c.HA.VirtualRouterID))
+			"ha.virtualRouterID: %d is out of range; use 1-255, or omit it and "+
+				"k0s assigns one starting at 51", c.HA.VirtualRouterID))
 	}
 
 	problems = append(problems, c.validateAuthPass()...)

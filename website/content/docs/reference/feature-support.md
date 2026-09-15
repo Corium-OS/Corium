@@ -170,6 +170,11 @@ Commonly reached this way:
 | Feature gates | `spec.featureGates` | [configuration](https://docs.k0sproject.io/stable/configuration/) |
 | Konnectivity ports | `spec.konnectivity` | [configuration](https://docs.k0sproject.io/stable/configuration/) |
 | Certificate lifetimes | `spec.api.ca`, `spec.storage.etcd.ca` | [configuration](https://docs.k0sproject.io/stable/configuration/) |
+| Multiple controllers on kine | `spec.storage.kine.dataSource` pointing at MySQL or PostgreSQL | [configuration](https://docs.k0sproject.io/stable/configuration/) |
+
+One passthrough field is worth avoiding: `spec.extensions.storage` is a
+deprecated no-op from k0s 1.31 onwards. It still parses, so a configuration
+using it looks accepted and does nothing. Install storage as an add-on instead.
 
 A patch can also override anything Corium computed, including values it treats
 as load-bearing. That is what makes it an escape hatch rather than a
@@ -178,6 +183,30 @@ suggestion. Corium checks only that the result is valid YAML.
 The second escape hatch is that your document stays an ordinary cloud-config:
 `write_files`, `runcmd`, `users` and every other module keep working. Corium is
 a guest in that document, not its owner.
+
+---
+
+## Static configuration, not dynamic
+
+k0s can run in two modes. By default it reads `k0s.yaml` from disk on every
+controller. With `--enable-dynamic-config` it instead stores a `ClusterConfig`
+resource in the cluster, and controllers reconcile against that.
+
+**Corium writes a static configuration file.** It does not pass
+`--enable-dynamic-config`, which means:
+
+- Changing the configuration means reprovisioning the node, in keeping with the
+  rest of the design: a node is rebuilt from an image, not adjusted in place.
+- Mixing controllers that use dynamic config with ones that do not is a
+  documented conflict in k0s. If you enable it, enable it everywhere.
+
+If you want dynamic configuration, three parts of the configuration stay
+file-local and per-controller regardless — `spec.api`, `spec.storage`, and
+`spec.network.controlPlaneLoadBalancing` — so they must still be identical
+across controllers. That is precisely what Corium's rendering already
+guarantees, since every controller in an HA cluster renders the same file.
+
+See [k0s: dynamic configuration](https://docs.k0sproject.io/stable/dynamic-configuration/).
 
 ---
 
@@ -192,7 +221,7 @@ should be.
 | **Fleet management** | Corium provisions a node and stops. It does not track, group or reconcile machines. That is a control plane's job, and there are good ones |
 | **A bespoke configuration API** | The value of cloud-init is that every cloud, hypervisor and PXE setup already speaks it |
 | **Forking or patching k0s** | Corium configures upstream k0s. A fork would mean owning Kubernetes bugs, which is not a business worth being in |
-| **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Deleting a chart from the configuration leaves the release in place — [remove it with the CRD](https://docs.k0sproject.io/stable/helm-charts/) |
+| **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Deleting a chart from the configuration leaves the release in place — remove it with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/) |
 | **Multiple Kubernetes distributions** | Only k0s. Supporting k3s or RKE2 as well would mean an abstraction that fits none of them properly |
 
 ### Not supported yet

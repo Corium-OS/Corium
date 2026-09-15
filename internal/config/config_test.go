@@ -339,6 +339,11 @@ func TestValidateHA(t *testing.T) {
 			wantErr: "out of range",
 		},
 		{
+			name:    "negative router ID",
+			mutate:  func(c *Config) { c.HA.VirtualRouterID = -1 },
+			wantErr: "out of range",
+		},
+		{
 			name:    "unicast peers must be addresses",
 			mutate:  func(c *Config) { c.HA.UnicastPeers = []string{"controller-2"} },
 			wantErr: "is not an IP address",
@@ -403,5 +408,25 @@ func TestValidateNodeName(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("Validate() with node.name %q = %v, want it to contain %q", name, err, wantErr)
 		}
+	}
+}
+
+func TestVirtualRouterIDMayBeOmitted(t *testing.T) {
+	// Zero means "let k0s assign one". Rejecting it would force every operator
+	// to pick a number they have no reason to care about.
+	cfg := Config{
+		Role:    RoleController,
+		Cluster: Cluster{Endpoint: "10.0.0.1"},
+		Join:    Join{Token: "x"},
+		HA: HA{
+			Enabled:   true,
+			VirtualIP: "10.0.0.1/24",
+			AuthPass:  "pw12345",
+		},
+	}
+	cfg.ApplyDefaults()
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with no virtualRouterID = %v, want nil", err)
 	}
 }
