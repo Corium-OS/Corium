@@ -30,6 +30,9 @@ PAGES = [
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From an empty machine to a working Kubernetes node in five steps, with "
      "the mistakes that cost the most time."),
+    ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
+     "How a Corium node moves to a new image, how to roll one back, and how to "
+     "upgrade a cluster without losing quorum."),
     ("features.md", "reference", "feature-support", "Feature support", 205,
      "What Corium models, what it passes through to k0s, and what it "
      "deliberately does not do."),
@@ -52,6 +55,7 @@ PAGES = [
 PAGE_URLS = {
     "quickstart.md": "/docs/guides/quickstart/",
     "features.md": "/docs/reference/feature-support/",
+    "upgrades.md": "/docs/guides/upgrades/",
     "reference.md": "/docs/reference/configuration/",
     "adr/0001-base-image.md": "/docs/reference/adr-0001-base-image/",
     "adr/0002-root-filesystem.md": "/docs/reference/adr-0002-root-filesystem/",

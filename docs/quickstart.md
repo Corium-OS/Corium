@@ -226,7 +226,9 @@ node's address.
 
 ### Upgrades
 
-Kubernetes ships with the OS, so upgrading means booting a new image:
+Kubernetes ships with the OS, so upgrading means booting a new image. The
+[upgrades guide](upgrades.md) covers doing this to a cluster without losing
+quorum; the short version:
 
 ```bash
 sudo bootc upgrade --apply     # reboots into the new version
