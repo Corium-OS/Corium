@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -201,6 +202,65 @@ func TestValidateAcceptsGoodConfigs(t *testing.T) {
 
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Validate() for role %q = %v, want nil", role, err)
+		}
+	}
+}
+
+func TestParseStandaloneDocument(t *testing.T) {
+	// The shape an operator writes in /etc/corium/config.yaml or serves over
+	// PXE, where wrapping the configuration in a cloud-config would be ceremony
+	// for its own sake.
+	doc := []byte(`role: worker
+cluster:
+  name: edge
+join:
+  token: abc123
+`)
+
+	cfg, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+
+	if cfg.Role != RoleWorker {
+		t.Errorf("Role = %q, want %q", cfg.Role, RoleWorker)
+	}
+
+	if cfg.Cluster.Name != "edge" {
+		t.Errorf("Cluster.Name = %q, want edge", cfg.Cluster.Name)
+	}
+}
+
+func TestParsePrefersEmbeddedBlock(t *testing.T) {
+	// A document with both shapes is ambiguous. The corium block wins, because
+	// a top-level role: in a cloud-config is far more likely to be some other
+	// tool's key than a Corium configuration.
+	doc := []byte(`#cloud-config
+role: worker
+corium:
+  role: single
+`)
+
+	cfg, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if cfg.Role != RoleSingle {
+		t.Errorf("Role = %q, want the corium block's value %q", cfg.Role, RoleSingle)
+	}
+}
+
+func TestParseIgnoresUnrelatedDocuments(t *testing.T) {
+	// A plain cloud-config with no Corium configuration must not be mistaken
+	// for one; the node is simply not a Kubernetes node.
+	for _, doc := range []string{
+		"#cloud-config\nusers: []\n",
+		"",
+		"#cloud-config\nwrite_files:\n  - path: /etc/hosts\n",
+	} {
+		if _, err := Parse([]byte(doc)); !errors.Is(err, ErrNoCoriumBlock) {
+			t.Errorf("Parse(%q) error = %v, want ErrNoCoriumBlock", doc, err)
 		}
 	}
 }

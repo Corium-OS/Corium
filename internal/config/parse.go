@@ -10,43 +10,35 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ErrNoCoriumBlock reports that a document parsed cleanly but contained no
-// `corium:` key. This is not necessarily a failure: a node may legitimately be
+// ErrNoCoriumBlock reports that a document parsed cleanly but held no Corium
+// configuration. This is not necessarily a failure: a node may legitimately be
 // provisioned with a plain cloud-config and no Kubernetes role at all, and
 // callers decide whether that is acceptable.
-var ErrNoCoriumBlock = errors.New("no corium block in cloud-config")
+var ErrNoCoriumBlock = errors.New("no corium configuration in document")
 
-// document is the subset of a cloud-config document Corium cares about.
+// Parse reads a Corium configuration and applies defaults.
 //
-// The corium block is captured as a raw node rather than decoded in place, so
-// that the surrounding document keeps its ordinary cloud-config keys — users,
-// write_files, runcmd and the rest — without Corium having to know about any of
-// them. Corium is a guest in this document, not its owner.
-type document struct {
-	// A value, not a pointer: yaml.v3 leaves a *yaml.Node field untouched
-	// during decoding, so a pointer here silently yields an empty node and
-	// every document looks like it has no corium block.
-	Corium yaml.Node `yaml:"corium"`
-}
-
-// Parse extracts the `corium:` block from a cloud-config document and applies
-// defaults. It does not validate; call Validate separately so that callers can
+// Two document shapes are accepted, because the same configuration arrives by
+// two different routes:
+//
+//   - embedded, under a `corium:` key in a cloud-config document, alongside
+//     users, write_files and the rest;
+//   - standalone, the configuration alone at the top level, which is what an
+//     operator writes in /etc/corium/config.yaml or serves over PXE, where
+//     wrapping it in a cloud-config would be ceremony for its own sake.
+//
+// The shapes are told apart by which key is present, so the rule is
+// predictable: `corium:` means embedded, a top-level `role:` means standalone.
+//
+// Parse does not validate; call Validate separately so that callers can
 // distinguish a malformed document from a well-formed but invalid one.
-//
-// It returns ErrNoCoriumBlock if the document has no `corium:` key.
 func Parse(data []byte) (*Config, error) {
-	var doc document
-
-	// No KnownFields here: unknown keys at the top level belong to cloud-init.
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parsing cloud-config: %w", err)
+	node, err := locate(data)
+	if err != nil {
+		return nil, err
 	}
 
-	if doc.Corium.IsZero() {
-		return nil, ErrNoCoriumBlock
-	}
-
-	cfg, err := decodeStrict(&doc.Corium)
+	cfg, err := decodeStrict(node)
 	if err != nil {
 		return nil, err
 	}
@@ -56,15 +48,55 @@ func Parse(data []byte) (*Config, error) {
 	return cfg, nil
 }
 
-// decodeStrict decodes the corium block, rejecting keys Corium does not know.
+// locate finds the Corium configuration within a document, whichever shape it
+// takes.
+func locate(data []byte) (*yaml.Node, error) {
+	var root yaml.Node
+
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("parsing document: %w", err)
+	}
+
+	// An empty document decodes to a zero node.
+	if root.IsZero() || len(root.Content) == 0 {
+		return nil, ErrNoCoriumBlock
+	}
+
+	mapping := root.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil, ErrNoCoriumBlock
+	}
+
+	// Mapping content alternates key, value, key, value.
+	var standalone bool
+
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		switch mapping.Content[i].Value {
+		case "corium":
+			return mapping.Content[i+1], nil
+		case "role":
+			standalone = true
+		}
+	}
+
+	if standalone {
+		return mapping, nil
+	}
+
+	return nil, ErrNoCoriumBlock
+}
+
+// decodeStrict decodes the configuration, rejecting keys Corium does not know.
 //
-// Strictness is worth the round-trip through YAML here: inside our own block a
-// key we do not recognise is a typo, and silently ignoring it means an operator
-// discovers their node booted without the setting they carefully wrote.
+// Strictness is worth the round-trip through YAML: within our own schema a key
+// we do not recognise is a typo, and silently ignoring it means an operator
+// discovers their node booted without the setting they carefully wrote. It is
+// applied here and not to the whole document, because at the top level of a
+// cloud-config the unknown keys belong to cloud-init.
 func decodeStrict(node *yaml.Node) (*Config, error) {
 	raw, err := yaml.Marshal(node)
 	if err != nil {
-		return nil, fmt.Errorf("reading corium block: %w", err)
+		return nil, fmt.Errorf("reading corium configuration: %w", err)
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
@@ -72,13 +104,13 @@ func decodeStrict(node *yaml.Node) (*Config, error) {
 
 	var cfg Config
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parsing corium block: %w", err)
+		return nil, fmt.Errorf("parsing corium configuration: %w", err)
 	}
 
 	return &cfg, nil
 }
 
-// ParseFile reads and parses a cloud-config document from disk.
+// ParseFile reads and parses a configuration from disk.
 func ParseFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

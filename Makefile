@@ -59,6 +59,46 @@ image: ## Build the Corium OS container image
 push: ## Push the OS image to the registry
 	podman push $(IMAGE)
 
+##@ Installable artefacts
+
+# bootc-image-builder turns the OS image into something you can actually boot.
+# It needs a privileged container and access to the local image store, and it
+# must run on a Linux host: it mounts the root filesystem it creates in order to
+# populate it.
+BIB          ?= quay.io/centos-bootc/bootc-image-builder:latest
+OUTPUT_DIR   ?= $(CURDIR)/output
+ARTEFACTS    ?= qcow2 raw anaconda-iso
+
+define bib
+	sudo podman run --rm --privileged \
+		--security-opt label=type:unconfined_t \
+		-v /var/lib/containers/storage:/var/lib/containers/storage \
+		-v $(OUTPUT_DIR):/output \
+		$(BIB) --type $(1) $(IMAGE)
+endef
+
+.PHONY: artefacts
+artefacts: $(addprefix artefact-,$(ARTEFACTS)) ## Build every installable artefact
+
+.PHONY: artefact-qcow2
+artefact-qcow2: ## Build a qcow2 for Proxmox, KVM and libvirt
+	@mkdir -p $(OUTPUT_DIR)
+	$(call bib,qcow2)
+
+.PHONY: artefact-raw
+artefact-raw: ## Build a raw disk for bare metal and most clouds
+	@mkdir -p $(OUTPUT_DIR)
+	$(call bib,raw)
+
+.PHONY: artefact-anaconda-iso
+artefact-anaconda-iso: ## Build an installer ISO for bare metal
+	@mkdir -p $(OUTPUT_DIR)
+	$(call bib,anaconda-iso)
+
+.PHONY: clean-artefacts
+clean-artefacts: ## Remove built artefacts
+	sudo rm -rf $(OUTPUT_DIR)
+
 ##@ Helpers
 
 .PHONY: help

@@ -89,8 +89,8 @@ func run() error {
 // bootstrapCommand configures the node and starts k0s.
 func bootstrapCommand(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
-	configPath := fs.String("config", defaultCloudConfigPath,
-		"path to the merged cloud-config document rendered by cloud-init")
+	configPath := fs.String("config", "",
+		"read one specific document instead of searching the source chain")
 	dryRun := fs.Bool("dry-run", false,
 		"render the configuration and print it without applying anything")
 
@@ -98,10 +98,7 @@ func bootstrapCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	slog.Info("starting bootstrap",
-		"version", version,
-		"config", *configPath,
-		"dryRun", *dryRun)
+	slog.Info("starting bootstrap", "version", version, "dryRun", *dryRun)
 
 	return bootstrap.Run(ctx, bootstrap.Options{
 		ConfigPath: *configPath,
@@ -139,9 +136,3 @@ func validateCommand(_ context.Context, args []string) error {
 
 	return nil
 }
-
-// defaultCloudConfigPath is where cloud-init writes the fully merged
-// cloud-config document for the current instance. Reading the merged result
-// rather than the raw user-data means multipart payloads and vendor-data have
-// already been resolved for us.
-const defaultCloudConfigPath = "/var/lib/cloud/instance/cloud-config.txt"

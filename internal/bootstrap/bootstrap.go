@@ -11,6 +11,7 @@ import (
 
 	"github.com/qjoly/corium/internal/config"
 	"github.com/qjoly/corium/internal/k0s"
+	"github.com/qjoly/corium/internal/source"
 )
 
 // StateDir holds Corium's own persistent state. It lives under /var because
@@ -26,7 +27,9 @@ var MarkerFile = filepath.Join(StateDir, "bootstrapped")
 
 // Options controls a bootstrap run.
 type Options struct {
-	// ConfigPath is the merged cloud-config document to read.
+	// ConfigPath reads one specific document instead of searching. Empty means
+	// search the standard source chain, which is what happens on a real boot;
+	// setting it is for testing a document by hand.
 	ConfigPath string
 
 	// DryRun renders everything and applies nothing.
@@ -50,13 +53,13 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	cfg, err := config.ParseFile(opts.ConfigPath)
+	cfg, err := load(ctx, opts.ConfigPath)
 	if err != nil {
-		if errors.Is(err, config.ErrNoCoriumBlock) {
-			// A node provisioned with a plain cloud-config and no corium block
-			// is a valid outcome: the operator wanted a machine, not a
-			// Kubernetes node. Say so and stop, rather than failing.
-			slog.Info("no corium block in cloud-config, leaving node unconfigured")
+		if errors.Is(err, config.ErrNoCoriumBlock) || errors.Is(err, source.ErrNotFound) {
+			// A machine provisioned without a Corium configuration is a valid
+			// outcome: someone wanted a host, not a Kubernetes node. Say so and
+			// stop, rather than failing.
+			slog.Info("no corium configuration found, leaving node unconfigured")
 
 			return nil
 		}
@@ -194,4 +197,28 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 	}
 
 	return nil
+}
+
+// load finds and parses the node's configuration.
+//
+// With no explicit path it searches the standard source chain, so a node can be
+// configured by cloud-init, by a file an operator placed, by the kernel command
+// line, or by a default baked into the image -- covering platforms that have no
+// cloud-init datasource at all.
+func load(ctx context.Context, path string) (*config.Config, error) {
+	if path != "" {
+		return config.ParseFile(path)
+	}
+
+	found, err := source.Resolve(ctx, source.Default())
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := config.Parse(found.Document)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", found.Source, err)
+	}
+
+	return cfg, nil
 }

@@ -1,0 +1,32 @@
+# A standalone Corium configuration: the schema on its own, with no
+# cloud-config wrapper.
+#
+# This is the shape for platforms that have no cloud-init datasource -- bare
+# metal without a seed device, PXE, or an appliance shipped preconfigured.
+# Place it at one of:
+#
+#   /etc/corium/config.yaml          an operator's answer for this machine
+#   /usr/share/corium/config.yaml    a default baked into a derived image
+#
+# or serve it over the network and point the kernel at it:
+#
+#   corium.config=https://boot.example.com/nodes/edge-01.yaml
+#
+# Sources are tried in that order of specificity, and the first one that answers
+# wins. Note that a source failing for any reason other than being absent stops
+# the search: an unreachable config URL means your intent is unknown, and
+# falling through to a baked-in default is how a node joins the wrong cluster.
+
+role: worker
+
+cluster:
+  name: edge
+  endpoint: k8s.example.com
+
+join:
+  tokenFrom:
+    url: https://secrets.example.com/corium/worker-token
+
+node:
+  labels:
+    node.corium.io/pool: edge
