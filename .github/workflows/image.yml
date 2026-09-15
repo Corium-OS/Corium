@@ -173,7 +173,19 @@ jobs:
       - name: Sign the image
         if: steps.plan.outputs.publish == 'true'
         run: |
-          cosign sign --yes "${{ steps.push.outputs.digest }}"
+          # --registry-referrers-mode=legacy writes the signature to the
+          # <digest>.sig tag rather than as an OCI referrer.
+          #
+          # This is not a stylistic choice. containers-policy.json -- what
+          # podman, skopeo and bootc use to enforce signatures on a node --
+          # only looks for the .sig tag. With cosign's newer default, a node
+          # configured to require a signature rejects the image with
+          # "A signature was required, but no signature exists", which is a
+          # confusing way to learn that the signature is real but in the wrong
+          # place. Verified on a node before changing this.
+          cosign sign --yes \
+            --registry-referrers-mode=legacy \
+            "${{ steps.push.outputs.digest }}"
           echo "signed ${{ steps.push.outputs.digest }}"
 
       - name: Summary
