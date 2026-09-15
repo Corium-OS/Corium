@@ -30,6 +30,9 @@ PAGES = [
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From an empty machine to a working Kubernetes node in five steps, with "
      "the mistakes that cost the most time."),
+    ("features.md", "reference", "feature-support", "Feature support", 205,
+     "What Corium models, what it passes through to k0s, and what it "
+     "deliberately does not do."),
     ("reference.md", "reference", "configuration", "Configuration", 210,
      "Every field of the corium: schema, where the configuration comes from, "
      "and what Corium does with it."),
@@ -48,6 +51,7 @@ PAGES = [
 # GitHub because the site does not serve the repository.
 PAGE_URLS = {
     "quickstart.md": "/docs/guides/quickstart/",
+    "features.md": "/docs/reference/feature-support/",
     "reference.md": "/docs/reference/configuration/",
     "adr/0001-base-image.md": "/docs/reference/adr-0001-base-image/",
     "adr/0002-root-filesystem.md": "/docs/reference/adr-0002-root-filesystem/",

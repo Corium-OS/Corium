@@ -4,6 +4,13 @@ What the configuration file contains, where it comes from, and what Corium does
 with it.
 
 For a task-oriented introduction, start with the [quick start](quickstart.md).
+For what Corium models versus what it passes through to k0s, see
+[feature support](features.md).
+
+Anything here describing k0s behaviour links to the
+[official k0s documentation](https://docs.k0sproject.io/). Corium configures
+upstream k0s without forking or patching it, so where the two disagree, k0s is
+right and this page is stale.
 
 ---
 
@@ -156,9 +163,20 @@ referred to indirectly in the journal.
 | Value | Control plane | Workloads | Notes |
 |---|---|---|---|
 | `single` | yes | yes | Self-contained. **Cannot gain nodes later**: k0s provisions it with SQLite and without the machinery multi-node clusters need |
-| `controller` | yes | no | Schedules nothing |
+| `controller` | yes | no | Runs no kubelet, so nothing schedules on it at all |
 | `controller+worker` | yes | yes | Expandable. Corium passes `--no-taints`, without which the node would schedule nothing and look broken |
 | `worker` | no | yes | Requires `join` |
+
+Controllers carry the labels `node-role.kubernetes.io/control-plane=true` and
+`node.k0sproject.io/role=control-plane`, which is how you tell them apart in
+`kubectl get nodes`.
+
+`single` is the one irreversible choice in the schema. Everything else can be
+changed by reprovisioning a node; a single-node cluster has to be rebuilt to
+become anything else. Use `controller+worker` if you might ever add a machine —
+it costs nothing today and keeps the door open.
+
+See [k0s: configuration](https://docs.k0sproject.io/stable/configuration/).
 
 ### 3.2 `cluster`
 
@@ -184,6 +202,12 @@ in an HA cluster, which defeats the point.
 `Pending` until you install a network — expected, not broken. See
 [`examples/custom-cni.yaml`](examples/custom-cni.yaml).
 
+kube-router is k0s's default and covers networking, network policy and service
+proxying in a single component. Tuning any of the three, changing the
+kube-proxy mode, or enabling dual-stack is done through `k0s.patch` rather than
+the `corium:` schema — see [feature support](features.md#passthrough) and
+[k0s: networking](https://docs.k0sproject.io/stable/networking/).
+
 Overlapping CIDRs are rejected: they produce a cluster that comes up and then
 misroutes traffic in ways that are miserable to diagnose.
 
@@ -199,6 +223,12 @@ second controller joined and then fail in a way that looks like a network fault.
 
 Corium's `sqlite` renders as k0s's `kine`, which is the mechanism; `sqlite` is
 what you are actually choosing.
+
+etcd runs embedded in the controllers; there is nothing to install. Use an odd
+number of them — three tolerates one failure, five tolerates two. A fourth
+controller adds no fault tolerance over three. Tuning etcd, or pointing k0s at
+an external cluster, is reachable through `k0s.patch`. See
+[k0s: configuration](https://docs.k0sproject.io/stable/configuration/).
 
 ### 3.5 `join`
 
@@ -218,8 +248,14 @@ k0s token create --role=controller --expiry=1h
 ```
 
 A controller token is effectively a cluster-admin credential — whoever holds an
-unexpired one can join a full control-plane member. Prefer short expiries and a
-secret store over embedding it in instance metadata.
+unexpired one can join a full control-plane member, with read and write access
+to etcd. A worker token is narrower but still lets a machine join the cluster.
+Prefer short expiries and a secret store over embedding either in instance
+metadata.
+
+Tokens can be listed and revoked on a controller with `k0s token list` and
+`k0s token invalidate <id>`. See
+[k0s: multi-node clusters](https://docs.k0sproject.io/stable/k0s-multi-node/).
 
 ### 3.6 `node`
 
@@ -259,6 +295,11 @@ node's outcome depend on *when* it booted.
 Add-ons are rejected on workers: only a controller installs them, so declaring
 them elsewhere expresses an intent that will never be carried out.
 
+Charts are installed once at bootstrap. Corium does not model removing one:
+deleting an add-on from the configuration of an already-bootstrapped node does
+nothing, because the node will not bootstrap again. See
+[k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/).
+
 ### 3.8 `ha`
 
 A highly available control plane without an external load balancer, and without
@@ -291,8 +332,17 @@ control plane to balance). Settings given while `enabled` is false are also
 rejected, since they would silently do nothing.
 
 **Certificates never appear here.** Controllers two and three join with a token
-and k0s ships them the cluster CA over its join API. See
-[`examples/ha-controller-first.yaml`](examples/ha-controller-first.yaml).
+and k0s ships them the cluster CA over its join API on port 9443. See
+[`examples/ha-controller-first.yaml`](examples/ha-controller-first.yaml) and
+[k0s: control plane load balancing](https://docs.k0sproject.io/stable/cplb/).
+
+A related feature Corium does not model is **node-local load balancing**, which
+runs a proxy on each worker so that kubelet and kube-proxy reach any healthy
+controller without an external load balancer. It solves the problem for
+workers, where CPLB solves it for clients. It is reachable through `k0s.patch`,
+and k0s documents it as incompatible with `spec.api.externalAddress` — which
+Corium sets from `cluster.endpoint`. See
+[k0s: node-local load balancing](https://docs.k0sproject.io/stable/nllb/).
 
 ### 3.9 Defaults
 

@@ -230,6 +230,8 @@ node's address.
 - **Anything Corium does not model** — `k0s.patch` is applied verbatim to the
   rendered `k0s.yaml`, so every k0s setting stays reachable.
 - **Every field in detail** — the [configuration reference](/docs/reference/configuration/).
+- **What is and is not supported** — [feature support](/docs/reference/feature-support/), including
+  everything reachable through the k0s passthrough.
 
 ### Upgrades
 
