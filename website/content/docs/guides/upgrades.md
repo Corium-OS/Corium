@@ -121,31 +121,58 @@ on their own; the failover was verified by hard-stopping the holder.
 
 ---
 
-## Health-gated rollback is not implemented
+## A node that breaks rolls itself back
 
-A node that boots an image where k0s does not start stays there. Nothing
-notices, and nothing brings it back. Rolling back is a decision you make, with
-`bootc rollback`.
+Staging an upgrade and rebooting is only safe if something notices when the new
+image does not work. Nodes run [greenboot](https://github.com/fedora-iot/greenboot)
+health checks at boot; if a check fails and there is a previous deployment to
+return to, the node rolls back on its own.
 
-This was attempted with [greenboot](https://github.com/fedora-iot/greenboot),
-the usual answer on OSTree systems, and reverted. With greenboot enabled, nodes
-rolled back on **every** reboot even when the health check passed:
+Corium ships one check: is k0s running and answering?
 
 ```
-Rollback to previous deployment completed successfully
 corium: k0scontroller.service is running and answering
 greenboot health-check passed.
+Set grubenv: boot_success=1
 ```
 
-The rollback is announced before the check runs, and a node walked backwards
-one image per reboot until it reached the one it was installed with. Shipping
-that would have made every upgrade unreliable in exchange for a safety net that
-did not work, so it is out until the interaction between greenboot and bootc is
-properly understood.
+**What it deliberately does not check is the interesting part.** It does not
+require the node to be `Ready` in Kubernetes. A node can be legitimately
+NotReady for reasons that have nothing to do with the image — no CNI installed
+yet, a control plane still coming back, a cluster-wide problem — and rolling
+back the OS would fix none of them while taking a healthy machine out of
+service at the worst possible moment. A health check that is too strict is
+worse than none.
 
-Until then: after an unattended upgrade, check that nodes came back. The
-`download` policy exists partly for this reason — it keeps the reboot, and
-therefore the moment of risk, under your control.
+The check also allows five minutes for k0s to start, since unpacking its
+supervised binaries and bringing up etcd is not instant, and passes trivially
+on a node that was never bootstrapped.
+
+A node only rolls back if an upgrade actually staged something. greenboot
+records the deployment it expects to boot, and the rollback path is gated on
+that record existing — so a health check that fails on a node nobody upgraded
+gets you a warning and manual intervention, not a surprise trip to an older
+image.
+
+Verified end to end, by pushing an image whose health check always fails and
+letting the node take it:
+
+```
+boot 1   check fails   First health check failure, setting boot counter to 3
+boot 2   check fails   Boot counter is 2, rebooting to try again
+boot 3   check fails   Boot counter is 1, rebooting to try again
+boot 4   check fails   Boot counter exhausted ... initiating rollback
+                       Rollback successful
+boot 5   healthy       greenboot health-check passed.  Set grubenv: boot_success=1
+```
+
+Four attempts on the broken image, then back to the previous one, which came up
+and stayed up. `GREENBOOT_MAX_BOOT_ATTEMPTS` in `/etc/greenboot/greenboot.conf`
+sets the count. Once rolled back, the image that failed is the one that gets
+replaced, so the node does not oscillate.
+
+Add your own checks by dropping executables in
+`/etc/greenboot/check/required.d/`. A non-zero exit fails the boot.
 
 ## Rolling back
 
@@ -217,7 +244,7 @@ corium:
 | Policy | What the node does | Reboots itself |
 |---|---|---|
 | `none` | Nothing. The default | No |
-| `download` | Stages a newer image, leaves it queued for the next boot | **No** |
+| `download` | Stages a newer image and queues it for the next boot, whenever that is | **No** |
 | `apply` | Stages it and reboots | **Yes** |
 
 **`download` is the one most clusters want.** The fetch and the deployment
@@ -240,6 +267,12 @@ Two behaviours worth knowing, because both are deliberate:
   credentials, and only a node running a control plane has them locally. On
   `worker` nodes, `apply` behaves as it did before. Use `download` there and
   drive the reboot from somewhere that can talk to the API.
+- **The new image stays locked until the drain has succeeded.** `apply` stages
+  with `bootc upgrade --download-only`, which leaves the deployment *locked for
+  finalization*, and unlocks it with `--from-downloaded` only once the node is
+  drained. A reboot for any other reason in between — an operator, a crash, a
+  power cut halfway through the drain — comes back up on the image the node was
+  already running, rather than half-applying an upgrade nobody scheduled.
 
 `schedule` takes any [systemd OnCalendar](https://www.freedesktop.org/software/systemd/man/systemd.time.html)
 expression. A randomised delay of up to an hour is applied on top, so a fleet

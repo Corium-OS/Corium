@@ -13,8 +13,14 @@ readonly DRAIN_TIMEOUT=5m
 
 log() { echo "corium-upgrade: $*"; }
 
-# 1. Fetch and deploy, without rebooting. If nothing new exists, stop here
-#    rather than draining a node for no reason.
+# 1. Fetch and stage, locked. If nothing new exists, stop here rather than
+#    draining a node for no reason.
+#
+# --download-only stages the deployment but leaves it locked for finalization,
+# so a reboot that happens for any other reason -- an operator, a crash, a power
+# cut in the middle of the drain below -- will not boot into it. The upgrade
+# applies only once this script has decided it should, which is the whole point
+# of draining first. Step 3 unlocks it.
 bootc upgrade --download-only --quiet
 
 staged="$(bootc status --format json 2>/dev/null |
@@ -62,6 +68,16 @@ else
     log "no cluster admin access on this node; rebooting without draining"
 fi
 
-# 3. Boot into what was staged.
+# 3. Unlock the staged deployment, then boot into it.
+#
+# Without this the reboot below is wasted: ostree-finalize-staged logs "Not
+# finalizing; deployment is locked for finalization" at shutdown and the node
+# comes back up on the image it was already running, having drained itself for
+# nothing. --from-downloaded unlocks what step 1 staged without going back to
+# the registry, so this cannot pick up a different image than the one the drain
+# was decided on.
+log "unlocking the staged image"
+bootc upgrade --from-downloaded --quiet
+
 log "rebooting into the staged image"
 systemctl reboot
