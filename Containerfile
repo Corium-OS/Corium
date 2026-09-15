@@ -47,7 +47,7 @@ ARG VERSION=dev
 
 LABEL org.opencontainers.image.title="Corium" \
       org.opencontainers.image.description="Immutable Kubernetes node based on bootc and k0s" \
-      org.opencontainers.image.source="https://github.com/qjoly/corium" \
+      org.opencontainers.image.source="https://github.com/Corium-OS/Corium" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 

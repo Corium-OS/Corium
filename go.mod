@@ -1,4 +1,4 @@
-module github.com/qjoly/corium
+module github.com/Corium-OS/Corium
 
 go 1.23
 

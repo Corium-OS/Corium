@@ -4,7 +4,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 # Image coordinates
-REGISTRY    ?= ghcr.io/qjoly
+REGISTRY    ?= ghcr.io/corium-os
 IMAGE_NAME  ?= corium
 IMAGE_TAG   ?= dev
 IMAGE       := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)

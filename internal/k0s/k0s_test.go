@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/qjoly/corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/config"
 )
 
 func render(t *testing.T, cfg *config.Config) map[string]any {

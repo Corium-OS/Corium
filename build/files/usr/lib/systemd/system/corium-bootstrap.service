@@ -1,6 +1,6 @@
 [Unit]
 Description=Corium node bootstrap
-Documentation=https://github.com/qjoly/corium
+Documentation=https://github.com/Corium-OS/Corium
 
 # The agent reads the `corium:` block from the cloud-config document that
 # cloud-init has already fetched and merged, so it must run after cloud-init

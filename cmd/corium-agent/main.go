@@ -19,8 +19,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/qjoly/corium/internal/bootstrap"
-	"github.com/qjoly/corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/bootstrap"
+	"github.com/Corium-OS/Corium/internal/config"
 )
 
 // Build metadata, injected at link time.

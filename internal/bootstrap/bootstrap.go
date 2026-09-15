@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/qjoly/corium/internal/config"
-	"github.com/qjoly/corium/internal/k0s"
-	"github.com/qjoly/corium/internal/source"
+	"github.com/Corium-OS/Corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/k0s"
+	"github.com/Corium-OS/Corium/internal/source"
 )
 
 // StateDir holds Corium's own persistent state. It lives under /var because

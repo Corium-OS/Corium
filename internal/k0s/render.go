@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/qjoly/corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/config"
 )
 
 // ConfigPath is where k0s reads its cluster configuration.

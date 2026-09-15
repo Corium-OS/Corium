@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/qjoly/corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/config"
 )
 
 // Binary is the k0s executable, baked into the read-only system tree.

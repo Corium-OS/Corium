@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qjoly/corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/config"
 )
 
 // secretFetchTimeout bounds how long first boot waits for a token service.
