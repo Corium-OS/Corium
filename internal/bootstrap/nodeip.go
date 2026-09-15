@@ -61,7 +61,11 @@ func routedAddress() (netip.Addr, error) {
 	if err != nil {
 		return netip.Addr{}, err
 	}
-	defer conn.Close()
+	defer func() {
+		// No packet was ever sent; this "connection" exists only to make the
+		// kernel pick a route, so closing it cannot fail meaningfully.
+		_ = conn.Close()
+	}()
 
 	local, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok {

@@ -136,4 +136,9 @@ RUN systemctl mask bootc-fetch-apply-updates.timer
 RUN rm -rf /run/cloud-init /run/corium-build /run/dnf /tmp/* /var/tmp/*
 
 # Validate the result against bootc's expectations for a bootable image.
-RUN bootc container lint
+#
+# --fatal-warnings because the warnings here are not stylistic: they catch
+# content written to /var that will not survive an upgrade, and files left in
+# runtime-only directories. The image is clean today, and this keeps it that
+# way rather than letting warnings accumulate until nobody reads them.
+RUN bootc container lint --fatal-warnings

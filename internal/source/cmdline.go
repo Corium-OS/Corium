@@ -124,7 +124,11 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", url, err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		// The body is read in full below; failing to close it cannot change
+		// the result, and there is nothing useful to do with the error.
+		_ = response.Body.Close()
+	}()
 
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetching %s: unexpected status %s", url, response.Status)

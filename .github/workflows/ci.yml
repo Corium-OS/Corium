@@ -1,0 +1,135 @@
+# Go build, tests, lint, and validation of every documented example.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push supersedes whatever was running for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          # Single source of truth: the version the module declares.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "${unformatted}" ]; then
+            echo "These files are not gofmt-clean:" >&2
+            echo "${unformatted}" >&2
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go.mod or go.sum changed after 'go mod tidy'; commit the result" >&2
+            git diff --stat go.mod go.sum >&2
+            exit 1
+          fi
+
+      - run: go build ./...
+
+      - run: go vet ./...
+
+      # -race because the agent is concurrent enough to hide a data race, and a
+      # race that only shows up on a node during bootstrap is expensive to find.
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+  examples:
+    name: Validate documented examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the agent
+        run: go build -o /tmp/corium-agent ./cmd/corium-agent
+
+      # Every example in the documentation must actually be valid. An example
+      # that stopped parsing is worse than no example: it is copied, it fails on
+      # a node, and the reader assumes they made the mistake.
+      - name: Validate every example
+        run: |
+          failed=0
+          for file in docs/examples/*.yaml deploy/proxmox/*.yaml; do
+            [ -e "${file}" ] || continue
+            if /tmp/corium-agent validate "${file}" >/dev/null 2>&1; then
+              echo "ok      ${file}"
+            else
+              echo "INVALID ${file}" >&2
+              /tmp/corium-agent validate "${file}" 2>&1 | sed 's/^/        /' >&2
+              failed=1
+            fi
+          done
+          exit "${failed}"
+
+      # The reference documents a rendered k0s.yaml. If rendering changes and
+      # the documentation does not, the example silently becomes a lie.
+      - name: Check the reference example still renders as documented
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys
+
+          doc = open("docs/reference.md", encoding="utf-8").read()
+          blocks = re.findall(r"```yaml\n(.*?)```", doc, re.S)
+
+          source = [b for b in blocks if b.startswith("#cloud-config")][-1]
+          documented = [b for b in blocks if b.startswith("apiVersion:")][-1].strip()
+
+          with open("/tmp/reference-example.yaml", "w", encoding="utf-8") as handle:
+              handle.write(source)
+
+          result = subprocess.run(
+              ["/tmp/corium-agent", "bootstrap", "--dry-run",
+               "--config", "/tmp/reference-example.yaml"],
+              capture_output=True, text=True, check=True)
+
+          rendered = result.stdout.split("# /etc/k0s/k0s.yaml\n", 1)[-1].strip()
+
+          if rendered != documented:
+              print("docs/reference.md no longer matches what the agent renders.",
+                    file=sys.stderr)
+              print("--- documented ---\n" + documented, file=sys.stderr)
+              print("--- actual ---\n" + rendered, file=sys.stderr)
+              sys.exit(1)
+
+          print("reference example matches the actual rendering")
+          PY

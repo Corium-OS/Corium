@@ -1,0 +1,46 @@
+# golangci-lint configuration.
+#
+# The agent is baked into an OS image and runs as root on every node, so the
+# linters enabled here lean towards correctness and away from style.
+
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose      # an unclosed response body leaks a connection per boot attempt
+    - errorlint      # errors.Is/As over ==, so wrapped errors keep matching
+    - gosec          # this runs as root; file modes and command execution matter
+    - misspell
+    - nilerr         # returning nil after a non-nil error hides failures
+    - revive
+    - unconvert
+    - wastedassign
+    - whitespace
+
+  settings:
+    gosec:
+      excludes:
+        # Subprocess execution is the agent's job: it drives k0s, systemctl and
+        # hostnamectl. Arguments are built in code, never from a shell string.
+        - G204
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+
+  exclusions:
+    rules:
+      # Tests construct fixtures and assert on them; the stricter checks above
+      # produce noise rather than signal there.
+      - path: _test\.go
+        linters: [gosec, errorlint]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

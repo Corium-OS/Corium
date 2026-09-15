@@ -112,7 +112,10 @@ func decodeStrict(node *yaml.Node) (*Config, error) {
 
 // ParseFile reads and parses a configuration from disk.
 func ParseFile(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	// The path comes from the caller -- a source in the chain, or an
+	// operator's --config flag. Reading a caller-supplied path is the point
+	// of this function, not an oversight.
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}

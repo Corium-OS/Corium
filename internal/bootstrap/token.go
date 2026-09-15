@@ -101,7 +101,11 @@ func fetchSecret(ctx context.Context, source *config.SecretSource, what string) 
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", what, err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		// Same as above: the body is read in full, so a close failure cannot
+		// affect the secret we return.
+		_ = response.Body.Close()
+	}()
 
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("fetching %s: unexpected status %s", what, response.Status)

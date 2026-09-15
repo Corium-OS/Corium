@@ -14,7 +14,9 @@ import (
 const Binary = "/usr/bin/k0s"
 
 // TokenPath is where a join token is written before k0s reads it.
-const TokenPath = "/etc/k0s/join-token"
+//
+// This is a path, not a credential: no token ever appears in source.
+const TokenPath = "/etc/k0s/join-token" // #nosec G101
 
 // ServiceName returns the systemd unit k0s installs for a role.
 func ServiceName(role config.Role) string {
