@@ -113,7 +113,6 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Unattended reboot | `upgrades.automatic: apply` | Reboots without draining; for labs and single nodes |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
 | Version ladder | — | `1.4.2`, `1.4`, `1`, `latest` published per release |
-| Automatic rollback on failure | — | greenboot health check; a node that cannot run k0s returns to its previous image |
 
 ### Where configuration comes from
 
@@ -242,6 +241,7 @@ enough, not because they are wrong.
 
 | Missing | Notes |
 |---|---|
+| **Health-gated rollback** | A node that boots a broken image stays broken. Attempted with greenboot and reverted: it rolled nodes back on every reboot, health check passing or not |
 | **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) by dropping an image bundle in `<data-dir>/images/`. Corium can already bake one into the image with a `COPY`, but there is no `corium:` field for it and it is untested |
 | **Worker profiles as a modelled field** | Reachable through the patch today |
 | **Uninstalling or resetting a node** | `k0s reset` exists; Corium does not wrap it. On an image-based OS, reprovisioning is usually the better answer |

@@ -121,40 +121,31 @@ on their own; the failover was verified by hard-stopping the holder.
 
 ---
 
-## A node that breaks rolls itself back
+## Health-gated rollback is not implemented
 
-Staging an upgrade and rebooting is only safe if something notices when the new
-image does not work. Nodes run [greenboot](https://github.com/fedora-iot/greenboot)
-health checks at boot; if a check fails and there is a previous deployment to
-return to, the node rolls back on its own.
+A node that boots an image where k0s does not start stays there. Nothing
+notices, and nothing brings it back. Rolling back is a decision you make, with
+`bootc rollback`.
 
-Corium ships one check: is k0s running and answering?
+This was attempted with [greenboot](https://github.com/fedora-iot/greenboot),
+the usual answer on OSTree systems, and reverted. With greenboot enabled, nodes
+rolled back on **every** reboot even when the health check passed:
 
 ```
+Rollback to previous deployment completed successfully
 corium: k0scontroller.service is running and answering
 greenboot health-check passed.
-Set grubenv: boot_success=1
 ```
 
-**What it deliberately does not check is the interesting part.** It does not
-require the node to be `Ready` in Kubernetes. A node can be legitimately
-NotReady for reasons that have nothing to do with the image — no CNI installed
-yet, a control plane still coming back, a cluster-wide problem — and rolling
-back the OS would fix none of them while taking a healthy machine out of
-service at the worst possible moment. A health check that is too strict is
-worse than none.
+The rollback is announced before the check runs, and a node walked backwards
+one image per reboot until it reached the one it was installed with. Shipping
+that would have made every upgrade unreliable in exchange for a safety net that
+did not work, so it is out until the interaction between greenboot and bootc is
+properly understood.
 
-The check also allows five minutes for k0s to start, since unpacking its
-supervised binaries and bringing up etcd is not instant, and passes trivially
-on a node that was never bootstrapped.
-
-Verified on a node: with a failing check and a previous deployment available,
-the node rolled back **on the first failed boot** rather than after the three
-attempts `GREENBOOT_MAX_BOOT_ATTEMPTS` suggests. Once rolled back, the image
-that failed becomes the rollback target, so the node does not oscillate.
-
-Add your own checks by dropping executables in
-`/etc/greenboot/check/required.d/`. A non-zero exit fails the boot.
+Until then: after an unattended upgrade, check that nodes came back. The
+`download` policy exists partly for this reason — it keeps the reboot, and
+therefore the moment of risk, under your control.
 
 ## Rolling back
 
