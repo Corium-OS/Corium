@@ -7,3 +7,11 @@
 docker:
   ghcr.io/corium-os/corium:
     use-sigstore-attachments: true
+
+# A note on the matching policy in ../policy.json:
+#
+# signedIdentity is matchRepository, not matchRepoDigestOrExact. Signing is
+# done by digest, so the signature records "ghcr.io/corium-os/corium" with no
+# tag. matchRepoDigestOrExact compares against the reference being pulled --
+# which has a tag -- and rejects it with "Signature for identity ... is not
+# accepted", a message that reads like the key is wrong when it is not.

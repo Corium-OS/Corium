@@ -11,7 +11,7 @@
                     "type": "sigstoreSigned",
                     "keyPath": "/usr/share/corium/cosign.pub",
                     "signedIdentity": {
-                        "type": "matchRepoDigestOrExact"
+                        "type": "matchRepository"
                     }
                 }
             ]

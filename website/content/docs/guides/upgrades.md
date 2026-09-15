@@ -253,15 +253,43 @@ DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-**Signing is not enforcing.** A stock Corium node ships the default
-`/etc/containers/policy.json`, which is `insecureAcceptAnything`: the image is
-signed, and nothing on the node checks that signature at pull time. A node will
-happily boot an unsigned image today.
+### Nodes enforce it
 
-To make a node enforce it, ship a policy requiring a sigstore signature for
-this repository and bake the trust root into your own derived image — a
-deliberate, reviewable change. See
-[bootc: image signatures](https://bootc.dev/bootc/security.html).
+Images are signed **twice**, because the two signatures answer different
+questions.
+
+| Signature | Proves | Used by |
+|---|---|---|
+| Keyless | Which workflow run built this image, recorded in a public transparency log | A human, running `cosign verify` |
+| Key | That the image came from this project | The node, at pull time |
+
+A Corium node ships a policy requiring the key signature for
+`ghcr.io/corium-os/corium`, with the public key at
+`/usr/share/corium/cosign.pub`. An image from that repository that is not
+signed is refused:
+
+```
+Source image rejected: A signature was required, but no signature exists
+```
+
+The policy is deliberately narrow. Everything else stays permissive, because
+k0s pulls its own images from quay.io and docker.io — a blanket policy would
+break the cluster rather than secure it.
+
+Verify it against a node yourself:
+
+```bash
+cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:main
+```
+
+**Why two signatures rather than one.** A node cannot enforce the keyless one:
+`containers-policy.json` matches a signer by `subjectEmail`, and a GitHub
+Actions certificate carries a URI instead, so enforcement fails with
+`Required email ... not found (got [])`. That is a limitation of
+`containers-image`, not a configuration mistake — worth knowing before you
+spend an afternoon on it.
+
+See [bootc: image signatures](https://bootc.dev/bootc/security.html).
 
 ---
 
