@@ -220,6 +220,7 @@ node's address.
 - **A different CNI** — [`examples/custom-cni.yaml`](examples/custom-cni.yaml).
 - **Anything Corium does not model** — `k0s.patch` is applied verbatim to the
   rendered `k0s.yaml`, so every k0s setting stays reachable.
+- **Every field in detail** — the [configuration reference](reference.md).
 
 ### Upgrades
 

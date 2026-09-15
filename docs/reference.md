@@ -1,0 +1,487 @@
+# Configuration reference
+
+What the configuration file contains, where it comes from, and what Corium does
+with it.
+
+For a task-oriented introduction, start with the [quick start](quickstart.md).
+
+---
+
+## 1. Where the configuration comes from
+
+`corium-agent` searches four sources on first boot and uses the first that
+answers. The order runs from most specific to most general, so a more targeted
+answer always beats a broader one.
+
+| # | Source | Intended for |
+|---|---|---|
+| 1 | `/etc/corium/config.yaml` | An operator's answer for this one machine |
+| 2 | cloud-init's merged document | Clouds and hypervisors |
+| 3 | `corium.config=` on the kernel command line | PXE and netboot |
+| 4 | `/usr/share/corium/config.yaml` | A default baked into a derived image |
+
+Source 2 reads `/var/lib/cloud/instance/cloud-config.txt`, the document
+cloud-init has already merged, so multipart payloads and vendor-data are
+resolved before Corium sees them.
+
+Source 3 accepts a path or an `https://` URL:
+
+```
+corium.config=/run/media/config.yaml
+corium.config=https://boot.example.com/nodes/edge-01.yaml
+```
+
+The last occurrence on the command line wins, matching the kernel's own
+handling, so a value appended at boot overrides one baked into the bootloader.
+Quoted values are honoured, so a path containing a space survives. A fetched
+configuration times out after 30 seconds and is capped at 1 MiB.
+
+An **empty file is treated as absent**, not as an empty configuration. A
+zero-byte file would otherwise boot a node with no role at all.
+
+A source that fails for **any reason other than being absent stops the search**.
+Falling through to a baked-in default when the intended configuration is merely
+unreachable is how a node silently joins the wrong cluster.
+
+If no source answers, the node boots as an ordinary machine and says so in the
+journal. That is a supported outcome, not an error.
+
+### Two document shapes
+
+The same schema arrives by two routes, told apart by which key is present.
+
+**Embedded**, under `corium:` in a cloud-config, alongside cloud-init's own keys:
+
+```yaml
+#cloud-config
+corium:
+  role: single
+users:
+  - name: core
+```
+
+**Standalone**, the schema alone at the top level — what you write in
+`/etc/corium/config.yaml` or serve over PXE, where a cloud-config wrapper would
+be ceremony for its own sake:
+
+```yaml
+role: single
+cluster:
+  name: lab
+```
+
+A document containing both is read as embedded: a top-level `role:` in a
+cloud-config is far more likely to belong to another tool.
+
+Unknown keys are handled differently on each side of the boundary. At the top
+level of a cloud-config they belong to cloud-init and are left alone. **Inside
+the Corium schema they are rejected**, because there they are typos — and a
+silently ignored key means a setting you carefully wrote never took effect.
+
+---
+
+## 2. How it becomes a running node
+
+```
+  source chain ──▶ parse ──▶ defaults ──▶ validate ──▶ hostname
+                                                          │
+                       k0s service ◀── k0s install ◀── render
+```
+
+| Step | What happens |
+|---|---|
+| **Parse** | Locate the schema in the document and decode it strictly |
+| **Defaults** | Fill unset fields (§3.9). Idempotent |
+| **Validate** | Report **every** problem at once, offline |
+| **Hostname** | Settle the node's name before anything reads it (§4) |
+| **Secrets** | Resolve `tokenFrom` / `authPassFrom` |
+| **Render** | Produce `/etc/k0s/k0s.yaml`, then apply `k0s.patch` |
+| **Install** | `k0s install …`, then start the service |
+| **Mark** | Write `/var/lib/corium/bootstrapped` |
+
+Three properties of this pipeline are load-bearing:
+
+**Validation is offline and exhaustive.** It performs no network or filesystem
+access, so `corium-agent validate` gives the same answer on your workstation as
+on the node. It reports every problem in one pass, so you do not discover your
+mistakes one reboot at a time.
+
+**Rendering is deterministic.** The same input produces a byte-identical
+`k0s.yaml`; map keys are sorted rather than left to Go's randomised iteration
+order. This matters for HA, where every controller must render the same file —
+the virtual IP, router ID and VRRP password are a shared agreement, and a
+disagreement means two controllers claiming one address.
+
+**Bootstrap is idempotent.** The marker file is written last, and
+`corium-bootstrap.service` does not start when it exists. A failure part-way
+leaves the node unmarked, so the next boot retries from a known point rather
+than resuming into an unknown one. Re-bootstrapping a node that already joined a
+cluster destroys data, so this check is deliberate.
+
+### What lands on the node
+
+| Path | Contents |
+|---|---|
+| `/etc/k0s/k0s.yaml` | Rendered cluster configuration, mode `0600`. Controllers only |
+| `/etc/k0s/join-token` | Resolved join token, mode `0600` |
+| `/var/lib/corium/bootstrapped` | Marker; its presence means "already done" |
+| `/etc/systemd/system/k0scontroller.service` | Written by `k0s install` |
+
+Workers get no `k0s.yaml`: they take their configuration from the control plane
+they join.
+
+Secrets are never logged. Tokens and passwords are written with mode `0600` and
+referred to indirectly in the journal.
+
+---
+
+## 3. The schema
+
+### 3.1 Root
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `role` | enum | **yes** | The only required field |
+| `cluster` | object | no | Identity and reachability (§3.2) |
+| `network` | object | no | Addressing and CNI (§3.3) |
+| `storage` | object | no | Datastore (§3.4) |
+| `join` | object | conditional | Required for `worker` (§3.5) |
+| `node` | object | no | Node attributes (§3.6) |
+| `addons` | list | no | Helm charts (§3.7) |
+| `ha` | object | no | Control plane load balancing (§3.8) |
+| `k0s` | object | no | Escape hatch (§3.10) |
+
+### `role`
+
+| Value | Control plane | Workloads | Notes |
+|---|---|---|---|
+| `single` | yes | yes | Self-contained. **Cannot gain nodes later**: k0s provisions it with SQLite and without the machinery multi-node clusters need |
+| `controller` | yes | no | Schedules nothing |
+| `controller+worker` | yes | yes | Expandable. Corium passes `--no-taints`, without which the node would schedule nothing and look broken |
+| `worker` | no | yes | Requires `join` |
+
+### 3.2 `cluster`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | `corium` | Cosmetic, but reaches generated kubeconfig contexts |
+| `endpoint` | string | — | The address clients and joining nodes use. Added to the API certificate automatically |
+| `subjectAltNames` | list | — | Additional names in the certificate |
+
+`endpoint` becomes `spec.api.externalAddress`. Set it to the load balancer, the
+HA virtual IP, or the sole controller's address — not to a specific controller
+in an HA cluster, which defeats the point.
+
+### 3.3 `network`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `podCIDR` | CIDR | `10.244.0.0/16` | |
+| `serviceCIDR` | CIDR | `10.96.0.0/12` | Must not overlap `podCIDR` |
+| `cni` | enum | `kuberouter` | `kuberouter`, `calico`, `custom` |
+
+`cni: custom` installs nothing. The node stays `NotReady` and pods stay
+`Pending` until you install a network — expected, not broken. See
+[`examples/custom-cni.yaml`](examples/custom-cni.yaml).
+
+Overlapping CIDRs are rejected: they produce a cluster that comes up and then
+misroutes traffic in ways that are miserable to diagnose.
+
+### 3.4 `storage`
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `type` | enum | role-dependent | `etcd` or `sqlite` |
+
+Defaults to `sqlite` for `single`, `etcd` otherwise. `sqlite` is rejected with
+`role: controller`: it cannot be shared, so the combination would work until the
+second controller joined and then fail in a way that looks like a network fault.
+
+Corium's `sqlite` renders as k0s's `kine`, which is the mechanism; `sqlite` is
+what you are actually choosing.
+
+### 3.5 `join`
+
+| Key | Type | Notes |
+|---|---|---|
+| `token` | string | Inline. Convenient for labs, a liability in production |
+| `tokenFrom` | object | Resolved at first boot (§3.11) |
+
+Set exactly one. Required for `worker`; rejected for `single`, which bootstraps
+its own cluster.
+
+Mint tokens on an existing controller:
+
+```bash
+k0s token create --role=worker     --expiry=1h
+k0s token create --role=controller --expiry=1h
+```
+
+A controller token is effectively a cluster-admin credential — whoever holds an
+unexpired one can join a full control-plane member. Prefer short expiries and a
+secret store over embedding it in instance metadata.
+
+### 3.6 `node`
+
+| Key | Type | Notes |
+|---|---|---|
+| `name` | string | Hostname, and the name it registers under. Derived if unset (§4) |
+| `labels` | map | Applied to the Node object |
+| `taints` | list | `key`, `value`, `effect` |
+
+`name` must be 63 characters or fewer, lowercase letters, digits and hyphens,
+starting and ending with a letter or digit. `effect` must be `NoSchedule`,
+`PreferNoSchedule` or `NoExecute`.
+
+Labels are sorted before reaching the command line, so identical input produces
+an identical command.
+
+### 3.7 `addons`
+
+Helm charts installed at bootstrap through k0s's Helm extensions. No Helm binary
+and no in-cluster operator are involved.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | yes | Release name |
+| `chart` | string | yes | Qualified, `repository/chart` |
+| `version` | string | no | **Pin it** |
+| `namespace` | string | no | Defaults to `default` |
+| `repository` | object | conditional | `name` and `url` |
+| `values` | map | no | Passed through unmodified |
+
+Every repository referenced by a `chart` must be declared by some add-on in the
+same document; a chart naming an undeclared repository is rejected.
+
+Leaving `version` unset resolves to whatever is latest at boot, which makes a
+node's outcome depend on *when* it booted.
+
+Add-ons are rejected on workers: only a controller installs them, so declaring
+them elsewhere expresses an intent that will never be carried out.
+
+### 3.8 `ha`
+
+A highly available control plane without an external load balancer, and without
+any PKI in the configuration. The controllers run VRRP between themselves and
+one holds a virtual IP.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `enabled` | bool | — | |
+| `virtualIP` | CIDR | yes | **With a prefix length**: keepalived needs it to add the address |
+| `interface` | string | no | Defaults to the interface holding the default route |
+| `virtualRouterID` | int | no | 1–255. Unique within the broadcast domain |
+| `authPass` | string | yes | **Eight characters or fewer** |
+| `authPassFrom` | object | — | Alternative to `authPass` (§3.11) |
+| `unicastPeers` | list | no | The other controllers' addresses |
+
+`authPass` is capped because **keepalived silently truncates it to eight
+characters**. A longer value lets two controllers believe they share a password
+they do not, so Corium rejects it rather than allowing that.
+
+`unicastPeers` is required on any network without multicast, which includes most
+clouds. It is harmless on a flat L2 segment.
+
+`cluster.endpoint` is required when HA is enabled, and should be the virtual IP:
+without it, clients would be pointed at one controller and the VIP would buy
+nothing.
+
+HA is rejected for `single` (one node by definition) and for `worker` (no
+control plane to balance). Settings given while `enabled` is false are also
+rejected, since they would silently do nothing.
+
+**Certificates never appear here.** Controllers two and three join with a token
+and k0s ships them the cluster CA over its join API. See
+[`examples/ha-controller-first.yaml`](examples/ha-controller-first.yaml).
+
+### 3.9 Defaults
+
+| Field | Default |
+|---|---|
+| `cluster.name` | `corium` |
+| `network.podCIDR` | `10.244.0.0/16` |
+| `network.serviceCIDR` | `10.96.0.0/12` |
+| `network.cni` | `kuberouter` |
+| `storage.type` | `sqlite` for `single`, `etcd` otherwise |
+| `addons[].namespace` | `default` |
+| `node.name` | Derived from the machine ID (§4) |
+
+Applying defaults is idempotent and never overwrites an explicit value.
+
+### 3.10 `k0s.patch` — the escape hatch
+
+A strategic merge patch applied to the rendered `k0s.yaml` **after** Corium has
+finished, passed through without interpretation. Every k0s setting stays
+reachable, including ones Corium has never heard of.
+
+```yaml
+corium:
+  k0s:
+    patch:
+      spec:
+        api:
+          extraArgs:
+            audit-log-path: /var/log/kubernetes/audit.log
+```
+
+Maps merge key by key; **every other type, including lists, is replaced
+wholesale**. A patch that sets a list means that list, not that list appended to
+whatever was there.
+
+The patch can override values Corium computed, including ones it considers
+load-bearing — that is what makes it an escape hatch rather than a suggestion.
+Corium checks only that the result is valid YAML. A patch that breaks the
+cluster is yours to own.
+
+The second escape hatch is that the document remains an ordinary cloud-config:
+`write_files`, `runcmd` and every other module keep working. Corium is a guest
+in that document, not its owner.
+
+### 3.11 Secret sources
+
+Used by `join.tokenFrom` and `ha.authPassFrom`, so credentials need not sit in
+instance metadata where anything reaching the metadata service can read them.
+
+| Key | Type | Notes |
+|---|---|---|
+| `url` | string | **Must be `https`** |
+| `file` | string | Absolute path |
+| `authFile` | string | File holding a bearer token for `url` |
+
+Set exactly one of `url` or `file`. Plain HTTP is rejected without an opt-out: a
+token fetched over HTTP is a token handed to anyone on the path.
+
+Fetches time out after 30 seconds and read at most 256 KiB. Errors never quote
+the response body, because the value being handled is a credential and a message
+echoing it into the journal has leaked it.
+
+---
+
+## 4. How the hostname is settled
+
+Kubernetes identifies a node by its hostname, and a duplicate does not fail
+loudly: nodes take turns overwriting each other's Node object while everything
+reports healthy.
+
+| # | Source | Used when |
+|---|---|---|
+| 1 | `node.name` | Set explicitly |
+| 2 | The current hostname | Something already set a real one |
+| 3 | `corium-<machine-id[:8]>` | The hostname is still generic |
+
+Generic means `fedora`, `localhost`, `localhost.localdomain` or empty — the
+names an unconfigured image boots with, which carry no identity.
+
+The derived name is **not random**. A random name would change on reboot,
+registering a new node every time and leaving the old one behind as a ghost.
+systemd generates the machine ID on first boot and the image ships none, so it
+is unique per node and stable for its lifetime.
+
+If you clone a disk *after* first boot, the machine ID comes with it. Clear
+`/etc/machine-id` on the clone or set `node.name`.
+
+The hostname is applied before k0s starts, since k0s registers the node under
+whatever it reads at startup.
+
+### Node address
+
+With HA enabled, Corium pins the kubelet's `--node-ip` to the node's own
+address, excluding the virtual IP.
+
+Without this the kubelet may register the VIP, because it picks whatever it
+finds on the interface — and the VIP belongs to whichever controller currently
+wins the election. The failure is delayed: everything works until the first
+failover, after which the node's advertised address belongs to a different
+machine and logs, exec, port-forward and metrics all go to the wrong node.
+
+---
+
+## 5. A worked example
+
+```yaml
+#cloud-config
+corium:
+  role: controller+worker
+  cluster:
+    name: prod
+    endpoint: 10.0.0.10
+    subjectAltNames: [k8s.example.com]
+  storage:
+    type: etcd
+  node:
+    name: ctrl-1
+    labels: {pool: general}
+  addons:
+    - name: cert-manager
+      chart: jetstack/cert-manager
+      version: 1.16.2
+      namespace: cert-manager
+      repository: {name: jetstack, url: 'https://charts.jetstack.io'}
+      values: {crds: {enabled: true}}
+  k0s:
+    patch:
+      spec:
+        api:
+          extraArgs: {audit-log-path: /var/log/audit.log}
+```
+
+Renders to:
+
+```yaml
+apiVersion: k0s.k0sproject.io/v1beta1
+kind: ClusterConfig
+metadata:
+    name: prod
+spec:
+    api:
+        externalAddress: 10.0.0.10
+        extraArgs:
+            audit-log-path: /var/log/audit.log
+        sans:
+            - 10.0.0.10
+            - k8s.example.com
+    extensions:
+        helm:
+            charts:
+                - chartname: jetstack/cert-manager
+                  name: cert-manager
+                  namespace: cert-manager
+                  values: |
+                    crds:
+                        enabled: true
+                  version: 1.16.2
+            repositories:
+                - name: jetstack
+                  url: https://charts.jetstack.io
+    network:
+        podCIDR: 10.244.0.0/16
+        provider: kuberouter
+        serviceCIDR: 10.96.0.0/12
+    storage:
+        type: etcd
+    telemetry:
+        enabled: false
+```
+
+and runs:
+
+```
+k0s install controller --config /etc/k0s/k0s.yaml \
+    --enable-worker --no-taints --labels pool=general
+```
+
+Worth noting in the output: `endpoint` appeared in `sans` without being asked
+for, the patch merged into `spec.api` without disturbing its siblings, chart
+values became the YAML string k0s expects, and telemetry is off by default —
+Corium does not phone home, and neither do the clusters it builds.
+
+Reproduce any of this without touching a machine:
+
+```bash
+corium-agent validate node.yaml
+corium-agent bootstrap --dry-run --config node.yaml
+```
+
+`--dry-run` resolves no secrets and renames nothing: it reaches no further than
+the process. Contacting a secret store to produce output nobody applies would be
+both a surprise and, on a shared network, a leak of intent.

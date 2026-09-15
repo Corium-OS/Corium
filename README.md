@@ -108,6 +108,7 @@ node silently joins the wrong cluster.
 ## Documentation
 
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
+- [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions
 - [`docs/examples/`](docs/examples/) — annotated configuration examples
 - [`docs/adr/`](docs/adr/) — architecture decision records
