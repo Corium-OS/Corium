@@ -61,7 +61,7 @@ the maintainers — do not quietly work around them.
 | 3 | The k0s binary lives in **`/usr`** (read-only, image-owned) | Immutability is the product. Kubernetes upgrades ship as a new OS image |
 | 4 | Kubernetes upgrades are **image-based**: new image → `bootc upgrade` → reboot → atomic rollback available | One upgrade mechanism, one version axis, free rollback |
 | 5 | k0s **Autopilot is disabled** | Autopilot mutates the k0s binary in place, which contradicts decision 3 |
-| 6 | User-facing configuration is **cloud-init**, via a `corium:` block | Familiar, portable across NoCloud/ConfigDrive/EC2/Azure/GCE, re-runnable |
+| 6 | Configuration is resolved from a **chain of sources**, cloud-init first among them | cloud-init covers every cloud and hypervisor, but bare metal, PXE and appliances have no datasource. `/etc/corium/config.yaml`, the kernel command line and an image default cover the rest |
 | 7 | **No Ignition.** cloud-init is the only first-boot mechanism | Two provisioning systems on one node means two authorities over users, SSH keys and networking, and races between them |
 | 8 | `corium-agent` and all tooling are written in **Go** | Same ecosystem as k0s and Kubernetes; static binaries drop cleanly into a read-only `/usr` |
 | 9 | **Every abstraction has an escape hatch** | `corium:` covers the common path; raw `write_files`, `runcmd`, and a verbatim k0s config patch must always remain available |
@@ -90,7 +90,7 @@ the maintainers — do not quietly work around them.
 ├── internal/
 │   ├── config/                # corium: schema, parsing, validation, defaults
 │   ├── k0s/                   # k0s.yaml rendering, token handling, service wiring
-│   ├── cloudinit/             # cloud-config integration
+│   ├── source/                # where a node's configuration comes from
 │   └── bootstrap/             # first-boot state machine
 ├── docs/
 │   ├── adr/                   # architecture decision records

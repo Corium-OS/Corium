@@ -52,10 +52,14 @@ Kubernetes means booting a new OS image — one version axis, one upgrade mechan
 rollback path. A node is a disposable artefact rebuilt from a digest, not a machine that
 accumulates state.
 
-**Configuration is cloud-init.** Not a bespoke API, not a new config language: the mechanism
-that every hypervisor, cloud, and PXE setup already speaks. Corium adds a `corium:` block
-that collapses the tedious parts into a handful of keys, and gets out of the way the moment
-you need something it did not anticipate.
+**Configuration is cloud-init, where cloud-init exists.** Not a bespoke API, not a new config
+language: the mechanism every hypervisor and cloud already speaks. Corium adds a `corium:`
+block that collapses the tedious parts into a handful of keys, and gets out of the way the
+moment you need something it did not anticipate.
+
+Where cloud-init does not exist — bare metal without a seed device, PXE, an appliance shipped
+preconfigured — the same configuration is read from a file, the kernel command line, or a
+default baked into the image. One schema, four ways in.
 
 ## What it is not
 
@@ -75,6 +79,31 @@ lineage.
 Corium's bet is narrower and specific: that for teams already living in OCI registries and
 GitOps, an operating system that *is* an image — built, signed, scanned, and promoted like
 every other image they ship — is worth more than a bespoke mechanism, however good.
+
+## Where a node's configuration comes from
+
+Sources are tried in order, most specific first, and the first one that answers wins:
+
+| Source | For |
+|---|---|
+| `/etc/corium/config.yaml` | An operator's answer for this machine |
+| cloud-init | Every cloud and hypervisor: NoCloud, ConfigDrive, EC2, Azure, GCE, OpenStack, Hetzner, VMware |
+| `corium.config=` on the kernel command line | PXE and netboot, where the command line is all you control |
+| `/usr/share/corium/config.yaml` | A default baked into a derived image |
+
+A source that fails for any reason other than being absent stops the search. An unreachable
+config URL means your intent is unknown, and falling through to a baked-in default is how a
+node silently joins the wrong cluster.
+
+## Installable artefacts
+
+`make artefacts` produces, via `bootc-image-builder`:
+
+| Artefact | For |
+|---|---|
+| `qcow2` | Proxmox, KVM, libvirt |
+| `raw` | Bare metal, and most clouds' import paths |
+| `anaconda-iso` | Interactive or kickstarted bare-metal installs |
 
 ## Documentation
 
