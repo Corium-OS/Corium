@@ -1,0 +1,47 @@
+#cloud-config
+#
+# Second and third controllers of a highly available cluster.
+#
+# Identical to the first controller except for the join block. Everything under
+# `ha:` must match the other controllers exactly -- it is a shared agreement
+# about who owns the virtual IP, and a disagreement means two controllers
+# claiming the same address.
+#
+# Mint the token on the first controller:
+#
+#   k0s token create --role=controller --expiry=1h
+#
+# Treat it as a cluster-admin credential: whoever holds an unexpired controller
+# token can join a full control-plane member. Prefer a short expiry and a secret
+# store over embedding it here.
+
+corium:
+  role: controller
+
+  cluster:
+    name: prod
+    endpoint: 192.168.0.200
+
+  ha:
+    enabled: true
+    virtualIP: 192.168.0.200/24
+    virtualRouterID: 51
+    authPass: vrrp-pw1
+    unicastPeers:
+      - 192.168.0.200
+      - 192.168.0.202
+
+  storage:
+    type: etcd
+
+  join:
+    # k0s hands this node the cluster CA over its join API on port 9443, so no
+    # certificate material has to travel in this file.
+    tokenFrom:
+      url: https://secrets.example.com/corium/controller-token
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com

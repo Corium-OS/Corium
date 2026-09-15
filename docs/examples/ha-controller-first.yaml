@@ -1,0 +1,46 @@
+#cloud-config
+#
+# First controller of a highly available cluster.
+#
+# This node bootstraps the control plane: it generates the cluster CA and forms
+# a single-member etcd cluster. Controllers two and three join it with a token.
+#
+# Note what is NOT in this file: no certificates, no CA, no PKI of any kind.
+# k0s generates the CA here and hands it to joining controllers over its join
+# API. The only shared secrets are the VRRP password below and the join token,
+# both of which are short strings rather than key material.
+
+corium:
+  role: controller
+
+  cluster:
+    name: prod
+    # The virtual IP, not this node's own address. Clients and joining nodes
+    # must use an address that survives losing any one controller, and this
+    # value ends up in the API server certificate.
+    endpoint: 192.168.0.200
+
+  ha:
+    enabled: true
+    virtualIP: 192.168.0.200/24
+    # Must be unique within the broadcast domain: two clusters sharing an ID on
+    # the same segment will interfere with each other's elections.
+    virtualRouterID: 51
+    # Identical on every controller. Keepalived uses only the first eight
+    # characters, so Corium rejects anything longer rather than letting two
+    # nodes disagree about a password they both think they set.
+    authPass: vrrp-pw1
+    # Required on any network that does not carry multicast, which is most
+    # clouds. Harmless on a flat L2 network.
+    unicastPeers:
+      - 192.168.0.201
+      - 192.168.0.202
+
+  storage:
+    type: etcd
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com

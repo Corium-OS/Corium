@@ -1,0 +1,44 @@
+#cloud-config
+#
+# First controller of a highly available cluster.
+# It bootstraps the control plane; further controllers and workers join with a token.
+
+corium:
+  role: controller
+
+  cluster:
+    name: prod
+    # Address that other nodes and kubectl use to reach the control plane.
+    # Typically a load balancer or a VIP in front of the controllers.
+    endpoint: k8s.example.com
+    # Extra names to include in the API server certificate.
+    subjectAltNames:
+      - 10.0.0.10
+      - k8s-internal.example.com
+
+  network:
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+    cni: kuberouter
+
+  storage:
+    type: etcd
+
+  # Add-ons are rendered into the k0s Helm extensions block and installed at bootstrap.
+  addons:
+    - name: cert-manager
+      chart: jetstack/cert-manager
+      version: 1.16.2
+      namespace: cert-manager
+      repository:
+        name: jetstack
+        url: https://charts.jetstack.io
+      values:
+        crds:
+          enabled: true
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

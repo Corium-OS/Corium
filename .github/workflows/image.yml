@@ -1,0 +1,153 @@
+# Build the OS image, and publish it from main and tags.
+name: Image
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - build/**
+      - cmd/**
+      - internal/**
+      - go.mod
+      - go.sum
+      - .github/workflows/image.yml
+  push:
+    branches: [main]
+    tags: ["v*"]
+  # Base images get security updates that this image should pick up even when
+  # nothing here changes.
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: corium-os/corium
+
+jobs:
+  build:
+    name: Build and publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing: cosign exchanges this token for a short-lived
+      # certificate, so there is no private key to store or rotate.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Work out whether this build gets published
+        id: plan
+        run: |
+          # Pull requests build but never publish: a PR from a fork must not be
+          # able to push an image that nodes would later pull.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build
+        id: build
+        run: |
+          # bootc container lint runs inside the build with --fatal-warnings,
+          # so a warning fails this step rather than scrolling past.
+          podman build \
+            --build-arg VERSION="${{ steps.plan.outputs.version }}" \
+            --build-arg COMMIT="${GITHUB_SHA::7}" \
+            --tag "localhost/corium:ci" \
+            --file Containerfile .
+
+      - name: Inspect what was produced
+        run: |
+          podman run --rm localhost/corium:ci k0s version
+          podman run --rm localhost/corium:ci corium-agent version
+          # The image must declare a root filesystem, or nothing can install it.
+          podman run --rm localhost/corium:ci \
+            bootc install print-configuration | grep -q '"root-fs-type"'
+          echo "image size: $(podman images --format '{{.Size}}' localhost/corium:ci)"
+
+      - name: Verify the pinned k0s version matches the lock file
+        run: |
+          # shellcheck disable=SC1091
+          . build/k0s.lock
+          actual="$(podman run --rm localhost/corium:ci k0s version)"
+          if [ "${actual}" != "${K0S_VERSION}" ]; then
+            echo "image ships k0s ${actual} but build/k0s.lock pins ${K0S_VERSION}" >&2
+            exit 1
+          fi
+          echo "k0s ${actual} matches the lock file"
+
+      - name: Log in to the registry
+        if: steps.plan.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: steps.plan.outputs.publish == 'true'
+        id: push
+        run: |
+          image="${REGISTRY}/${IMAGE_NAME}"
+          tags="${{ steps.plan.outputs.version }}"
+
+          # A tagged release is also what :latest points at.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tags="${tags} latest"
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            tags="${tags} main"
+          fi
+
+          for tag in ${tags}; do
+            podman tag localhost/corium:ci "${image}:${tag}"
+            podman push "${image}:${tag}"
+            echo "pushed ${image}:${tag}"
+          done
+
+          # Sign by digest, not by tag: tags move, digests do not, and a
+          # signature attached to a tag says nothing about what it points at now.
+          digest="$(podman inspect --format '{{index .RepoDigests 0}}' "${image}:${{ steps.plan.outputs.version }}")"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install cosign
+        if: steps.plan.outputs.publish == 'true'
+        # Pinned to an exact version rather than a floating major tag. This
+        # action is what signs the images nodes will trust, so it gets a
+        # narrower pin than the rest -- and cosign-installer publishes no v4
+        # tag anyway, only full versions.
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign the image
+        if: steps.plan.outputs.publish == 'true'
+        run: |
+          cosign sign --yes "${{ steps.push.outputs.digest }}"
+          echo "signed ${{ steps.push.outputs.digest }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${{ steps.plan.outputs.version }}\` |"
+            echo "| Published | ${{ steps.plan.outputs.publish }} |"
+            if [ "${{ steps.plan.outputs.publish }}" = "true" ]; then
+              echo "| Digest | \`${{ steps.push.outputs.digest }}\` |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

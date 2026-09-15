@@ -1,0 +1,29 @@
+# Build artefacts
+/bin/
+/out/
+/output/
+*.qcow2
+*.raw
+*.iso
+*.img
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Local overrides
+.env
+*.local.yaml
+
+# Secrets — never commit these
+*.token
+kubeconfig
+*.pem
+*.key
+!testdata/**/*.key
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

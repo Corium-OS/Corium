@@ -1,0 +1,43 @@
+#cloud-config
+#
+# Demonstrates the escape hatches. The `corium:` block covers the common path;
+# when it does not, you drop to the underlying primitives without leaving the
+# same document, and without Corium getting in the way.
+
+corium:
+  role: controller+worker
+
+  cluster:
+    name: lab
+    endpoint: 10.0.0.10
+
+  network:
+    # Corium installs no CNI; you bring your own.
+    cni: custom
+
+  # Escape hatch 1 — a strategic merge patch applied verbatim to the rendered
+  # k0s.yaml, after Corium is done with it. Anything expressible in k0s is
+  # reachable here, including fields Corium knows nothing about.
+  k0s:
+    patch:
+      spec:
+        api:
+          extraArgs:
+            audit-log-path: /var/log/kubernetes/audit.log
+        workerProfiles:
+          - name: default
+            values:
+              maxPods: 150
+
+# Escape hatch 2 — raw cloud-init. Corium never claims exclusive ownership of
+# the cloud-config document; all standard modules keep working.
+write_files:
+  - path: /etc/corium/cilium-values.yaml
+    permissions: '0644'
+    content: |
+      kubeProxyReplacement: true
+      k8sServiceHost: 10.0.0.10
+      k8sServicePort: 6443
+
+runcmd:
+  - [ systemctl, enable, --now, node-problem-detector.service ]

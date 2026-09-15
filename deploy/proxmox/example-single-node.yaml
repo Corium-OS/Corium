@@ -1,0 +1,17 @@
+#cloud-config
+# Corium test node on Proxmox: a complete single-node Kubernetes cluster.
+
+corium:
+  role: single
+  cluster:
+    name: homelab
+
+users:
+  - name: core
+    groups: [wheel]
+    sudo: 'ALL=(ALL) NOPASSWD:ALL'
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com
+
+ssh_pwauth: false

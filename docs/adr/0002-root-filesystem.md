@@ -1,0 +1,45 @@
+# 2. Use ext4 for the root filesystem
+
+Status: accepted
+
+## Context
+
+`fedora-bootc` ships an empty `/usr/lib/bootc/install/`, so the root filesystem
+type is undecided. Every tool that installs the image needs it:
+`bootc-image-builder` fails with `missing required info: DefaultRootFs`.
+
+xfs was the first choice — it is what the CoreOS and RHEL lineage use for
+container hosts, it handles the many-small-files pattern of an overlay image
+store well, and it grows online.
+
+Building the image with xfs failed on the target host:
+
+```
+XFS (loop0p4): Superblock has unknown incompatible features (0xc0) enabled.
+XFS (loop0p4): Filesystem cannot be safely mounted by this kernel.
+```
+
+`xfsprogs` on Fedora 44 creates filesystems using features that kernels older
+than 6.10 refuse to mount. `bootc-image-builder` mounts the root filesystem on
+the *build host* to populate it, so the build fails there — Proxmox 8 runs
+Debian 12 with kernel 6.8.
+
+Note what this is not: the resulting disk would have booted correctly, since
+the VM runs a current Fedora kernel. The image simply could not be produced.
+
+## Decision
+
+Declare `root-fs-type = "ext4"` in `/usr/lib/bootc/install/00-corium.toml`.
+
+The type is declared in the image rather than passed as `--rootfs` on the build
+command line, so the image stays self-describing and every installer agrees
+without being told.
+
+## Consequences
+
+The image builds on any host with a kernel in service, which includes the
+homelab Proxmox and CI runners people actually have. ext4 grows online with
+`resize2fs`, so resizing a node's disk still works.
+
+For a Kubernetes node, the practical difference between ext4 and xfs does not
+justify restricting who can build the image.

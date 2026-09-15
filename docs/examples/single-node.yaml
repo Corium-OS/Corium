@@ -1,0 +1,13 @@
+#cloud-config
+#
+# The smallest useful Corium node: a complete single-node Kubernetes cluster.
+# Everything below except `role` has a sensible default.
+
+corium:
+  role: single
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

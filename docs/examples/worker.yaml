@@ -1,0 +1,33 @@
+#cloud-config
+#
+# A worker joining an existing cluster.
+#
+# The join token is a secret. Prefer fetching it at boot from a metadata service
+# or a secret store over embedding it in an image or a seed ISO.
+
+corium:
+  role: worker
+
+  join:
+    # Either an inline token:
+    #   token: <k0s join token>
+    # or a reference resolved at first boot:
+    tokenFrom:
+      url: https://secrets.example.com/corium/worker-token
+      # Optional bearer token read from a file placed by write_files.
+      authFile: /etc/corium/join-auth
+
+  node:
+    labels:
+      topology.kubernetes.io/zone: eu-west-1a
+      node.corium.io/pool: general
+    taints:
+      - key: dedicated
+        value: gpu
+        effect: NoSchedule
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

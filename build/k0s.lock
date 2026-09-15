@@ -1,0 +1,12 @@
+# Pinned k0s release.
+#
+# The checksums live in git, not alongside the download. A checksum fetched from
+# the same place as the artefact protects against corruption, not against a
+# compromised release — this file is the trust anchor and changing it is a
+# reviewable event.
+#
+# Refresh with: make k0s-lock K0S_VERSION=vX.Y.Z+k0s.N
+
+K0S_VERSION=v1.36.4+k0s.0
+K0S_SHA256_amd64=ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f
+K0S_SHA256_arm64=6301f64d98f9e4f6fbc2892bc66d137bb4ad5840685300772d8391614d47b8aa
