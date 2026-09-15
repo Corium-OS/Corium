@@ -70,7 +70,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		socat \
 		ethtool \
 	&& dnf clean all \
-	&& rm -rf /var/cache/dnf /var/lib/dnf/history.sqlite*
+	&& rm -rf /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
 
 # --- k0s -------------------------------------------------------------------
 #
@@ -95,22 +95,28 @@ COPY build/files/etc /etc
 #
 # Enabled at build time so the preset is baked into the image rather than
 # written to /etc on a running system.
-RUN systemctl enable corium-bootstrap.service \
-	&& systemctl enable cloud-init.service \
-	&& systemctl enable cloud-init-local.service \
-	&& systemctl enable cloud-config.service \
-	&& systemctl enable cloud-final.service
+# cloud-init's own units are deliberately not enabled here. The package preset
+# already enables them, and their names are not stable across releases:
+# cloud-init 26.1 on Fedora 44 has no cloud-init.service at all, having split it
+# into cloud-init-main.service and cloud-init-network.service. Enabling them by
+# name buys nothing and breaks on upgrade.
+RUN systemctl enable corium-bootstrap.service
 
 # The image decides when it updates; it does not update itself behind the
 # operator's back. Upgrades are an explicit, orchestrated, drain-aware act.
 RUN systemctl mask bootc-fetch-apply-updates.timer
 
-# --- State -----------------------------------------------------------------
+# State directories are declared in /usr/lib/tmpfiles.d/corium.conf rather than
+# created here; see that file for why.
+
+# /run and /tmp are runtime-only: whatever the build left there is never read,
+# because both are fresh tmpfs mounts on a booted system. Shipping their
+# contents just makes the image bigger and the lint noisier.
 #
-# /var is persistent machine state and is only seeded at install time. These
-# directories exist so first boot does not have to guess at ownership and mode.
-RUN mkdir -p /var/lib/k0s /var/lib/corium \
-	&& chmod 0700 /var/lib/k0s /var/lib/corium
+# Named explicitly rather than globbed: podman bind-mounts its own paths under
+# /run during the build (resolv.conf among them), and a wildcard trips over
+# them. If a future package leaves something else behind, the lint will say so.
+RUN rm -rf /run/cloud-init /run/corium-build /run/dnf /tmp/* /var/tmp/*
 
 # Validate the result against bootc's expectations for a bootable image.
 RUN bootc container lint
