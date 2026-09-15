@@ -5,10 +5,13 @@
 # Run on the Proxmox node. Creates three VMs, brings up the first so it can form
 # the cluster, then joins the other two with a token it mints from the first.
 #
-# The ordering is the whole point of this script. A k0s cluster has no
-# pre-shared secret: the first controller generates the CA, and only then can it
-# issue a join token. There is no way to start all three at once, so the
-# sequencing has to live somewhere -- here, rather than in a runbook.
+# A k0s cluster has no pre-shared secret: the first controller generates the CA,
+# and only then can it issue a join token.
+#
+# The joining controllers no longer have to wait for that in a script, though.
+# They are configured with join.tokenFrom.waitFor, so they boot immediately,
+# find no token, and wait for one to appear. All three machines start together;
+# this script only has to deliver the token once it exists.
 set -euo pipefail
 
 DISK_IMAGE="${DISK_IMAGE:?set DISK_IMAGE (path to the qcow2)}"
@@ -47,9 +50,9 @@ DISK_SIZE="${DISK_SIZE:-32G}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# write_config <index> <output path> [join token]
+# write_config <index> <output path>
 write_config() {
-	local index="$1" out="$2" token="${3:-}"
+	local index="$1" out="$2"
 
 	cat > "${out}" <<EOF
 #cloud-config
@@ -72,11 +75,15 @@ corium:
     type: etcd
 EOF
 
-	if [[ -n "${token}" ]]; then
+	if [[ "${index}" -gt 0 ]]; then
+		# A path rather than the token itself: the node waits for this file to
+		# appear instead of needing it at boot.
 		cat >> "${out}" <<EOF
 
   join:
-    token: '${token}'
+    tokenFrom:
+      file: /etc/corium/join-token
+      waitFor: 20m
 EOF
 	fi
 
@@ -95,11 +102,11 @@ EOF
 }
 
 create_vm() {
-	local index="$1" token="${2:-}"
+	local index="$1"
 	local vmid="${VMIDS[$index]}" ip="${NODE_IPS[$index]}"
 	local config="/tmp/corium-ha-${vmid}.yaml"
 
-	write_config "${index}" "${config}" "${token}"
+	write_config "${index}" "${config}"
 
 	if qm status "${vmid}" &>/dev/null; then
 		qm stop "${vmid}" 2>/dev/null || true
@@ -129,11 +136,17 @@ wait_for_ping() {
 	return 1
 }
 
-echo "==> creating the first controller; it generates the CA and forms etcd"
-create_vm 0
-wait_for_ping "${NODE_IPS[0]}"
+echo "==> starting all three controllers at once"
+for index in 0 1 2; do
+	create_vm "${index}"
+done
+
+for ip in "${NODE_IPS[@]}"; do
+	wait_for_ping "${ip}"
+done
 
 echo "==> waiting for the first controller to serve the API"
+echo "    (the other two are already up, waiting for their token)"
 ssh -o StrictHostKeyChecking=no -o BatchMode=yes "core@${NODE_IPS[0]}" \
 	'for i in $(seq 1 120); do sudo k0s kubectl get --raw /readyz >/dev/null 2>&1 && exit 0; sleep 5; done; exit 1'
 
@@ -143,10 +156,13 @@ echo "==> minting a controller join token"
 token="$(ssh -o StrictHostKeyChecking=no -o BatchMode=yes "core@${NODE_IPS[0]}" \
 	'sudo k0s token create --role=controller --expiry=1h' | tail -1 | tr -d '\n')"
 
+echo "==> delivering it; the waiting controllers pick it up on their own"
 for index in 1 2; do
-	echo "==> joining controller $((index + 1))"
-	create_vm "${index}" "${token}"
-	wait_for_ping "${NODE_IPS[$index]}"
+	ssh -o StrictHostKeyChecking=no -o BatchMode=yes "core@${NODE_IPS[$index]}" \
+		"sudo install -d -m 0700 /etc/corium && \
+		 printf '%s' '${token}' | sudo tee /etc/corium/join-token >/dev/null && \
+		 sudo chmod 0600 /etc/corium/join-token"
+	echo "delivered to ${NODE_IPS[$index]}"
 done
 
 echo

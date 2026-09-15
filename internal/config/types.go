@@ -204,6 +204,19 @@ type SecretSource struct {
 	// AuthFile contains a bearer token presented when fetching URL. Its
 	// contents are never logged.
 	AuthFile string `yaml:"authFile,omitempty" json:"authFile,omitempty"`
+
+	// WaitFor keeps retrying until the secret appears, for at most this long.
+	// A Go duration such as "15m". Empty means do not wait.
+	//
+	// This is what lets a whole cluster start at once. A joining node can boot
+	// before the node that mints its token has finished bootstrapping, wait,
+	// and join when the token shows up -- instead of failing and needing an
+	// operator to sequence the machines by hand.
+	//
+	// Waiting applies only while the secret is absent. A rejected credential
+	// fails immediately, because retrying a wrong password for fifteen minutes
+	// helps nobody and hides the mistake.
+	WaitFor string `yaml:"waitFor,omitempty" json:"waitFor,omitempty"`
 }
 
 // Node carries kubelet-level attributes for this machine.

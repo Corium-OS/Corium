@@ -40,6 +40,16 @@ corium:
     tokenFrom:
       url: https://secrets.example.com/corium/controller-token
 
+      # Wait for the token instead of failing if it is not there yet.
+      #
+      # This is what lets all three controllers start at once. The first one
+      # generates the cluster CA and publishes a token; these two boot at the
+      # same time, find nothing, and wait until it appears. Without it they
+      # would have to be started in order, by hand or by a script.
+      #
+      # Only absence is waited out. A rejected credential fails immediately.
+      waitFor: 15m
+
 users:
   - name: core
     groups: [wheel]

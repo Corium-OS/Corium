@@ -85,6 +85,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 |---|---|---|
 | Inline token | `join.token` | |
 | Token from a URL or file | `join.tokenFrom` | HTTPS only |
+| Waiting for a token to appear | `join.tokenFrom.waitFor` | Lets every node start at once instead of in sequence |
 | Bearer auth for that URL | `join.tokenFrom.authFile` | |
 
 ### Add-ons

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Validate checks the configuration and returns every problem it finds, joined
@@ -170,6 +171,22 @@ func (t *SecretSource) validate() []error {
 			"join.tokenFrom.file: must be an absolute path, got %q", t.File))
 	}
 
+	if t.WaitFor != "" {
+		switch d, err := time.ParseDuration(t.WaitFor); {
+		case err != nil:
+			problems = append(problems, fmt.Errorf(
+				"waitFor: %q is not a duration; use a form like 15m or 1h", t.WaitFor))
+		case d < 0:
+			problems = append(problems, fmt.Errorf(
+				"waitFor: %q is negative", t.WaitFor))
+		case d > maxWaitFor:
+			// A node stuck waiting is a node nobody is looking at. An hour is
+			// already generous for "the first controller is still coming up".
+			problems = append(problems, fmt.Errorf(
+				"waitFor: %q is longer than the %s maximum", t.WaitFor, maxWaitFor))
+		}
+	}
+
 	return problems
 }
 
@@ -262,6 +279,9 @@ func (c *Config) validateAddons() []error {
 // actually uses. Longer values are silently truncated, which is how two
 // controllers end up disagreeing about a password they both believe they set.
 const keepalivedAuthPassLimit = 8
+
+// maxWaitFor bounds how long a node will wait for a secret to appear.
+const maxWaitFor = time.Hour
 
 func (c *Config) validateHA() []error {
 	if !c.HA.Enabled {
