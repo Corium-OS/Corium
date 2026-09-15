@@ -207,6 +207,11 @@ type K0s struct {
 	Patch map[string]any `yaml:"patch,omitempty" json:"patch,omitempty"`
 }
 
+// Required reports whether a join token has been configured by any means.
+func (j Join) Required() bool {
+	return j.Token != "" || j.TokenFrom != nil
+}
+
 // IsController reports whether the role runs a control plane.
 func (r Role) IsController() bool {
 	return r == RoleSingle || r == RoleController || r == RoleControllerWorker

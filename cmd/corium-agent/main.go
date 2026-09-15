@@ -18,6 +18,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/qjoly/corium/internal/bootstrap"
+	"github.com/qjoly/corium/internal/config"
 )
 
 // Build metadata, injected at link time.
@@ -25,11 +28,6 @@ var (
 	version = "dev"
 	commit  = "unknown"
 )
-
-// errNotImplemented marks the parts of the agent that are still stubs. It is a
-// real error rather than a silent success so that a half-built agent fails a
-// node's bootstrap loudly instead of leaving it apparently healthy and empty.
-var errNotImplemented = errors.New("not implemented")
 
 const usage = `corium-agent %s (%s)
 
@@ -89,7 +87,7 @@ func run() error {
 }
 
 // bootstrapCommand configures the node and starts k0s.
-func bootstrapCommand(_ context.Context, args []string) error {
+func bootstrapCommand(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	configPath := fs.String("config", defaultCloudConfigPath,
 		"path to the merged cloud-config document rendered by cloud-init")
@@ -105,7 +103,10 @@ func bootstrapCommand(_ context.Context, args []string) error {
 		"config", *configPath,
 		"dryRun", *dryRun)
 
-	return fmt.Errorf("bootstrap: %w", errNotImplemented)
+	return bootstrap.Run(ctx, bootstrap.Options{
+		ConfigPath: *configPath,
+		DryRun:     *dryRun,
+	})
 }
 
 // validateCommand parses and validates a configuration without applying it.
@@ -123,7 +124,20 @@ func validateCommand(_ context.Context, args []string) error {
 		return errors.New("validate: expected exactly one file argument")
 	}
 
-	return fmt.Errorf("validate: %w", errNotImplemented)
+	path := fs.Arg(0)
+
+	cfg, err := config.ParseFile(path)
+	if err != nil {
+		return err
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("%s is not valid:\n%w", path, err)
+	}
+
+	fmt.Printf("%s: valid (role %s, cluster %s)\n", path, cfg.Role, cfg.Cluster.Name)
+
+	return nil
 }
 
 // defaultCloudConfigPath is where cloud-init writes the fully merged
