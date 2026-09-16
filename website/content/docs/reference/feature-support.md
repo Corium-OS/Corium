@@ -124,7 +124,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Filesystem | `raid[].filesystem` | `ext4` (default), `xfs`, or `none` for a raw device |
 | Mount and persist | `raid[].mountPoint` | Written to `/etc/fstab` by UUID |
 | Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
-| Root filesystem on RAID | — | Install-time only, via Kickstart. Not declarable: see [software RAID](/docs/guides/raid/) |
+| Root filesystem on RAID | — | Works, but install-time only: hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](/docs/guides/raid/) |
 
 ### Where configuration comes from
 

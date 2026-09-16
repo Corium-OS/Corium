@@ -34,8 +34,7 @@ to be arranged by whatever laid the disk down, which means the installer.
 before k0s is installed.
 
 A RAID root filesystem is documented as an install-time Kickstart procedure,
-with its current upstream breakage stated plainly, and is not supported by
-Corium.
+verified on hardware, and is not modelled in the schema.
 
 ## Why spare-disk RAID earns its place
 
@@ -56,27 +55,32 @@ things make that worse than a field:
 - **Idempotency.** A second bootstrap adopts an existing array rather than
   rebuilding it, and rewrites its own fstab line rather than appending another.
 
-## Why a RAID root is not supported
+## Why a RAID root is not a schema field
 
-Not a philosophical position — the upstream pieces do not currently hold
-together on bootc:
+Not because it does not work. It does: a bootc install onto RAID1 `/` and
+RAID1 `/boot` was verified on a two-disk machine, including detaching the first
+disk and booting from the second, with the arrays degraded and serving.
 
-- Anaconda permits `/boot/efi` on RAID1 with metadata 1.0, but `bootupd` derives
-  the ESP partition number from `/sys/class/block/<name>/partition`, which an md
-  device does not have. The install fails at `bootupctl backend install`
-  ([bootc#947](https://github.com/bootc-dev/bootc/discussions/947), open and
-  unanswered since December 2024).
-- The recommended alternative — one independent ESP per disk — leaves the
-  secondary ESP without `grub.cfg`, so the spare disk boots to a GRUB rescue
-  shell ([bootupd#1076](https://github.com/coreos/bootupd/issues/1076), open,
-  fix unmerged).
-- There is no published success report for a bootc install onto an mdraid root,
-  and no Anaconda or kickstart test covering `raid /` with `ostreecontainer`.
+It is not a field because a field would be a lie about *when* the decision is
+taken. The `corium:` block is read by `corium-agent` at first boot, by which
+point the root filesystem is deployed, mounted, and running the process reading
+the block. There is nothing a field could do at that moment.
 
-Fedora CoreOS solves this declaratively with Ignition's `boot_device.mirror`,
-which builds the array in the initramfs and replicates `/boot` per disk. bootc
-has no equivalent. Modelling a field for something that does not work would be
-worse than the documentation, because a field implies it has been made to work.
+Three things additionally have to be done by hand at install time, none of which
+Anaconda does for you, and all of which are documented in `docs/raid.md`:
+
+1. Build a second ESP on the mirror disk and register it with the firmware.
+   Anaconda creates one ESP and warns that a drive failure will make the system
+   unbootable; it is right.
+2. Do that in `%post` using disk-level tools only — `%post` writes into the
+   deployment's `/etc` and `/var` do not survive a bootc install.
+3. Add `nofail` to the `/boot/efi` line in `/etc/fstab`. Without it the mount is
+   `RequiredBy=local-fs.target`, so losing the first disk drops the machine into
+   emergency mode with perfectly healthy mirrored filesystems.
+
+Fedora CoreOS collapses all three into Ignition's `boot_device.mirror`, which
+builds the array in the initramfs and replicates `/boot` per disk. bootc has no
+equivalent. Until it does, this belongs in a procedure, not a field.
 
 ## Consequences
 
@@ -96,7 +100,17 @@ should be revisited; the schema has room for it.
 key. Rejected: it leaves the ordering problem unsolved, and the ordering problem
 is the one that silently corrupts a node.
 
-**Support a RAID root via Kickstart as a product feature.** Rejected on the
-evidence above. It would mean shipping an install path whose bootloader step is
-known to fail, and whose redundancy is not verifiable without physically pulling
-a disk.
+**Support a RAID root via Kickstart as a product feature.** Rejected for now,
+but on narrower grounds than "it does not work". It does work, and the procedure
+is documented. What it is not is *declarative*: it needs a hand-written
+kickstart, a `%post` block, and a post-install `fstab` edit, and it applies only
+to the ISO path. Wrapping that in a Corium field would promise a uniformity the
+install paths do not have.
+
+`bootc-generic-growpart.service` also fails permanently on an md root — it reads
+`/sys/class/block/<name>/partition`, which an md device lacks. Harmless, but it
+leaves every such node reporting `degraded`, which is a poor thing to ship as a
+supported configuration.
+
+If bootc grows a declarative equivalent of `boot_device.mirror`, revisit both
+this and the decision above.

@@ -154,11 +154,15 @@ This is an install-time decision, taken from the ISO. It is not available on the
 qcow2 or cloud-image paths, because those ship a disk layout that is already
 decided.
 
-> **Corium does not support this yet, and the reason is upstream.** The
-> kickstart below is the correct shape, and the pieces it needs are in the
-> image, but the bootloader installation step is known to fail on bootc with
-> exactly this layout. Read [what is broken](#what-is-broken) before spending
-> an afternoon on it.
+> **This works. It was verified end to end on a two-disk machine, including
+> pulling the first disk and booting from the second.** It is not something
+> Corium models in the `corium:` block, because by the time that block is read
+> the root filesystem is already mounted — but the procedure below is tested,
+> not inferred.
+>
+> Anaconda will not give you a redundant boot on its own. Three manual steps
+> below are what make the difference between a mirrored filesystem and a
+> machine that survives losing a disk.
 
 ### What is already in place
 
@@ -215,18 +219,19 @@ zerombr
 clearpart --all --initlabel --disklabel=gpt
 ignoredisk --only-use=sda,sdb
 
-# One independent ESP per disk. Deliberately not a RAID1 array: see above.
+# One ESP, on the first disk. The second one is built in %post, because
+# Anaconda has no kickstart idiom for an unmounted ESP.
 part /boot/efi --fstype=efi --size=600 --ondisk=sda
-part none      --fstype=efi --size=600 --ondisk=sdb
 
 # /boot mirrored, metadata 1.2, members are partitions.
-part raid.11 --size=1024 --ondisk=sda --fstype=mdmember
-part raid.12 --size=1024 --ondisk=sdb --fstype=mdmember
+part raid.11 --size=2048 --ondisk=sda --fstype=mdmember
+part raid.12 --size=2048 --ondisk=sdb --fstype=mdmember
 raid /boot --level=RAID1 --device=boot --fstype=ext4 raid.11 raid.12
 
-# Root mirrored.
-part raid.21 --size=1 --grow --ondisk=sda --fstype=mdmember
-part raid.22 --size=1 --grow --ondisk=sdb --fstype=mdmember
+# Root mirrored. Sized rather than grown, so space is left at the end of the
+# second disk for the ESP that %post creates there.
+part raid.21 --size=16384 --ondisk=sda --fstype=mdmember
+part raid.22 --size=16384 --ondisk=sdb --fstype=mdmember
 raid / --level=RAID1 --device=root --fstype=ext4 raid.21 raid.22
 
 lang en_US.UTF-8
@@ -241,23 +246,121 @@ Note `--fstype=mdmember` on the members, which Anaconda requires, and
 `--device=<name>` rather than `--device=md0`: it is a name, not a device node.
 There is no `--metadata` option; blivet picks it.
 
-### What is broken
+### The three steps Anaconda leaves to you
 
-None of this is theoretical, and none of it is Corium's to fix:
+An install with the kickstart above boots fine — and then does **not** survive
+losing the first disk. Each of these was found by pulling the disk and watching
+what happened.
 
-| Problem | Where | Status |
+**1. Build a second ESP and register it.** Anaconda creates one ESP, on the
+first disk. It says so itself during the install:
+
+```
+boot loader stage2 device boot is on a multi-disk array, but boot loader
+stage1 device sda1 is not. A drive failure in boot could render the system
+unbootable.
+```
+
+It means it. Without a second ESP the firmware reports
+`No bootable option or device was found` and stops.
+
+There is no kickstart idiom for a second, unmounted ESP — `part none
+--fstype=efi` is taken literally as a mount point called `none`, and the install
+dies binding `/mnt/sysimagenone`. So leave room on the second disk by sizing the
+last RAID member instead of growing it, and build the ESP in `%post`:
+
+```bash
+%post --nochroot
+sgdisk --new=3:0:+600M --typecode=3:EF00 /dev/sdb
+partprobe /dev/sdb; sleep 2
+mkfs.vfat -F32 /dev/sdb3
+mkdir -p /tmp/esp2 && mount /dev/sdb3 /tmp/esp2
+cp -a /mnt/sysimage/boot/efi/. /tmp/esp2/
+sync; umount /tmp/esp2
+efibootmgr --create --disk /dev/sdb --part 3 \
+  --label "Fedora (mirror)" --loader '\EFI\fedora\shimx64.efi'
+%end
+```
+
+**2. Do the rest outside `%post`.** On a bootc install, `%post` writes into
+`/mnt/sysimage/etc` and `/mnt/sysimage/var` **do not survive**. Disk-level work
+does, which is why the block above is only `sgdisk`, `mkfs` and `efibootmgr`. A
+`sudoers` drop-in and a log file written the same way both vanished silently.
+
+**3. Add `nofail` to `/boot/efi` in `/etc/fstab`.** This is the step that is easy
+to miss, because the machine boots perfectly until the day the first disk dies —
+and then lands in emergency mode with healthy, mounted, mirrored filesystems.
+The reason:
+
+```
+$ systemctl show boot-efi.mount -p RequiredBy -p WantedBy
+RequiredBy=local-fs.target
+WantedBy=
+```
+
+fstab mounts `/boot/efi` by the UUID of the *first* disk's ESP. Lose that disk
+and the mount fails; because it is `RequiredBy` rather than `WantedBy`,
+`local-fs.target` fails with it and systemd drops to emergency mode. Adding
+`nofail` flips it:
+
+```
+RequiredBy=
+WantedBy=local-fs.target
+```
+
+`/etc` is persistent and three-way merged on bootc, so this edit survives image
+upgrades.
+
+### Verified
+
+With all three in place, the first disk detached, and the machine booted from
+the second alone:
+
+```
+md126 : active raid1 sda2[1]
+      2094080 blocks super 1.2 [2/1] [_U]     → /boot
+md127 : active raid1 sda1[1]
+      16759808 blocks super 1.2 [2/1] [_U]    → /sysroot
+
+$ systemctl is-system-running
+degraded
+$ findmnt /boot/efi
+(not mounted — its disk is gone)
+```
+
+The node came up, took SSH, and `bootc status` still answered. Arrays degraded
+and serving, which is what a mirror is for.
+
+### Rough edges that remain
+
+- **`bootc-generic-growpart.service` fails on every boot.** It derives the
+  partition from `/sys/class/block/<name>/partition`, which an md device does
+  not have: `cat: /sys/class/block/md126/partition: No such file or
+  directory`. Not fatal — the unit fails, the system reports `degraded`, and
+  everything else works — but it is the same assumption that breaks `bootupd`
+  when the ESP itself is on RAID ([bootc#947](https://github.com/bootc-dev/bootc/discussions/947)).
+  Size the root array explicitly rather than relying on it to grow.
+- **After a failure, `/boot/efi` is not mounted.** The surviving ESP is there
+  and the machine boots from it, but fstab still names the dead one. Repoint it
+  before the next `bootc upgrade`, or bootloader updates have nowhere to go.
+- **ESP synchronisation on update was not tested here.** `bootupd` v0.2.28+
+  updates every ESP it finds ([bootupd#855](https://github.com/coreos/bootupd/pull/855),
+  and this image carries v0.2.35), but
+  [bootupd#1076](https://github.com/coreos/bootupd/issues/1076) — secondary
+  ESPs not receiving `grub.cfg` — is open. Re-verify by pulling a disk after
+  your first upgrade, not just after the install.
+
+### What does not apply
+
+These are often quoted together as though root-on-RAID were hopeless. Read them
+separately:
+
+| Problem | Where | Applies? |
 |---|---|---|
-| `bootupctl` fails on an mdraid ESP | [bootc#947](https://github.com/bootc-dev/bootc/discussions/947) | Open, unanswered since Dec 2024 |
-| Secondary ESPs never get `grub.cfg`, so the spare disk boots to a GRUB rescue shell | [bootupd#1076](https://github.com/coreos/bootupd/issues/1076) | Open, fix unmerged |
-| Installing across multiple parent devices | [bootc#1911](https://github.com/bootc-dev/bootc/pull/1911) | Merged Apr 2026; older bootc errors outright |
-| A custom kickstart's partitioning silently ignored | [bib#695](https://github.com/osbuild/bootc-image-builder/issues/695) | Closed |
-
-There is no published success report for a bootc install onto an mdraid root,
-and no Anaconda or kickstart test covering `raid /` together with
-`ostreecontainer`. If you try it, check `lsblk` and `/root/original-ks.cfg` on
-the installed system rather than assuming the `raid` lines were honoured — and
-verify redundancy by physically removing the first disk, which is the step that
-catches the stale-secondary-ESP problem.
+| `bootupctl` fails on an mdraid ESP | [bootc#947](https://github.com/bootc-dev/bootc/discussions/947) | **No.** That report put `/boot/efi` on RAID. The layout here deliberately does not |
+| Installing across multiple parent devices | [bootc#1911](https://github.com/bootc-dev/bootc/pull/1911) | **No.** Shipped since bootc v1.15.1; this image carries v1.16.10 |
+| Updating every ESP, not just the booted one | [bootupd#855](https://github.com/coreos/bootupd/pull/855) | **No.** Shipped in bootupd v0.2.28; this image carries v0.2.35 |
+| A custom kickstart's partitioning silently ignored | [bib#695](https://github.com/osbuild/bootc-image-builder/issues/695) | Not seen here, but check `lsblk` rather than assume |
 
 Fedora CoreOS solves this declaratively with Ignition's `boot_device.mirror`,
 which builds the array in the initramfs and replicates `/boot` per disk. bootc
