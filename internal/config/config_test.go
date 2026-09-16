@@ -476,3 +476,147 @@ func TestScheduleWithoutAutomaticIsRejected(t *testing.T) {
 		t.Errorf("Validate() = %v, want it to flag a schedule that does nothing", err)
 	}
 }
+
+func TestValidateRAID(t *testing.T) {
+	base := func(arrays ...RAIDArray) Config {
+		return Config{Role: RoleSingle, RAID: arrays}
+	}
+
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr string
+	}{
+		{
+			name:    "array without a name",
+			cfg:     base(RAIDArray{Level: 1, Devices: []string{"/dev/sdb", "/dev/sdc"}}),
+			wantErr: "raid[0].name: required",
+		},
+		{
+			name: "unsupported level",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 2, Devices: []string{"/dev/sdb", "/dev/sdc"},
+			}),
+			wantErr: "unsupported level 2",
+		},
+		{
+			// mdadm would refuse this too, but it would refuse it at first boot
+			// on a machine nobody is watching.
+			name: "too few devices for the level",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 5, Devices: []string{"/dev/sdb", "/dev/sdc"},
+			}),
+			wantErr: "RAID 5 needs at least 3 devices",
+		},
+		{
+			name: "a mirror needs two devices",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 1, Devices: []string{"/dev/sdb"},
+			}),
+			wantErr: "RAID 1 needs at least 2 devices",
+		},
+		{
+			// A spare that can never be rebuilt into the array is a safety
+			// margin someone thinks they have and does not.
+			name: "spare on a stripe",
+			cfg: base(RAIDArray{
+				Name: "scratch", Level: 0,
+				Devices: []string{"/dev/sdb", "/dev/sdc"},
+				Spares:  []string{"/dev/sdd"},
+			}),
+			wantErr: "RAID 0 has no redundancy",
+		},
+		{
+			name: "relative device path",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 1, Devices: []string{"sdb", "/dev/sdc"},
+			}),
+			wantErr: "must be an absolute device path",
+		},
+		{
+			// Building two arrays from one disk corrupts whichever is built
+			// second, and does it silently.
+			name: "device claimed by two arrays",
+			cfg: base(
+				RAIDArray{Name: "a", Level: 1, Devices: []string{"/dev/sdb", "/dev/sdc"}},
+				RAIDArray{Name: "b", Level: 1, Devices: []string{"/dev/sdc", "/dev/sdd"}},
+			),
+			wantErr: `"/dev/sdc" is already claimed by raid[0]`,
+		},
+		{
+			name: "duplicate array names",
+			cfg: base(
+				RAIDArray{Name: "data", Level: 1, Devices: []string{"/dev/sdb", "/dev/sdc"}},
+				RAIDArray{Name: "data", Level: 1, Devices: []string{"/dev/sdd", "/dev/sde"}},
+			),
+			wantErr: "is used by more than one array",
+		},
+		{
+			name: "unknown filesystem",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 1, Filesystem: "btrfs",
+				Devices: []string{"/dev/sdb", "/dev/sdc"},
+			}),
+			wantErr: `unknown value "btrfs"`,
+		},
+		{
+			// Mounting an unformatted array is a wait for something that is
+			// never going to appear.
+			name: "mount point on an unformatted array",
+			cfg: base(RAIDArray{
+				Name: "raw", Level: 1, Filesystem: RAIDFilesystemNone,
+				MountPoint: "/data",
+				Devices:    []string{"/dev/sdb", "/dev/sdc"},
+			}),
+			wantErr: "there is nothing to mount",
+		},
+		{
+			name: "relative mount point",
+			cfg: base(RAIDArray{
+				Name: "data", Level: 1, MountPoint: "data",
+				Devices: []string{"/dev/sdb", "/dev/sdc"},
+			}),
+			wantErr: "must be an absolute path",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want an error mentioning %q", test.wantErr)
+			}
+
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Errorf("Validate() = %q, want it to mention %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsGoodRAID(t *testing.T) {
+	configs := []Config{
+		{Role: RoleSingle, RAID: []RAIDArray{{
+			Name: "data", Level: 1,
+			Devices:    []string{"/dev/disk/by-id/one", "/dev/disk/by-id/two"},
+			MountPoint: "/var/lib/corium/data",
+		}}},
+		{Role: RoleSingle, RAID: []RAIDArray{{
+			Name: "raw", Level: 10, Filesystem: RAIDFilesystemNone,
+			Devices: []string{"/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde"},
+		}}},
+		{Role: RoleSingle, RAID: []RAIDArray{{
+			Name: "big", Level: 6, Filesystem: RAIDFilesystemXFS,
+			Devices:    []string{"/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde"},
+			Spares:     []string{"/dev/sdf"},
+			MountPoint: "/srv/data",
+			Wipe:       true,
+		}}},
+	}
+
+	for _, cfg := range configs {
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() rejected a valid configuration: %v", err)
+		}
+	}
+}

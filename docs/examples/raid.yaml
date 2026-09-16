@@ -1,0 +1,46 @@
+#cloud-config
+#
+# A node that mirrors its two spare disks and puts Kubernetes state on the
+# array.
+#
+# The array is built at first boot, before k0s is installed. That ordering is
+# the reason this is a Corium field rather than a runcmd calling mdadm: an
+# array created after the kubelet has started is an array the kubelet has
+# already written past, and the data underneath the mount point is then
+# invisible while still consuming the root disk.
+#
+# See docs/raid.md.
+
+corium:
+  role: controller+worker
+
+  raid:
+    - name: data
+      level: 1
+
+      # Whole disks, by ID rather than by kernel name.
+      #
+      # /dev/sdb and /dev/sdc are assigned in discovery order, and that order
+      # is not promised to be stable across boots -- least of all on the first
+      # boot, which is the one that decides which disks get overwritten.
+      devices:
+        - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+        - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
+
+      filesystem: ext4
+      mountPoint: /var/lib/corium/data
+
+      # wipe is absent, so it is false.
+      #
+      # Any of these disks already carrying a filesystem, a partition table or
+      # another array's metadata stops the bootstrap with an error naming what
+      # it found. Set wipe: true only when you mean "these disks are
+      # expendable" -- a node that refuses to finish booting costs an
+      # afternoon, and a disk that was silently consumed costs whatever was on
+      # it.
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

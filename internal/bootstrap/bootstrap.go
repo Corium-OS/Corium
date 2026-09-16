@@ -91,6 +91,15 @@ func Run(ctx context.Context, opts Options) error {
 		"storage", cfg.Storage.Type,
 		"addons", len(cfg.Addons))
 
+	// Disks first. Everything after this point may want to write to an array,
+	// and an array created after the fact is an array something has already
+	// written past.
+	if !opts.DryRun {
+		if err := applyRAID(ctx, cfg); err != nil {
+			return err
+		}
+	}
+
 	rendered, err := k0s.Render(cfg)
 	if err != nil {
 		return err

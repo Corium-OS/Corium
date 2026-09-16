@@ -65,6 +65,7 @@ the maintainers — do not quietly work around them.
 | 7 | **No Ignition.** cloud-init is the only first-boot mechanism | Two provisioning systems on one node means two authorities over users, SSH keys and networking, and races between them |
 | 8 | `corium-agent` and all tooling are written in **Go** | Same ecosystem as k0s and Kubernetes; static binaries drop cleanly into a read-only `/usr` |
 | 9 | **Every abstraction has an escape hatch** | `corium:` covers the common path; raw `write_files`, `runcmd`, and a verbatim k0s config patch must always remain available |
+| 10 | **Software RAID covers spare disks, not the root filesystem** | A root array is an install-time decision the `corium:` block is read too late to make, and the bootc path for one is broken upstream. See [ADR 3](docs/adr/0003-software-raid-scope.md) |
 
 ---
 

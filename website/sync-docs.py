@@ -36,6 +36,9 @@ PAGES = [
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
+    ("raid.md", "guides", "raid", "Software RAID", 130,
+     "Declaring mdadm arrays on a node's spare disks, why they are built "
+     "before k0s starts, and where a RAID root filesystem stands today."),
     ("comparison.md", "reference", "comparison", "Comparison", 201,
      "How Corium compares to Talos, Kairos, Flatcar, Bottlerocket and running "
      "k0s on an ordinary distribution -- and when not to use it."),
@@ -53,6 +56,10 @@ PAGES = [
      "ADR 2 — Root filesystem", 920,
      "Why the root filesystem is ext4 rather than xfs, and why the reason is "
      "about who can build the image."),
+    ("adr/0003-software-raid-scope.md", "reference", "adr-0003-software-raid-scope",
+     "ADR 3 — Software RAID scope", 930,
+     "Why software RAID covers a node's spare disks and not its root "
+     "filesystem, and what upstream would have to change."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
@@ -64,9 +71,11 @@ PAGE_URLS = {
     "features.md": "/docs/reference/feature-support/",
     "comparison.md": "/docs/reference/comparison/",
     "upgrades.md": "/docs/guides/upgrades/",
+    "raid.md": "/docs/guides/raid/",
     "reference.md": "/docs/reference/configuration/",
     "adr/0001-base-image.md": "/docs/reference/adr-0001-base-image/",
     "adr/0002-root-filesystem.md": "/docs/reference/adr-0002-root-filesystem/",
+    "adr/0003-software-raid-scope.md": "/docs/reference/adr-0003-software-raid-scope/",
 }
 
 REPO_BLOB = "https://github.com/Corium-OS/Corium/blob/main"

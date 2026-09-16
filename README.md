@@ -9,6 +9,16 @@
   An immutable, container-native Linux distribution that boots into a Kubernetes node.
 </p>
 
+<p align="center">
+  <a href="https://github.com/Corium-OS/Corium/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/ci.yml?branch=main&label=CI&logo=github" alt="CI"></a>
+  <a href="https://github.com/Corium-OS/Corium/actions/workflows/image.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/image.yml?branch=main&label=image&logo=podman&logoColor=white" alt="Image build"></a>
+  <img src="https://img.shields.io/badge/Kubernetes-1.36-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes 1.36">
+  <img src="https://img.shields.io/badge/k0s-v1.36.4%2Bk0s.0-0F1689" alt="k0s v1.36.4+k0s.0">
+  <img src="https://img.shields.io/badge/Fedora-bootc-51A2DA?logo=fedora&logoColor=white" alt="Fedora bootc">
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Corium-OS/Corium?logo=go&logoColor=white&label=Go" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Corium-OS/Corium?color=blue" alt="License: MIT"></a>
+</p>
+
 Corium is [Fedora bootc](https://docs.fedoraproject.org/en-US/bootc/) with
 [k0s](https://k0sproject.io/) baked into the read-only system and a small declarative
 configuration layer on top of cloud-init.
@@ -121,6 +131,7 @@ node silently joins the wrong cluster.
 - [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
+- [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
 - [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions

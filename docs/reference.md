@@ -98,7 +98,7 @@ silently ignored key means a setting you carefully wrote never took effect.
 | Step | What happens |
 |---|---|
 | **Parse** | Locate the schema in the document and decode it strictly |
-| **Defaults** | Fill unset fields (§3.10). Idempotent |
+| **Defaults** | Fill unset fields (§3.11). Idempotent |
 | **Validate** | Report **every** problem at once, offline |
 | **Hostname** | Settle the node's name before anything reads it (§4) |
 | **Secrets** | Resolve `tokenFrom` / `authPassFrom` |
@@ -157,7 +157,8 @@ referred to indirectly in the journal.
 | `addons` | list | no | Helm charts (§3.7) |
 | `ha` | object | no | Control plane load balancing (§3.8) |
 | `upgrades` | object | no | Unattended upgrades (§3.9) |
-| `k0s` | object | no | Escape hatch (§3.11) |
+| `raid` | list | no | Software RAID on spare disks (§3.10) |
+| `k0s` | object | no | Escape hatch (§3.12) |
 
 ### `role`
 
@@ -252,7 +253,7 @@ an external cluster, is reachable through `k0s.patch`. See
 | Key | Type | Notes |
 |---|---|---|
 | `token` | string | Inline. Convenient for labs, a liability in production |
-| `tokenFrom` | object | Resolved at first boot (§3.12) |
+| `tokenFrom` | object | Resolved at first boot (§3.13) |
 
 Set exactly one. Required for `worker`; rejected for `single`, which bootstraps
 its own cluster.
@@ -342,7 +343,7 @@ one holds a virtual IP.
 | `interface` | string | no | Defaults to the interface holding the default route |
 | `virtualRouterID` | int | no | 1–255. Omit it and k0s assigns one starting at 51. Must be unique within the broadcast domain |
 | `authPass` | string | yes | **Eight characters or fewer** |
-| `authPassFrom` | object | — | Alternative to `authPass` (§3.12) |
+| `authPassFrom` | object | — | Alternative to `authPass` (§3.13) |
 | `unicastPeers` | list | no | The other controllers' addresses |
 
 `authPass` is capped because **keepalived silently truncates it to eight
@@ -394,15 +395,57 @@ an explicit schedule is a maintenance window, and moving it by up to an hour
 would defeat the point of writing one.
 
 `none` does nothing. `download` stages a newer image without rebooting, so the
-reboot you schedule is near-instant. `apply` reboots on its own, without
-draining, which suits a lab and not much else.
+reboot you schedule is near-instant. `apply` drains the node and then reboots
+into the staged image, uncordoning once k0s is back.
 
 A `schedule` with `automatic: none` is rejected: it would be a setting that
 silently does nothing.
 
 See [upgrades](upgrades.md#unattended-upgrades).
 
-### 3.10 Defaults
+### 3.10 `raid`
+
+A list of software RAID arrays, built from this node's **spare disks** at first
+boot. It does not cover the disk the OS booted from — see
+[software RAID](raid.md) for why, and for how to install onto a redundant root.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** Becomes `/dev/md/<name>` |
+| `level` | int | — | **Required.** `0`, `1`, `5`, `6` or `10` |
+| `devices` | list | — | **Required.** Whole disks, absolute paths |
+| `spares` | list | — | Idle members pulled in when one fails |
+| `filesystem` | enum | `ext4` | `ext4`, `xfs`, or `none` for a raw device |
+| `mountPoint` | string | — | Absolute path; also written to `/etc/fstab` |
+| `wipe` | bool | `false` | Consent to erasing devices that hold data |
+
+```yaml
+corium:
+  role: controller+worker
+  raid:
+    - name: data
+      level: 1
+      devices:
+        - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+        - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
+      filesystem: ext4
+      mountPoint: /var/lib/corium/data
+```
+
+Rejected at validation, before anything touches a disk: a level with too few
+devices for it, a device claimed by two arrays, two arrays sharing a name, a
+spare on a RAID 0, and a `mountPoint` on an array with `filesystem: none`.
+
+**`wipe` is off by default and that is the point.** A device carrying a
+filesystem, a partition table, or another array's metadata stops the bootstrap
+with an error naming what it found. A node that refuses to boot is recoverable;
+a disk that has been silently consumed is not.
+
+Prefer `/dev/disk/by-id/...` over `/dev/sdb`. Kernel names are handed out in
+discovery order, so on a first boot they can name a different disk than the one
+you meant.
+
+### 3.11 Defaults
 
 | Field | Default |
 |---|---|
@@ -416,7 +459,7 @@ See [upgrades](upgrades.md#unattended-upgrades).
 
 Applying defaults is idempotent and never overwrites an explicit value.
 
-### 3.11 `k0s.patch` — the escape hatch
+### 3.12 `k0s.patch` — the escape hatch
 
 A strategic merge patch applied to the rendered `k0s.yaml` **after** Corium has
 finished, passed through without interpretation. Every k0s setting stays
@@ -445,7 +488,7 @@ The second escape hatch is that the document remains an ordinary cloud-config:
 `write_files`, `runcmd` and every other module keep working. Corium is a guest
 in that document, not its owner.
 
-### 3.12 Secret sources
+### 3.13 Secret sources
 
 Used by `join.tokenFrom` and `ha.authPassFrom`, so credentials need not sit in
 instance metadata where anything reaching the metadata service can read them.
