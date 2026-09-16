@@ -22,7 +22,13 @@ mathEngine = "KaTeX" # "KaTeX" (default) or "MathJax"
 
   ## Button
   navBarButton = true
-  navBarButtonUrl = "/docs/guides/quickstart/"
+  # Deliberately no leading slash. The theme renders this through Hugo's
+  # absURL, and absURL treats a leading slash as "absolute from the host",
+  # dropping the /Corium/ path from baseURL -- so "/docs/..." resolved to
+  # https://corium-os.github.io/docs/... and every visitor who pressed the
+  # button landed on a 404. Without the slash it is joined to the full
+  # baseURL, path included.
+  navBarButtonUrl = "docs/guides/quickstart/"
   navBarButtonText = "Get started"
 
   # FlexSearch

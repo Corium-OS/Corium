@@ -30,22 +30,43 @@ CANONICAL = re.compile(r'rel=(?:"canonical"|\'canonical\'|canonical)[^>]*?'
                        r'href=(?:"([^"]+)"|\'([^\']+)\'|([^\s>]+))')
 
 
-def base_path() -> str:
-    """The subpath the site is served from."""
+def canonical_url() -> str:
+    """The site's own absolute URL, taken from the home page's canonical link."""
     index = PUBLIC / "index.html"
     if not index.is_file():
-        return "/"
+        return ""
 
     match = CANONICAL.search(index.read_text(encoding="utf-8", errors="replace"))
     if not match:
         print("no canonical link on the home page; assuming the site root",
               file=sys.stderr)
-        return "/"
+        return ""
 
-    url = next(filter(None, match.groups()), "")
+    return next(filter(None, match.groups()), "")
+
+
+def base_path(url: str) -> str:
+    """The subpath the site is served from."""
     path = urlparse(url).path or "/"
 
     return path if path.endswith("/") else path + "/"
+
+
+def site_origin(url: str) -> str:
+    """The scheme and host the site is published under, or empty if unknown.
+
+    Links to our own host are not external, however they are spelled. Treating
+    them as external is how the "Get started" button shipped pointing at
+    https://corium-os.github.io/docs/... -- correct host, missing /Corium/, a
+    404 for every visitor who pressed it. Hugo's absURL drops the baseURL path
+    when handed a leading slash, so this is a mistake the templates invite.
+    """
+    parsed = urlparse(url)
+
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def resolve(target: str, prefix: str) -> pathlib.Path | None:
@@ -70,8 +91,12 @@ def main() -> int:
         print(f"no built site at {PUBLIC}; run hugo first", file=sys.stderr)
         return 1
 
-    prefix = base_path()
-    print(f"site is served from {prefix!r}")
+    canonical = canonical_url()
+    prefix = base_path(canonical)
+    origin = site_origin(canonical)
+
+    print(f"site is served from {prefix!r}"
+          + (f" on {origin}" if origin else ""))
 
     broken: list[tuple[str, str]] = []
     checked = 0
@@ -83,9 +108,16 @@ def main() -> int:
         for match in ATTRIBUTE.finditer(text):
             target = next(filter(None, match.groups()), "")
 
-            # Only internal, absolute links: external ones are not ours to
-            # guarantee, and fragments resolve within the page.
-            if not target.startswith("/"):
+            # Internal links only: other sites are not ours to guarantee, and
+            # fragments resolve within the page.
+            #
+            # A link to our own host counts as internal even when it is spelled
+            # in full. That is not pedantry: the one class of breakage this
+            # script was written for -- a link that loses the subpath GitHub
+            # Pages serves from -- produces exactly that shape.
+            if origin and target.startswith(origin):
+                target = target[len(origin):] or "/"
+            elif not target.startswith("/"):
                 continue
 
             checked += 1
