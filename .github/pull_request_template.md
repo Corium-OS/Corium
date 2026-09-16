@@ -50,6 +50,8 @@ Documentation is part of the change, not a follow-up.
 - [ ] [`docs/examples/`](docs/examples/) updated, and every example still passes `corium-agent validate`
 - [ ] An [ADR](docs/adr/) added if this changes one of the decisions recorded in [`AGENTS.md`](AGENTS.md)
 - [ ] Any worked example in the docs still matches what the agent actually renders
+- [ ] `python3 website/sync-docs.py` re-run and the result committed, if anything under [`docs/`](docs/) changed
+- [ ] [`CHANGELOG.md`](CHANGELOG.md) updated under `## [Unreleased]`, if a user would notice this change
 
 ### If the OS image changed
 
@@ -75,7 +77,20 @@ Documentation is part of the change, not a follow-up.
 
 ## CI
 
-> **Note:** there is no CI pipeline yet — `.github/workflows/` is empty. Until
-> one exists, the checks above are run locally and the boxes are a statement
-> about what you ran, not about what a machine confirmed. Please say so
-> explicitly if you skipped any.
+<!--
+Three workflows exist. On a pull request:
+
+  - CI runs gofmt, `go mod tidy`, build, vet, tests with the race detector,
+    golangci-lint, and validates every example under docs/examples/ and
+    deploy/proxmox/.
+  - Image builds the image with `bootc container lint --fatal-warnings`, and
+    never publishes: a pull request from a fork must not be able to push an
+    image that nodes would later pull.
+  - Pages does not run on pull requests at all. That is why the sync-docs.py
+    box above matters -- nothing will catch a stale site copy until after the
+    merge, when the deployment goes red.
+
+What none of them do is run anything on a machine. The boxes above are a
+statement about what you ran, not about what was confirmed for you. Please say
+so explicitly if you skipped any.
+-->
