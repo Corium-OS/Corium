@@ -9,8 +9,14 @@ IMAGE_NAME  ?= corium
 IMAGE_TAG   ?= dev
 IMAGE       := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
-# Build metadata injected into the agent binary
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Build metadata injected into the agent binary.
+#
+# git describe keeps the v from the tag; the image tag and the
+# org.opencontainers.image.version label do not carry one. Strip it here so a
+# binary built from a checkout and one built by the release workflow report the
+# same version instead of differing by a prefix. patsubst leaves a bare commit
+# hash and the dev fallback alone, neither of which starts with a v.
+VERSION     ?= $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS     := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
