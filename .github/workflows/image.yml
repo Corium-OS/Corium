@@ -33,6 +33,9 @@ jobs:
     name: Build and publish
     runs-on: ubuntu-latest
 
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+
     permissions:
       contents: read
       packages: write
@@ -54,8 +57,13 @@ jobs:
             echo "publish=true" >> "${GITHUB_OUTPUT}"
           fi
 
+          # The git tag is v0.1.0; the version is 0.1.0. Stripping the prefix
+          # once, here, is what keeps the image tag, the
+          # org.opencontainers.image.version label and `corium-agent version`
+          # all saying the same thing.
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "version=${{ github.ref_name }}" >> "${GITHUB_OUTPUT}"
+            tag="${{ github.ref_name }}"
+            echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
           else
             echo "version=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
           fi
@@ -119,35 +127,59 @@ jobs:
         id: push
         run: |
           image="${REGISTRY}/${IMAGE_NAME}"
-          tags="${{ steps.plan.outputs.version }}"
+          version="${{ steps.plan.outputs.version }}"
+          tags="${version}"
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             # A release publishes a ladder of tags, so a node can choose how
             # much movement it accepts:
             #
             #   1.4.2   never moves      -- pin to an exact release
-            #   1.4     follows patches  -- fixes, no new behaviour
+            #   1.4     follows patches  -- fixes within that minor
             #   1       follows minors   -- new features, no breaking changes
             #   latest  follows releases -- whatever is newest
             #
+            # There is no `0` rung, and below 1.0 the ladder is 0.1.0, 0.1 and
+            # latest. Semantic versioning reserves 0.y.z for initial
+            # development and lets a minor bump break, so a `0` tag meaning
+            # "new features, no breaking changes" would promise exactly what
+            # the version scheme withholds. `0.1` survives the same test,
+            # because a patch bump does not break even in 0.x, and so does
+            # `latest`, which claims recency and never compatibility.
+            #
             # Prereleases (1.4.0-rc.1) publish only their exact tag: a release
             # candidate must never be picked up by a node following 1.4.
-            version="${{ github.ref_name }}"
-            version="${version#v}"
-
-            if [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            #
+            # The grammar below is semver's own rather than [0-9]+, which
+            # accepts leading zeros: v01.2.3 would yield major="01", which is
+            # not "0", and publish a nonsense `01` rung.
+            if [[ "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
               major="${BASH_REMATCH[1]}"
               minor="${BASH_REMATCH[2]}"
-              tags="${version} ${major}.${minor} ${major} latest"
+
+              tags="${version} ${major}.${minor}"
+              if [ "${major}" != "0" ]; then
+                tags="${tags} ${major}"
+              fi
+              tags="${tags} latest"
             else
-              echo "::notice::${version} is not a plain semantic version; publishing that tag only"
-              tags="${version}"
+              echo "::notice::${version} is a prerelease or not a stable semantic version; publishing that tag only"
             fi
           elif [ "${{ github.ref_name }}" = "main" ]; then
             tags="${tags} main"
           fi
 
+          digest=""
           for tag in ${tags}; do
+            # An OCI tag is [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}. Semver build
+            # metadata (1.4.2+build) contains a '+' and cannot be one at all,
+            # so say that here rather than letting podman die on a reference
+            # parse error after we have already logged in to the registry.
+            if [[ ! "${tag}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$ ]]; then
+              echo "::error::${tag} is not a valid OCI tag" >&2
+              exit 1
+            fi
+
             podman tag localhost/corium:ci "${image}:${tag}"
             # --digestfile records the digest of the manifest as the registry
             # stored it. The local RepoDigests value is not the same thing:
@@ -155,12 +187,24 @@ jobs:
             # digest then fails with a 404 against a manifest that never
             # existed upstream.
             podman push --digestfile /tmp/digest "${image}:${tag}"
-            echo "pushed ${image}:${tag} ($(cat /tmp/digest))"
+            pushed="$(cat /tmp/digest)"
+            echo "pushed ${image}:${tag} (${pushed})"
+
+            # Every tag in this loop is the same manifest, so every push must
+            # report the same digest. Only one of them is signed. If they ever
+            # disagreed, the signature would cover an image nobody pulled --
+            # so check the invariant rather than assuming it.
+            if [ -z "${digest}" ]; then
+              digest="${pushed}"
+            elif [ "${pushed}" != "${digest}" ]; then
+              echo "::error::${tag} pushed ${pushed}, but ${digest} was expected" >&2
+              exit 1
+            fi
           done
 
           # Sign by digest, not by tag: tags move, digests do not, and a
           # signature attached to a tag says nothing about what it points at now.
-          echo "digest=${image}@$(cat /tmp/digest)" >> "${GITHUB_OUTPUT}"
+          echo "digest=${image}@${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Install cosign
         if: steps.plan.outputs.publish == 'true'
@@ -217,3 +261,131 @@ jobs:
               echo "| Digest | \`${{ steps.push.outputs.digest }}\` |"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  release:
+    name: Publish the GitHub Release
+    needs: build
+    # Only a real tag push. workflow_dispatch can be pointed at a tag too, and
+    # rebuilding a published image by hand must not try to create its Release a
+    # second time.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    permissions:
+      # The only job that writes to the repository, so the grant stays here
+      # rather than at the top of the file where it would widen the build too.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Passed through the environment rather than interpolated into the
+          # script: a tag name is chosen by whoever pushed it.
+          TAG: ${{ github.ref_name }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          # Re-running a tag build after a transient registry failure replays
+          # the same push event. Publishing the image again is harmless;
+          # creating the Release again is not.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "::notice::${TAG} already has a Release; leaving it alone"
+            exit 0
+          fi
+
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::the build published no digest" >&2
+            exit 1
+          fi
+
+          version="${TAG#v}"
+
+          # Keep a Changelog sections look like "## [0.1.0] - 2026-09-16" and
+          # run to the next "## " heading or the end of the file. Matched with
+          # index() rather than a regex: a version number is mostly dots, and
+          # every one of them is a wildcard to a regex engine. "### Added" does
+          # not end a section, because in it "## " starts at column two.
+          section() {
+            awk -v head="## [$1]" '
+              index($0, head) == 1 { inside = 1; next }
+              inside && index($0, "## ") == 1 { exit }
+              inside { print }
+            ' CHANGELOG.md
+          }
+
+          prerelease=false
+          case "${TAG}" in *-*) prerelease=true ;; esac
+
+          # Not [ -z ], which would accept a section containing one blank line
+          # and publish a Release with an empty body.
+          notes="$(section "${version}")"
+          if ! printf '%s' "${notes}" | grep -q '[^[:space:]]'; then
+            if [ "${prerelease}" = true ]; then
+              # A release candidate is cut before its own section is written.
+              echo "::notice::no CHANGELOG section for ${version}; using Unreleased"
+              notes="$(section "Unreleased")"
+            else
+              echo "::error::CHANGELOG.md has no section for ${version}" >&2
+              exit 1
+            fi
+          fi
+
+          # printf rather than a heredoc: the body is full of fenced code
+          # blocks, and backticks in an unquoted heredoc are command
+          # substitution, while a quoted one would stop ${DIGEST} expanding.
+          {
+            printf '%s\n\n' "${notes}"
+
+            printf -- '---\n\n'
+            printf '## Getting it\n\n'
+            printf 'The signed image is the release. Disk images are a local rendering of it.\n\n'
+            printf '```bash\n'
+            printf 'podman pull %s\n' "${DIGEST}"
+            printf '```\n\n'
+
+            printf '### Check it before you run it\n\n'
+            printf 'Keyless first: it needs no key you have to obtain from somewhere.\n\n'
+            printf '```bash\n'
+            printf 'cosign verify %s \\\n' "${DIGEST}"
+            printf '  --certificate-identity-regexp %s \\\n' "'https://github.com/${GH_REPO}/.*'"
+            printf '  --certificate-oidc-issuer https://token.actions.githubusercontent.com\n'
+            printf '```\n\n'
+            printf 'Nodes enforce a second, key-based signature instead, because a container\n'
+            printf 'policy cannot match a GitHub Actions identity. To check that one before you\n'
+            printf 'have a node, take the public key from this tag rather than from a file\n'
+            printf 'attached here: a key arriving by the same channel as the release it\n'
+            printf 'authenticates adds nothing.\n\n'
+            printf '```bash\n'
+            printf 'curl -fsSL -o cosign.pub \\\n'
+            printf '  https://raw.githubusercontent.com/%s/%s/build/files/usr/share/corium/cosign.pub\n' "${GH_REPO}" "${TAG}"
+            printf 'cosign verify --key cosign.pub %s\n' "${DIGEST}"
+            printf '```\n\n'
+
+            printf '### Disk images\n\n'
+            printf 'Nothing is attached here. The anaconda ISO is about 2.4 GB, past the limit\n'
+            printf 'for a release asset, and attaching only the artefacts that fit would read as\n'
+            printf 'though the ISO had been forgotten rather than left out deliberately.\n\n'
+            printf 'Build them from the digest above instead. An ISO hosted here would be an\n'
+            printf 'unsigned blob whose provenance ends at whoever uploaded it; one you build\n'
+            printf 'from a signed digest has a chain of custody you can follow.\n\n'
+            printf '```bash\n'
+            printf 'make artefacts IMAGE_TAG=%s\n' "${version}"
+            printf '```\n\n'
+            printf 'Needs a Linux host and `sudo`, because bootc-image-builder mounts the\n'
+            printf 'filesystem it creates.\n\n'
+
+            printf -- '---\n\n'
+            printf 'New here: [quick start](https://github.com/%s/blob/%s/docs/quickstart.md).\n' "${GH_REPO}" "${TAG}"
+            printf 'Upgrading: [which tag to follow](https://github.com/%s/blob/%s/docs/upgrades.md#choosing-what-to-track).\n' "${GH_REPO}" "${TAG}"
+          } > "${RUNNER_TEMP}/notes.md"
+
+          # --verify-tag because without it a wrong TAG does not fail: gh
+          # creates a tag of that name pointing at the default branch.
+          gh release create "${TAG}" \
+            --title "Corium ${version}" \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
+            --verify-tag \
+            --prerelease="${prerelease}"

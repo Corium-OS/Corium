@@ -75,6 +75,7 @@ the maintainers — do not quietly work around them.
 .
 ├── AGENTS.md                  # this file
 ├── README.md
+├── CHANGELOG.md               # what a user would notice, release by release
 ├── Containerfile              # the OS image build
 ├── Makefile                   # build, test, lint, image targets
 ├── build/
@@ -193,12 +194,29 @@ rest of the tree.
 - One logical change per commit. Do not mix a refactor with a behaviour change.
 - Pull requests describe the user-visible effect and the testing performed. If the change
   affects the `corium:` schema, the PR updates `docs/` and the examples in the same commit.
+- Anything under `docs/` also has copies on the documentation site. Re-run
+  `python3 website/sync-docs.py` and commit the result, or the Pages workflow fails after
+  the merge — it does not run on pull requests, so nothing will warn you earlier.
 - Never commit secrets, tokens, kubeconfigs, or private keys. Not even in examples — use
   obvious placeholders.
 
 ---
 
-## 10. Working agreements for agents
+## 10. Releases
+
+- Semantic versioning, and Corium is **below 1.0**: a minor release is permitted to change
+  or remove configuration an earlier one accepted. Use that permission sparingly, and
+  never silently.
+- A user-visible change adds an entry to `CHANGELOG.md` under `## [Unreleased]`, in the
+  same pull request. Say what a user would notice, not what moved in the tree.
+- Tags are `vX.Y.Z`, or `vX.Y.Z-rc.N` for a candidate. Tagging publishes and signs an
+  image to a public registry and moves `latest`. It cannot be undone.
+- The procedure, and what has to be verified on a real machine before a release, are in
+  [`.github/RELEASING.md`](.github/RELEASING.md).
+
+---
+
+## 11. Working agreements for agents
 
 - **Read before you write.** This project has a strong architectural opinion; code that
   fights it will be rejected regardless of quality.

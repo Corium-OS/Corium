@@ -53,15 +53,15 @@ sudo bootc status
 sudo bootc upgrade
 
 # Or move it to a different image or tag.
-sudo bootc switch ghcr.io/corium-os/corium:main
+sudo bootc switch ghcr.io/corium-os/corium:0.1
 ```
 
 Neither reboots by default. They stage a deployment for the next boot, which is
 what makes the maintenance window yours to choose:
 
 ```
-Queued for next boot: ghcr.io/corium-os/corium:main
-  Version: c41716d
+Queued for next boot: ghcr.io/corium-os/corium:0.1
+  Version: 0.1.0
   Digest: sha256:38c2194904b1de400a6f2366760c85dae5e45bb7f5f500612bb428817e850bb6
 ```
 
@@ -210,18 +210,36 @@ accepts.
 | Tag | Moves | You get |
 |---|---|---|
 | `corium@sha256:...` | Never | Exactly one image. The strongest pin |
-| `corium:1.4.2` | Never | One release |
-| `corium:1.4` | On patch releases | Fixes, no new behaviour |
-| `corium:1` | On minor releases | New features, no breaking changes |
-| `corium:latest` | On every release | Whatever is newest, including major versions |
+| `corium:0.1.0` | Never | One release |
+| `corium:0.1` | On patch releases | Fixes, no new behaviour |
+| `corium:latest` | On every release | Whatever is newest |
 | `corium:main` | On every push to `main` | Development builds, unreleased |
 
-Most clusters want `1.4` in production and `1` somewhere they can afford
-surprises. `latest` crosses major versions, which is where breaking changes
-live by definition.
+**Track `0.1`.** It moves only on patch releases, which do not change
+behaviour, so it picks up fixes without you deciding anything. Pin `0.1.0`
+exactly if you would rather choose the moment yourself. Read the changelog
+before moving to `0.2`: a minor release may require a configuration change,
+and it will say which.
 
-Prereleases publish only their exact tag: `1.4.0-rc.1` never becomes `1.4` or
-`1`, so a node following a stable tag will not pick up a release candidate.
+**Below 1.0 there is no major rung.** Semantic versioning reserves `0.y.z` for
+initial development and lets a minor release break things, so a `0` tag
+meaning "new features, no breaking changes" would promise exactly what the
+version number withholds. It is not published. When Corium reaches 1.0, a `1`
+rung joins the ladder with that meaning, and it will be true:
+
+| Tag | Moves | You get |
+|---|---|---|
+| `corium:1.4` | On patch releases | Fixes, no new behaviour |
+| `corium:1` | On minor releases | New features, no breaking changes |
+
+`latest` is a claim about recency, not about compatibility. It crosses minor
+releases below 1.0 and major ones above, which is where breaking changes live
+by definition. It exists so that `podman pull ghcr.io/corium-os/corium`
+returns something; it is not a tag to run a cluster on.
+
+Prereleases publish only their exact tag: `0.2.0-rc.1` never becomes `0.2` or
+`latest`, so a node following a stable tag will not pick up a release
+candidate.
 
 `bootc status` always reports the digest actually booted, whatever the tag
 said at the time — which is what you want in an incident.
@@ -290,14 +308,14 @@ systemctl list-timers 'corium-upgrade-*' 'bootc-*'
 
 ## Verifying what you are about to boot
 
-Images published from `main` are signed with
-[cosign](https://docs.sigstore.dev/), keyless: there is no private key, and the
-signing identity is the GitHub Actions workflow itself. The signature is
+Every image Corium publishes -- from a release tag and from `main` alike --
+is signed with [cosign](https://docs.sigstore.dev/), keyless: there is no
+private key, and the signing identity is the GitHub Actions workflow itself. The signature is
 attached to the image digest rather than to a tag, because tags move and a
 signature on a moving tag says nothing about what it points at now.
 
 ```bash
-cosign verify ghcr.io/corium-os/corium:main \
+cosign verify ghcr.io/corium-os/corium:0.1 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -305,7 +323,7 @@ cosign verify ghcr.io/corium-os/corium:main \
 Verified output looks like this:
 
 ```
-Verification for ghcr.io/corium-os/corium:main --
+Verification for ghcr.io/corium-os/corium:0.1 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -319,7 +337,7 @@ Running it with an empty `DOCKER_CONFIG` is a quick way to tell:
 
 ```bash
 mkdir -p /tmp/emptycfg && echo '{}' > /tmp/emptycfg/config.json
-DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:main \
+DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:0.1 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -350,7 +368,7 @@ break the cluster rather than secure it.
 Verify it against a node yourself:
 
 ```bash
-cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:main
+cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:0.1
 ```
 
 **Why two signatures rather than one.** A node cannot enforce the keyless one:

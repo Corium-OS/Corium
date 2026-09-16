@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Corium-OS/Corium/releases/latest"><img src="https://img.shields.io/github/v/release/Corium-OS/Corium?include_prereleases&sort=semver&logo=github&label=release" alt="Latest release"></a>
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/ci.yml?branch=main&label=CI&logo=github" alt="CI"></a>
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/image.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/image.yml?branch=main&label=image&logo=podman&logoColor=white" alt="Image build"></a>
   <img src="https://img.shields.io/badge/Kubernetes-1.36-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes 1.36">
@@ -23,8 +24,12 @@ Corium is [Fedora bootc](https://docs.fedoraproject.org/en-US/bootc/) with
 [k0s](https://k0sproject.io/) baked into the read-only system and a small declarative
 configuration layer on top of cloud-init.
 
-> **Status: early.** The architecture is settled, the implementation is not. Do not run this
-> anywhere you care about yet.
+> **Status: 0.x.** The architecture is settled and the path works end to end — a node boots,
+> joins, upgrades, drains itself before rebooting, rolls back when it comes up broken, and
+> refuses an image that is not signed. Two things are not settled. The configuration surface
+> can still change between minor releases, and the testing is narrower than it looks:
+> everything has been verified on virtual machines, none of it on physical hardware. Pin a
+> version, read the [changelog](CHANGELOG.md), and do not put anything on it you would miss.
 
 ---
 
@@ -134,6 +139,7 @@ node silently joins the wrong cluster.
 - [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
 - [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
+- [**Changelog**](CHANGELOG.md) — what each release changed, and what is known to be broken
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions
 - [`docs/examples/`](docs/examples/) — annotated configuration examples
 - [`docs/adr/`](docs/adr/) — architecture decision records

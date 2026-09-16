@@ -103,7 +103,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Unattended staging | `upgrades.automatic: download` | Stages a new image, never reboots on its own |
 | Unattended reboot | `upgrades.automatic: apply` | Drains the node, reboots, uncordons. A drain a PDB refuses cancels the upgrade |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
-| Version ladder | — | `1.4.2`, `1.4`, `1`, `latest` published per release |
+| Version ladder | — | `0.1.0`, `0.1` and `latest` per release. No major rung below 1.0, because a 0.x minor may break. See [upgrades](upgrades.md#choosing-what-to-track) |
 | Automatic rollback on failure | — | greenboot health check; a node that cannot run k0s returns to its previous image |
 
 ### Disks
