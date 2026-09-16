@@ -18,7 +18,7 @@ ARG BASE_TAG=44
 #
 # Compiled in a throwaway stage so the Go toolchain never reaches the OS image.
 # ---------------------------------------------------------------------------
-FROM docker.io/library/golang:1.23 AS agent-builder
+FROM docker.io/library/golang:1.27 AS agent-builder
 
 WORKDIR /src
 
