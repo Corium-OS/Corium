@@ -166,7 +166,17 @@ jobs:
             tags="${tags} main"
           fi
 
+          digest=""
           for tag in ${tags}; do
+            # An OCI tag is [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}. Semver build
+            # metadata (1.4.2+build) contains a '+' and cannot be one at all,
+            # so say that here rather than letting podman die on a reference
+            # parse error after we have already logged in to the registry.
+            if [[ ! "${tag}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$ ]]; then
+              echo "::error::${tag} is not a valid OCI tag" >&2
+              exit 1
+            fi
+
             podman tag localhost/corium:ci "${image}:${tag}"
             # --digestfile records the digest of the manifest as the registry
             # stored it. The local RepoDigests value is not the same thing:
@@ -174,12 +184,24 @@ jobs:
             # digest then fails with a 404 against a manifest that never
             # existed upstream.
             podman push --digestfile /tmp/digest "${image}:${tag}"
-            echo "pushed ${image}:${tag} ($(cat /tmp/digest))"
+            pushed="$(cat /tmp/digest)"
+            echo "pushed ${image}:${tag} (${pushed})"
+
+            # Every tag in this loop is the same manifest, so every push must
+            # report the same digest. Only one of them is signed. If they ever
+            # disagreed, the signature would cover an image nobody pulled --
+            # so check the invariant rather than assuming it.
+            if [ -z "${digest}" ]; then
+              digest="${pushed}"
+            elif [ "${pushed}" != "${digest}" ]; then
+              echo "::error::${tag} pushed ${pushed}, but ${digest} was expected" >&2
+              exit 1
+            fi
           done
 
           # Sign by digest, not by tag: tags move, digests do not, and a
           # signature attached to a tag says nothing about what it points at now.
-          echo "digest=${image}@$(cat /tmp/digest)" >> "${GITHUB_OUTPUT}"
+          echo "digest=${image}@${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Install cosign
         if: steps.plan.outputs.publish == 'true'
