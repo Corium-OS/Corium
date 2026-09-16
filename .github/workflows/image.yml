@@ -54,8 +54,13 @@ jobs:
             echo "publish=true" >> "${GITHUB_OUTPUT}"
           fi
 
+          # The git tag is v0.1.0; the version is 0.1.0. Stripping the prefix
+          # once, here, is what keeps the image tag, the
+          # org.opencontainers.image.version label and `corium-agent version`
+          # all saying the same thing.
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "version=${{ github.ref_name }}" >> "${GITHUB_OUTPUT}"
+            tag="${{ github.ref_name }}"
+            echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
           else
             echo "version=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
           fi
@@ -119,29 +124,43 @@ jobs:
         id: push
         run: |
           image="${REGISTRY}/${IMAGE_NAME}"
-          tags="${{ steps.plan.outputs.version }}"
+          version="${{ steps.plan.outputs.version }}"
+          tags="${version}"
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             # A release publishes a ladder of tags, so a node can choose how
             # much movement it accepts:
             #
             #   1.4.2   never moves      -- pin to an exact release
-            #   1.4     follows patches  -- fixes, no new behaviour
+            #   1.4     follows patches  -- fixes within that minor
             #   1       follows minors   -- new features, no breaking changes
             #   latest  follows releases -- whatever is newest
             #
+            # There is no `0` rung, and below 1.0 the ladder is 0.1.0, 0.1 and
+            # latest. Semantic versioning reserves 0.y.z for initial
+            # development and lets a minor bump break, so a `0` tag meaning
+            # "new features, no breaking changes" would promise exactly what
+            # the version scheme withholds. `0.1` survives the same test,
+            # because a patch bump does not break even in 0.x, and so does
+            # `latest`, which claims recency and never compatibility.
+            #
             # Prereleases (1.4.0-rc.1) publish only their exact tag: a release
             # candidate must never be picked up by a node following 1.4.
-            version="${{ github.ref_name }}"
-            version="${version#v}"
-
-            if [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            #
+            # The grammar below is semver's own rather than [0-9]+, which
+            # accepts leading zeros: v01.2.3 would yield major="01", which is
+            # not "0", and publish a nonsense `01` rung.
+            if [[ "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
               major="${BASH_REMATCH[1]}"
               minor="${BASH_REMATCH[2]}"
-              tags="${version} ${major}.${minor} ${major} latest"
+
+              tags="${version} ${major}.${minor}"
+              if [ "${major}" != "0" ]; then
+                tags="${tags} ${major}"
+              fi
+              tags="${tags} latest"
             else
-              echo "::notice::${version} is not a plain semantic version; publishing that tag only"
-              tags="${version}"
+              echo "::notice::${version} is a prerelease or not a stable semantic version; publishing that tag only"
             fi
           elif [ "${{ github.ref_name }}" = "main" ]; then
             tags="${tags} main"
