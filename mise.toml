@@ -1,0 +1,182 @@
+# Corium — the toolchain and the developer entry point.
+#
+#   mise install    provision every tool below at the pinned version
+#   mise tasks      list what you can run
+#   mise run <task> run one
+#
+# A floor rather than an exact version: mise is what reads this file, so
+# demanding one exact release would require already having it. This is the
+# oldest version carrying the `usage` argument spec and the `go:` backend used
+# below.
+min_version = "2026.5.1"
+
+# Task scripts are POSIX shell, not bash. mise runs them with `sh`, which is
+# dash on most Linux distributions -- no arrays, no `[[`, no `${var//a/b}`.
+[tools]
+# Mirrors the directive in go.mod, which stays the authority CI reads through
+# setup-go's go-version-file.
+go = "1.27"
+golangci-lint = "2.13.2"
+# Hugo's SCSS pipeline exists only in the extended build, which the registry
+# publishes under its own name. Plain `hugo` cannot build this site.
+hugo-extended = "0.166.0"
+# website/package.json declares a floor; this is the version you actually get.
+node = "24"
+# Not in the registry under any name, so it is built from source. This entry is
+# the reason the file exists: `mise run fmt` used to fail outright on a machine
+# that had never installed goimports by hand, and nothing in the repository
+# said it was needed.
+"go:golang.org/x/tools/cmd/goimports" = "0.50.0"
+
+[env]
+# These reproduce make's `?=`: a value already in the environment wins, so
+# `IMAGE_TAG=v0.1.0 mise run push` still does what it used to.
+REGISTRY = "{{ env.REGISTRY | default(value='ghcr.io/corium-os') }}"
+IMAGE_NAME = "{{ env.IMAGE_NAME | default(value='corium') }}"
+IMAGE_TAG = "{{ env.IMAGE_TAG | default(value='dev') }}"
+IMAGE = "{{ env.REGISTRY | default(value='ghcr.io/corium-os') }}/{{ env.IMAGE_NAME | default(value='corium') }}:{{ env.IMAGE_TAG | default(value='dev') }}"
+
+# bootc-image-builder turns the OS image into something you can actually boot.
+# It needs a privileged container and access to the local image store, and it
+# must run on a Linux host: it mounts the root filesystem it creates in order
+# to populate it.
+BIB = "{{ env.BIB | default(value='quay.io/centos-bootc/bootc-image-builder:latest') }}"
+OUTPUT_DIR = "{{ env.OUTPUT_DIR | default(value = config_root ~ '/output') }}"
+
+# ---------------------------------------------------------------- Go
+
+[tasks.build]
+description = "Build the corium-agent binary for the host platform"
+run = '''
+set -eu
+
+# git describe keeps the v from the tag; the image tag and the
+# org.opencontainers.image.version label do not carry one. Strip it here so a
+# binary built from a checkout and one built by the release workflow report the
+# same version instead of differing by a prefix. A bare commit hash and the dev
+# fallback are left alone, neither of which starts with a v.
+version="${VERSION:-}"
+if [ -z "${version}" ]; then
+	version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+	version="${version#v}"
+fi
+commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+go build -trimpath \
+	-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
+	-o bin/corium-agent ./cmd/corium-agent
+'''
+
+[tasks."build-linux"]
+description = "Build a static linux/amd64 agent for the OS image"
+run = '''
+set -eu
+
+# Same version derivation as `build`; see the comment there for why the v goes.
+version="${VERSION:-}"
+if [ -z "${version}" ]; then
+	version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+	version="${version#v}"
+fi
+commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+	go build -trimpath \
+	-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
+	-o bin/linux-amd64/corium-agent ./cmd/corium-agent
+'''
+
+[tasks.test]
+description = "Run unit tests"
+run = "go test -race -count=1 ./..."
+
+[tasks."test-update"]
+description = "Regenerate golden files"
+run = "go test -count=1 ./... -update"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.fmt]
+description = "Format the source tree"
+run = ["gofmt -w -s .", "goimports -w ."]
+
+[tasks.tidy]
+description = "Tidy and verify module dependencies"
+run = ["go mod tidy", "go mod verify"]
+
+# ---------------------------------------------------------------- Image
+
+[tasks.image]
+description = "Build the Corium OS container image"
+run = 'podman build --tag "${IMAGE}" --file Containerfile .'
+
+[tasks.push]
+description = "Push the OS image to the registry"
+run = 'podman push "${IMAGE}"'
+
+# ---------------------------------------------------- Installable artefacts
+
+# The privileged invocation lives here once, and the three artefact tasks below
+# differ only in the type they ask for.
+[tasks.bib]
+hide = true
+usage = 'arg "<type>" help="artefact type bootc-image-builder should produce"'
+run = '''
+set -eu
+mkdir -p "${OUTPUT_DIR}"
+sudo podman run --rm --privileged \
+	--security-opt label=type:unconfined_t \
+	-v /var/lib/containers/storage:/var/lib/containers/storage \
+	-v "${OUTPUT_DIR}:/output" \
+	"${BIB}" --type "${usage_type}" "${IMAGE}"
+'''
+
+[tasks."artefact-qcow2"]
+description = "Build a qcow2 for Proxmox, KVM and libvirt"
+depends = ["bib qcow2"]
+
+[tasks."artefact-raw"]
+description = "Build a raw disk for bare metal and most clouds"
+depends = ["bib raw"]
+
+[tasks."artefact-anaconda-iso"]
+description = "Build an installer ISO for bare metal"
+depends = ["bib anaconda-iso"]
+
+[tasks.artefacts]
+description = "Build every installable artefact"
+# Sequential, deliberately. Tasks named in `depends` run in parallel, and three
+# privileged builders competing for the image store and the disk is not a
+# speedup.
+run = [
+	"mise run artefact-qcow2",
+	"mise run artefact-raw",
+	"mise run artefact-anaconda-iso",
+]
+
+[tasks."clean-artefacts"]
+description = "Remove built artefacts"
+run = 'sudo rm -rf "${OUTPUT_DIR}"'
+
+# ---------------------------------------------------------------- Site
+
+[tasks."site-deps"]
+description = "Install the documentation site's theme dependencies"
+dir = "website"
+sources = ["package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm ci"
+
+[tasks."docs-sync"]
+description = "Regenerate the site's pages from docs/"
+# Anything changed under docs/ has to land here too, in the same commit: the
+# Pages workflow fails on a stale tree and does not run on pull requests.
+run = "python3 website/sync-docs.py"
+
+[tasks.site]
+description = "Serve the documentation site locally"
+depends = ["site-deps", "docs-sync"]
+dir = "website"
+run = "hugo server"
