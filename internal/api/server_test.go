@@ -11,12 +11,18 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
 // authority is an operator CA a test can actually sign client certificates
@@ -100,6 +106,13 @@ func start(t *testing.T, store *Store) (*Server, string) {
 		t.Fatalf("NewServer() error = %v", err)
 	}
 
+	return server, serveOn(t, server)
+}
+
+// serveOn runs a server that the caller has already configured.
+func serveOn(t *testing.T, server *Server) string {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 
@@ -126,7 +139,7 @@ func start(t *testing.T, store *Store) (*Server, string) {
 		t.Fatal("Serve() never became ready")
 	}
 
-	return server, server.Addr()
+	return server.Addr()
 }
 
 // client talks to the node the way cctl does: pinning the node's certificate
@@ -387,5 +400,131 @@ func TestRoleFromCertificatePrefersTheStrongest(t *testing.T) {
 	none := &x509.Certificate{Subject: pkix.Name{Organization: []string{"some other org"}}}
 	if got := roleFromCertificate(none); got != "" {
 		t.Errorf("roleFromCertificate() = %q, want no role", got)
+	}
+}
+
+func TestRolesReachOnlyWhatTheyShould(t *testing.T) {
+	store := newTestStore(t)
+	ca := newAuthority(t)
+
+	if err := store.Adopt(ca.pem); err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+
+	_, address := start(t, store)
+
+	// Read-only is the floor for both routes served today, so every issued
+	// role reaches them. The case that matters is the one below it.
+	for _, role := range []Role{RoleReadOnly, RoleOperator, RoleAdmin} {
+		response, err := client(t, store, ca.issue(t, role)).Get("https://" + address + "/v1/node")
+		if err != nil {
+			t.Fatalf("GET /v1/node as %s: %v", role, err)
+		}
+
+		_ = response.Body.Close()
+
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("status = %d as %s, want 200", response.StatusCode, role)
+		}
+	}
+}
+
+func TestACertificateWithNoRoleIsAuthenticatedButNotAuthorised(t *testing.T) {
+	// Issuing a certificate without naming a role is not a way to grant every
+	// role. The handshake succeeds, and the request still does not.
+	store := newTestStore(t)
+	ca := newAuthority(t)
+
+	if err := store.Adopt(ca.pem); err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+
+	_, address := start(t, store)
+
+	response, err := client(t, store, ca.issue(t, "some other org")).
+		Get("https://" + address + "/v1/node")
+	if err != nil {
+		t.Fatalf("GET /v1/node: %v", err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	// 403 rather than 401: the client is authenticated, and retrying with the
+	// same certificate will never work.
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", response.StatusCode)
+	}
+
+	body := decode(t, response.Body)
+	if message, _ := body["error"].(string); !strings.Contains(message, "cctl pki issue") {
+		t.Errorf("error = %q, want it to say how to fix the certificate", message)
+	}
+}
+
+func TestAllows(t *testing.T) {
+	tests := []struct {
+		held, minimum Role
+		want          bool
+	}{
+		{RoleAdmin, RoleReadOnly, true},
+		{RoleAdmin, RoleAdmin, true},
+		{RoleOperator, RoleReadOnly, true},
+		{RoleOperator, RoleAdmin, false},
+		{RoleReadOnly, RoleOperator, false},
+		{"", RoleReadOnly, false},
+		{"corium:root", RoleReadOnly, false},
+	}
+
+	for _, tc := range tests {
+		if got := allows(tc.held, tc.minimum); got != tc.want {
+			t.Errorf("allows(%q, %q) = %v, want %v", tc.held, tc.minimum, got, tc.want)
+		}
+	}
+}
+
+func TestNodeReportsWhatTheInspectorFound(t *testing.T) {
+	store := newTestStore(t)
+	ca := newAuthority(t)
+
+	if err := store.Adopt(ca.pem); err != nil {
+		t.Fatalf("Adopt() error = %v", err)
+	}
+
+	server, err := NewServer(store, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	// A constructed machine, so the assertion is about the route rather than
+	// about whichever host the tests happen to run on.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "var/lib/corium"), 0o755); err != nil {
+		t.Fatalf("creating the fake state directory: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, nodeinfo.StateFile),
+		[]byte(`{"role":"worker","cluster":"prod"}`), 0o600); err != nil {
+		t.Fatalf("writing state: %v", err)
+	}
+
+	server.Inspect(&nodeinfo.Inspector{
+		Root: root,
+		Run: func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("not installed")
+		},
+	})
+
+	address := serveOn(t, server)
+
+	response, err := client(t, store, ca.issue(t, RoleReadOnly)).Get("https://" + address + "/v1/node")
+	if err != nil {
+		t.Fatalf("GET /v1/node: %v", err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	body := decode(t, response.Body)
+	if body["role"] != "worker" || body["cluster"] != "prod" {
+		t.Errorf("body = %v, want the constructed node's role and cluster", body)
 	}
 }

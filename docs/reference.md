@@ -452,10 +452,10 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
-> **Partly implemented.** The daemon runs, `cctl` claims a node and talks to
-> it, and the trust model is complete end to end. What does not exist yet are
-> the four management surfaces: a claimed node serves `GET /v1/health` and
-> nothing more.
+> **Partly implemented.** The daemon runs, `cctl` claims a node and reports on
+> it, and roles are enforced. Of the four management surfaces, node state is
+> done (`cctl status`); services and journals, upgrades, and node lifecycle are
+> not.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -545,7 +545,32 @@ Afterwards the fingerprint is remembered, so later calls need no flags:
 ```console
 $ cctl health 192.168.1.51
 192.168.1.51:7443  ok  (authenticated as corium:admin)
+
+$ cctl status 192.168.1.51
+192.168.1.51:7443
+
+  hostname     worker-01
+  role         controller+worker
+  cluster      prod
+
+  os           Fedora Linux 44 (Cloud Edition)
+  booted       ghcr.io/corium-os/corium:0.1
+  digest       sha256:aaaa1111
+
+  staged       ghcr.io/corium-os/corium:0.2
+  digest       sha256:bbbb2222
+  (the next reboot moves this node to the staged image)
+
+  k0s          v1.31.2+k0s.0
+  service      k0scontroller.service (running)
+  greenboot    passed
+  uptime       35h40m50s
 ```
+
+A field it could not determine is left out rather than shown as a dash or a
+zero. This is usually read just before doing something irreversible, and a
+blank is honest where a placeholder invites a guess. `--json` prints the node's
+reply verbatim.
 
 `curl` works too, which is half the reason the API speaks JSON over HTTP:
 

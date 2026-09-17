@@ -67,6 +67,30 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   It is a workstation tool and is not shipped in the OS image. Build it with
   `mise run build`.
 
+- **`cctl status`, and roles that actually gate something.** The first of the
+  four management surfaces: what a node is, read-only — role, cluster, the
+  booted and staged image with their digests, kernel, k0s version and service
+  state, greenboot's verdict, uptime. The digest is the field an incident turns
+  on, since a tag says what was asked for and a digest says what booted.
+
+  A field the node could not determine is left out rather than shown as a dash
+  or a zero: this is read just before doing something irreversible, and a blank
+  is honest where a placeholder invites a guess. A machine provisioned without
+  a Corium block says so plainly instead of looking broken, and a report
+  survives every tool on the node being missing — which is when it is most
+  worth having.
+
+  Every route now names the lowest role that may call it, so a route cannot be
+  added without answering the question. A certificate signed by the operator CA
+  but carrying no recognised role is authenticated and not authorised: it gets
+  a 403 saying how to reissue it, because signing a certificate without naming
+  a role is not a way to grant every role.
+
+  `corium-agent` now records what a node was bootstrapped as in
+  `/var/lib/corium/node.json`. The API reports from that rather than re-reading
+  the configuration, which after an edit describes an intention rather than a
+  machine.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

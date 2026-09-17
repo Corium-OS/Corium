@@ -12,6 +12,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,6 +42,7 @@ Commands:
   pki init      Create the operator CA this fleet will trust
   pki issue     Sign a client certificate for yourself
   enroll        Claim an unenrolled node, using the code on its console
+  status        Report what a node is: image, digest, role, k0s, health
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -71,6 +73,8 @@ func run() error {
 		return pkiCommand(args)
 	case "enroll", "enrol":
 		return enrolCommand(ctx, args)
+	case "status":
+		return statusCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -369,6 +373,79 @@ func confirmFingerprint(ctx context.Context, address string) (string, error) {
 	return seen, nil
 }
 
+func statusCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl status", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		asJSON      = flags.Bool("json", false, "print the node's reply verbatim")
+	)
+
+	rest, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
+	if len(rest) != 1 {
+		return errors.New("usage: cctl status <address>")
+	}
+
+	address := withDefaultPort(rest[0])
+
+	client, err := connect(*dir, address, *fingerprint)
+	if err != nil {
+		return err
+	}
+
+	node, err := client.Node(ctx)
+	if err != nil {
+		return err
+	}
+
+	if *asJSON {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+
+		return encoder.Encode(node)
+	}
+
+	cctl.FormatNode(os.Stdout, address, node)
+
+	return nil
+}
+
+// connect builds a client for an address, using the remembered fingerprint and
+// the operator's certificate. Every authenticated command needs both.
+func connect(dir, address, fingerprint string) (*cctl.Client, error) {
+	store, err := openStore(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if fingerprint == "" {
+		if fingerprint, err = store.Fingerprint(address); err != nil {
+			return nil, err
+		}
+	}
+
+	if fingerprint == "" {
+		return nil, fmt.Errorf("%w for %s; enrol it first, or pass --fingerprint",
+			cctl.ErrFingerprintUnknown, address)
+	}
+
+	certificates, err := cctl.ClientCertificate(store)
+	if err != nil {
+		return nil, err
+	}
+
+	if certificates == nil {
+		return nil, errors.New("no client certificate; run `cctl pki issue --role admin`")
+	}
+
+	return cctl.Dial(address, fingerprint, certificates...), nil
+}
+
 func healthCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("cctl health", flag.ExitOnError)
 	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
@@ -385,32 +462,12 @@ func healthCommand(ctx context.Context, args []string) error {
 
 	address := withDefaultPort(rest[0])
 
-	store, err := openStore(*dir)
+	client, err := connect(*dir, address, *fingerprint)
 	if err != nil {
 		return err
 	}
 
-	if *fingerprint == "" {
-		if *fingerprint, err = store.Fingerprint(address); err != nil {
-			return err
-		}
-	}
-
-	if *fingerprint == "" {
-		return fmt.Errorf("%w for %s; enrol it first, or pass --fingerprint",
-			cctl.ErrFingerprintUnknown, address)
-	}
-
-	certificates, err := cctl.ClientCertificate(store)
-	if err != nil {
-		return err
-	}
-
-	if certificates == nil {
-		return errors.New("no client certificate; run `cctl pki issue --role admin`")
-	}
-
-	health, err := cctl.Dial(address, *fingerprint, certificates...).Health(ctx)
+	health, err := client.Health(ctx)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
 // DefaultPort is where corium-apid listens.
@@ -62,6 +64,10 @@ type Server struct {
 	enroller *Enroller
 	address  string
 
+	// inspector reads the machine. It is a field so that a test can serve a
+	// constructed node rather than the one it happens to be running on.
+	inspector *nodeinfo.Inspector
+
 	// claimed is closed when an enrolment succeeds, so that the process can
 	// come back up in its other shape rather than rebuilding TLS underneath a
 	// live listener.
@@ -73,13 +79,18 @@ type Server struct {
 	bound string
 }
 
+// Inspect replaces where the server reads the machine's state from. It exists
+// for tests; a real node is inspected as itself.
+func (s *Server) Inspect(inspector *nodeinfo.Inspector) { s.inspector = inspector }
+
 // NewServer prepares a listener for whichever state the node is in.
 func NewServer(store *Store, address string) (*Server, error) {
 	server := &Server{
-		store:   store,
-		address: address,
-		claimed: make(chan struct{}),
-		ready:   make(chan struct{}),
+		store:     store,
+		address:   address,
+		claimed:   make(chan struct{}),
+		ready:     make(chan struct{}),
+		inspector: &nodeinfo.Inspector{},
 	}
 
 	enrolled, err := store.Enrolled()
@@ -230,7 +241,12 @@ func (s *Server) routes() http.Handler {
 		return logRequests(mux)
 	}
 
-	mux.HandleFunc("GET /v1/health", s.handleHealth)
+	// Every route names the lowest role that may call it. Health is the one
+	// exception at readonly: it exists so an operator can find out whether
+	// their certificate works at all, and refusing to answer that would make
+	// diagnosing a bad certificate harder than it needs to be.
+	mux.HandleFunc("GET /v1/health", require(RoleReadOnly, s.handleHealth))
+	mux.HandleFunc("GET /v1/node", require(RoleReadOnly, s.handleNode))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing
@@ -317,6 +333,14 @@ func (s *Server) finishClaim() {
 	default:
 		close(s.claimed)
 	}
+}
+
+// handleNode reports what this machine is.
+//
+// Read-only, and the endpoint the other surfaces are meant to be used after:
+// it is how an operator finds out what a node is before doing anything to it.
+func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.inspector.Collect(r.Context()))
 }
 
 type healthResponse struct {

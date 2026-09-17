@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/api"
+	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
 // requestTimeout bounds a single call. Every route this client speaks to
@@ -132,6 +133,20 @@ func (c *Client) Health(ctx context.Context) (*Health, error) {
 	}
 
 	return &health, nil
+}
+
+// Node asks a claimed node what it is.
+//
+// The reply is nodeinfo.Node, decoded here rather than restated: a second
+// definition of the same shape is a second thing to keep in step, and this one
+// would drift the first time a field was added.
+func (c *Client) Node(ctx context.Context) (*nodeinfo.Node, error) {
+	var node nodeinfo.Node
+	if err := c.call(ctx, http.MethodGet, "/v1/node", nil, &node); err != nil {
+		return nil, err
+	}
+
+	return &node, nil
 }
 
 // call makes one request and turns a node's error into this tool's error.

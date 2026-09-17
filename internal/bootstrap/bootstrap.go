@@ -3,14 +3,17 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
+	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/source"
 )
 
@@ -206,6 +209,12 @@ func apply(ctx context.Context, cfg *config.Config, rendered []byte, args []stri
 		return err
 	}
 
+	// What the node became, recorded before the marker so that a machine the
+	// marker calls bootstrapped can always say what it was bootstrapped as.
+	if err := recordState(cfg); err != nil {
+		return err
+	}
+
 	if err := markBootstrapped(); err != nil {
 		return err
 	}
@@ -241,6 +250,31 @@ func alreadyBootstrapped() (bool, error) {
 	default:
 		return false, fmt.Errorf("checking %s: %w", MarkerFile, err)
 	}
+}
+
+// recordState writes what this node was actually made into.
+//
+// It is deliberately separate from the configuration it came from: a
+// cloud-config can be edited after a node has joined a cluster, and from then
+// on it describes an intention rather than a machine. The management API
+// reports from this file for that reason.
+func recordState(cfg *config.Config) error {
+	state := nodeinfo.State{
+		Role:           string(cfg.Role),
+		Cluster:        cfg.Cluster.Name,
+		BootstrappedAt: time.Now().UTC(),
+	}
+
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encoding node state: %w", err)
+	}
+
+	if err := os.MkdirAll(StateDir, 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", StateDir, err)
+	}
+
+	return writeFile(nodeinfo.StateFile, encoded, 0o644)
 }
 
 func markBootstrapped() error {
