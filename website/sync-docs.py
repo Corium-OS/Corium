@@ -5,7 +5,8 @@ The Markdown in docs/ is the single source of truth. It carries no Hugo front
 matter, so that it stays readable on GitHub and in an editor; this script adds
 what Hugo needs on the way in.
 
-Run from the website/ directory, or via `make site-content`.
+Run via `mise run docs-sync`. Paths are resolved from this file's location, so
+running it directly with python3 works from anywhere too.
 """
 
 import os

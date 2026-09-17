@@ -5,8 +5,8 @@ From nothing to a working Kubernetes node in five steps.
 The short version, if you are in a hurry:
 
 ```bash
-make image                      # build the OS
-make artefact-qcow2             # turn it into a bootable disk
+mise run image                  # build the OS
+mise run artefact-qcow2         # turn it into a bootable disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -21,7 +21,9 @@ If you would rather understand the model before typing anything, read
 
 ## Before you start
 
-You need a **Linux host** with `podman` and about 20 GB of free disk.
+You need a **Linux host** with `podman` and about 20 GB of free disk, plus
+[mise](https://mise.jdx.dev), which runs every command below and provisions the
+toolchain they need. `mise install` once, in the checkout.
 
 macOS and Windows cannot build the disk images. `bootc-image-builder` mounts the
 root filesystem it creates in order to populate it, which needs a real Linux
@@ -41,7 +43,7 @@ build.
 ## 1. Build the OS image
 
 ```bash
-make image
+mise run image
 ```
 
 This produces an ordinary OCI image. Inspect it like any other:
@@ -58,7 +60,7 @@ survive an upgrade.
 To publish it:
 
 ```bash
-make push REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0
+REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push
 ```
 
 ---
@@ -76,10 +78,10 @@ where the node will run:
 
 | Command | Produces | Use it for |
 |---|---|---|
-| `make artefact-qcow2` | `output/qcow2/disk.qcow2` | Proxmox, KVM, libvirt |
-| `make artefact-raw` | `output/image/disk.raw` | Bare metal, most cloud import paths |
-| `make artefact-anaconda-iso` | `output/bootiso/install.iso` | Bare-metal installs |
-| `make artefacts` | all three | |
+| `mise run artefact-qcow2` | `output/qcow2/disk.qcow2` | Proxmox, KVM, libvirt |
+| `mise run artefact-raw` | `output/image/disk.raw` | Bare metal, most cloud import paths |
+| `mise run artefact-anaconda-iso` | `output/bootiso/install.iso` | Bare-metal installs |
+| `mise run artefacts` | all three | |
 
 Each takes several minutes and needs `sudo`, because the builder runs
 privileged.

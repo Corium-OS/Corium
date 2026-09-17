@@ -383,6 +383,11 @@ K0S_VERSION=v1.36.4+k0s.0
 K0S_SHA256_amd64=...
 ```
 
+`mise run k0s-lock vX.Y.Z+k0s.N` rewrites it: it downloads both architectures'
+binaries and hashes them, rather than trusting a checksum published beside the
+download. Review the resulting diff — it is what every image build verifies
+against from then on.
+
 CI checks that the image really ships the version the lock file names, so a
 lock file and an image cannot silently disagree.
 

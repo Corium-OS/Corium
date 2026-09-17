@@ -126,7 +126,7 @@ download would not have added anything.
 
 ## Building them yourself
 
-Nothing above is required. `make artefacts` produces the qcow2, the raw disk
+Nothing above is required. `mise run artefacts` produces the qcow2, the raw disk
 and the ISO locally from any image you can pull, including one you have
 modified. It needs a Linux host and `sudo`, because
 [`bootc-image-builder`](https://github.com/osbuild/bootc-image-builder) mounts

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Create a Corium VM on Proxmox that installs itself from the Anaconda ISO
-# produced by `make artefact-anaconda-iso`.
+# produced by `mise run artefact-anaconda-iso`.
 #
 # The ISO is unattended: Anaconda deploys the bootc image embedded in it with no
 # prompts. Run this on the Proxmox node itself.

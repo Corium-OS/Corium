@@ -12,7 +12,19 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Building from source uses [mise](https://mise.jdx.dev) instead of make.**
+  `make image` is now `mise run image`, and variable overrides move into the
+  environment: `REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push`.
+  `mise install` fetches the whole toolchain at the versions the project
+  expects, which `make` never did — `make fmt` simply failed if you had no
+  goimports. `mise tasks` lists what you can run. Nothing about the published
+  images or artefacts changes, and you still need a Linux host with podman to
+  build a disk.
+- **`mise run k0s-lock vX.Y.Z+k0s.N` repins the Kubernetes version.**
+  `build/k0s.lock` has always documented a command to refresh it; that command
+  now exists.
 
 ## [0.1.0] - 2026-09-17
 

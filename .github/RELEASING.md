@@ -176,7 +176,7 @@ coverage than it has is worse than a short one.
 ### Things a machine can check, that CI does not
 
 - `corium-agent version` reports the release, not `dev` or a bare SHA. The
-  first tag is what makes `git describe --tags` in the Makefile meaningful.
+  first tag is what makes `git describe --tags` in the `build` task meaningful.
 - The image carries `org.opencontainers.image.version` matching its tag.
 - `podman run --rm <image> k0s version` matches `build/k0s.lock`.
-- `python3 website/sync-docs.py` produces no diff.
+- `mise run docs-sync` produces no diff.

@@ -15,6 +15,7 @@ coverage.*
 # Local overrides
 .env
 *.local.yaml
+mise.local.toml
 
 # Secrets — never commit these
 *.token
