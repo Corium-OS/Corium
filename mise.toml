@@ -160,6 +160,64 @@ run = [
 description = "Remove built artefacts"
 run = 'sudo rm -rf "${OUTPUT_DIR}"'
 
+# ---------------------------------------------------------------- k0s
+
+[tasks."k0s-lock"]
+description = "Repin build/k0s.lock to a k0s release"
+usage = 'arg "<version>" help="k0s release tag, for example v1.36.4+k0s.0"'
+run = '''
+set -eu
+
+# The checksums are computed from the bytes this task downloads, not copied
+# from upstream, because there is nothing to copy: a k0s release carries the
+# bare binaries and 345-byte cosign signatures with no bundle or certificate
+# beside them. Neither a checksum file nor a verifiable signature is published.
+#
+# That is the same conclusion build/k0s.lock already states from the other
+# direction -- the lock file is the trust anchor, and changing it is a
+# reviewable event. Read the diff; it is the only control there is.
+version="${usage_version}"
+
+# A k0s tag contains a '+', which is not legal unencoded in a URL path.
+encoded="$(printf '%s' "${version}" | sed 's/+/%2B/g')"
+release="https://github.com/k0sproject/k0s/releases/download/${encoded}"
+
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+
+# sha256sum on Linux, shasum on macOS. This task is the one thing here a
+# developer might reasonably run from either.
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+fetch() {
+	echo "k0s-lock: fetching k0s ${version} (${1}), around 250 MB" >&2
+	curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+		--output "${work}/k0s-${1}" "${release}/k0s-${version}-${1}"
+	sha256 "${work}/k0s-${1}"
+}
+
+amd64="$(fetch amd64)"
+arm64="$(fetch arm64)"
+
+# Rewritten in place rather than regenerated, so the header explaining why this
+# file exists stays owned by the file and not by this task.
+awk -v v="${version}" -v a="${amd64}" -v b="${arm64}" '
+	/^K0S_VERSION=/      { print "K0S_VERSION=" v; next }
+	/^K0S_SHA256_amd64=/ { print "K0S_SHA256_amd64=" a; next }
+	/^K0S_SHA256_arm64=/ { print "K0S_SHA256_arm64=" b; next }
+	{ print }
+' build/k0s.lock > "${work}/k0s.lock"
+mv "${work}/k0s.lock" build/k0s.lock
+
+echo "k0s-lock: build/k0s.lock now pins ${version}"
+'''
+
 # ---------------------------------------------------------------- Site
 
 [tasks."site-deps"]

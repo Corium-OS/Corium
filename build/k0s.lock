@@ -5,7 +5,7 @@
 # compromised release — this file is the trust anchor and changing it is a
 # reviewable event.
 #
-# Refresh with: make k0s-lock K0S_VERSION=vX.Y.Z+k0s.N
+# Refresh with: mise run k0s-lock vX.Y.Z+k0s.N
 
 K0S_VERSION=v1.36.4+k0s.0
 K0S_SHA256_amd64=ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f
