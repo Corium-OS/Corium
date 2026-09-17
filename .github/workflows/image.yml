@@ -296,23 +296,6 @@ jobs:
       MIRROR_BUCKET: corium-releases
 
     steps:
-      - name: Make room for a 2.4 GB build
-        run: |
-          # The image is 2.4 GB, the ISO about the same, and osbuild wants
-          # roughly twice the base container in scratch space. The runner's
-          # documented 14 GB does not cover that; what is actually free is
-          # larger, but undocumented, so measure it rather than trust either
-          # number.
-          echo "before:"
-          df -h /
-          sudo rm -rf \
-            /usr/local/lib/android \
-            /usr/share/dotnet \
-            /opt/ghc \
-            /opt/hostedtoolcache
-          echo "after:"
-          df -h /
-
       - name: Log in to the registry
         uses: docker/login-action@v4
         with:
@@ -324,6 +307,14 @@ jobs:
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
+          # Measured, because the numbers in circulation are wrong: GitHub
+          # documents 14 GB of runner storage and the figure people repeat is
+          # 25-30 GB free. A real run had 145 GB with 87 GB free, against a
+          # 2.4 GB image and a 2.4 GB ISO. There was a step here that deleted
+          # the Android SDK and the tool cache to make room; it took 85
+          # seconds and freed space nothing needed.
+          df -h /
+
           # By digest, not by tag: this ISO installs the exact bytes that were
           # signed a job ago, and nothing that moves in between.
           #
@@ -361,7 +352,12 @@ jobs:
       - name: Install oras
         uses: oras-project/setup-oras@v2.0.1
         with:
-          version: 1.3.4
+          # The newest release this action knows about. It carries a table of
+          # versions and their checksums, so the CLI version is capped by the
+          # action's own release date, not by what ORAS has published: asking
+          # for 1.3.4 fails with "official ORAS CLI releases does not contain
+          # version 1.3.4" rather than downloading it.
+          version: 1.3.3
 
       - name: Publish and sign it
         id: publish
