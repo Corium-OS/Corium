@@ -452,15 +452,14 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
-> **Not implemented yet.** The schema below is settled and validated; the
-> daemon is not written. A node naming an operator CA bootstraps normally and
-> logs that nothing is serving the API. A node asking for maintenance mode
-> refuses to bootstrap, since there is nothing to enrol against and joining a
-> cluster unclaimed is the outcome the design exists to prevent.
+> **Partly implemented.** The daemon runs, serves TLS on `7443`, and enrolment
+> works. What does not exist yet is `cctl` — so enrolment is done with `curl`
+> for now, shown below — and the four management surfaces themselves. A claimed
+> node serves `GET /v1/health` and nothing more.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `enabled` | bool | `false` | Setting either key below implies `true` |
+| `enabled` | bool | `false` | Setting either key below implies `true`. False masks `corium-apid.service` |
 | `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
 
@@ -506,9 +505,33 @@ Corium node is unenrolled and is not in a cluster.
   cctl enroll 192.168.1.51 --code K7QM-93XF
 ```
 
-`cctl enroll` pins the CA and releases the bootstrap, which proceeds from the
-cloud-init configuration the node has been holding all along. Enrolment sends a
-CA certificate and nothing else — it is not a way to configure a node.
+Enrolment pins the CA and releases the bootstrap, which proceeds from the
+cloud-init configuration the node has been holding all along. It sends a CA
+certificate and nothing else — it is not a way to configure a node.
+
+Until `cctl` exists, claim a node with `curl`. The API speaks JSON over HTTP,
+which is half the reason it was chosen over gRPC:
+
+```console
+$ curl --cacert /dev/null -k -X POST https://192.168.1.51:7443/v1/enroll \
+    -d "{\"code\": \"K7QM-93XF\",
+         \"operatorCA\": $(jq -Rs . < operator-ca.pem)}"
+{"enrolled":true,"operatorCA":"SHA256:KuLc7+18paKxpMRed6xJMCUYvtBo9Hd6osRKAkO+7Qo"}
+```
+
+Check the fingerprint in the reply against the one on the console before
+trusting the node. Afterwards the daemon restarts and requires a client
+certificate signed by the CA you just sent:
+
+```console
+$ curl -k --cert operator.crt --key operator.key \
+    https://192.168.1.51:7443/v1/health
+{"status":"ok","role":"corium:admin"}
+```
+
+The `-k` is not a shortcut: the node signs its own certificate, because no
+private key is ever carried in a configuration. The fingerprint is the check,
+and `cctl` will pin it for you.
 
 Two consequences worth knowing before choosing this mode:
 
@@ -519,8 +542,9 @@ Two consequences worth knowing before choosing this mode:
   directions: a node cannot return to maintenance mode while it is a cluster
   member, so `cctl reset` takes it out of the cluster on the way.
 
-Enrolment is recorded under `/var/lib/corium/api/` and survives reboots and
-upgrades. A node that has been claimed never falls back to maintenance mode on
+Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
+because a certificate is not a secret, and the node's own serving key at `0600`
+because that one is — and it survives reboots and upgrades. A node that has been claimed never falls back to maintenance mode on
 its own, or power-cycling a machine would be enough to take it.
 
 ### 3.12 Defaults

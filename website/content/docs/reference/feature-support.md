@@ -136,7 +136,9 @@ Off unless asked for, and covered by
 | The API itself | `api.enabled` | Off by default. A node with no `api:` block runs no daemon and binds no port |
 | Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
 | Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
-| Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until `cctl enroll` claims it |
+| Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |
+| Transport | — | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
+| Roles | — | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin` |
 
 A node in maintenance mode is not a cluster member: it validates its
 configuration and waits, rather than joining first and being claimed later.

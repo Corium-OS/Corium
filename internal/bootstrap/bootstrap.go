@@ -34,6 +34,10 @@ type Options struct {
 
 	// DryRun renders everything and applies nothing.
 	DryRun bool
+
+	// StateDir overrides where the management API keeps the operator CA.
+	// Empty means the real path; setting it is for tests.
+	StateDir string
 }
 
 // Run bootstraps the node. It is idempotent: on an already-bootstrapped node it
@@ -74,7 +78,7 @@ func Run(ctx context.Context, opts Options) error {
 	// A node nobody has claimed is a node in no cluster. This is checked before
 	// the hostname is settled and before any disk is touched, because for an
 	// unclaimed node the correct amount of the machine to change is none of it.
-	if err := gateOnEnrolment(cfg); err != nil {
+	if err := gateOnEnrolment(ctx, cfg, opts); err != nil {
 		return err
 	}
 

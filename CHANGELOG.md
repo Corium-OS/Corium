@@ -39,6 +39,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   API will speak JSON over HTTP and mutual TLS rather than gRPC, so that an OS
   image does not grow five modules behind a listener running as root.
 
+- **`corium-apid`, the management API daemon, and its systemd unit.** On a node
+  nobody has claimed it serves one unauthenticated route — enrolment — and
+  prints a pairing code and its certificate fingerprint on the console; the
+  node joins no cluster until somebody uses them. Once claimed it restarts and
+  requires a client certificate signed by the operator CA, with the role taken
+  from the certificate's organisation. A node with no `api:` block runs nothing
+  and binds no port.
+
+  Maintenance mode is now real rather than a refusal: `corium-bootstrap.service`
+  waits for enrolment instead of failing, with no timeout, because what it is
+  waiting for is a person walking to a console.
+
+  There is no `cctl` yet, so enrolment is done with `curl` — the API speaks
+  JSON over HTTP, which is half the reason it was chosen. A claimed node serves
+  `GET /v1/health` and nothing else; the four management surfaces come next.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

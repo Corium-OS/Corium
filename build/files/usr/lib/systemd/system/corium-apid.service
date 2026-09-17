@@ -1,0 +1,69 @@
+[Unit]
+Description=Corium management API
+Documentation=https://github.com/Corium-OS/Corium/blob/main/docs/adr/0004-management-api.md
+
+# The daemon reads the `corium:` block to learn whether it should run at all and
+# who owns this node, so it must start after cloud-init has fetched and merged
+# the document. Same reasoning as corium-bootstrap.service, and the same trap:
+# see the [Install] section there before changing any of this.
+After=cloud-final.service
+Wants=cloud-final.service
+
+# Binding a port needs an address to bind to.
+After=network-online.target
+Wants=network-online.target
+
+# These belong to the unit, not the service: systemd moved them in v229 and
+# still parses them in [Service] only to warn about it.
+StartLimitIntervalSec=30s
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/corium-apid
+
+# Exit 0 means "enrolled, come back up requiring client certificates". The
+# restart is how that happens: rebuilding a TLS configuration under a live
+# listener is the kind of thing that works until the one request that matters
+# arrives mid-swap.
+Restart=always
+RestartSec=2s
+
+# Exit 78 (EX_CONFIG) means the node's configuration asks for no API. That is
+# the overwhelmingly common case, it is a success, and it must not restart --
+# otherwise every ordinary node in a fleet ends up with a unit in `failed` and
+# a system that reports `degraded` for doing exactly what it was told.
+SuccessExitStatus=78
+RestartPreventExitStatus=78
+
+# The pairing code is printed on /dev/console by the daemon itself rather than
+# by routing all of its output there, because everything after the banner is
+# ordinary logging that nobody wants on a console.
+StandardOutput=journal
+StandardError=journal
+
+# The API reboots the machine, drives bootc and reads the journal, so it runs
+# privileged and there is no version of it that does not. That is the argument
+# for the surface being as small as it is, and the reason there is no exec
+# endpoint -- see ADR 4. What can be taken away without lying about it, is.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# /var/lib/corium is the only place it writes. Reading is unaffected, so it can
+# still find cloud-init's merged document under /var/lib/cloud.
+#
+# Note what is absent: DeviceAllow. Setting it would switch DevicePolicy from
+# auto to closed, and the banner goes to /dev/console.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/corium
+
+[Install]
+# cloud-init.target rather than multi-user.target, for the ordering-cycle
+# reason spelled out in corium-bootstrap.service.
+WantedBy=cloud-init.target
