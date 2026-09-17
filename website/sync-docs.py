@@ -34,7 +34,7 @@ PAGES = [
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From an empty machine to a working Kubernetes node in five steps, with "
      "the mistakes that cost the most time."),
-    ("downloads.md", "guides", "downloads", "Downloads", 115,
+    ("install/downloads.md", "install", "downloads", "Downloads", 300,
      "Where the installer ISO, the qcow2 and the image are published, why "
      "nothing is attached to the release, and how to check what you got."),
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,

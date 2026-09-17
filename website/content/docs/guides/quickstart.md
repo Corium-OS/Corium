@@ -79,7 +79,7 @@ REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push
 **If you only want to install a release, skip this section.** Every release
 publishes a ready-made installer ISO and a qcow2 disk image, both signed, that
 you can download with `oras`, with `curl`, or from a browser -- no Linux host
-and no `sudo` required to obtain either. See [downloads](/docs/guides/downloads/), which
+and no `sudo` required to obtain either. See [downloads](/docs/install/downloads/), which
 also covers how to check that what you received is what was published.
 
 Build your own when you have changed the image. Pick the artefact that matches

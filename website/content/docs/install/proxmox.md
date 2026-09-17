@@ -47,7 +47,7 @@ sha256sum corium-0.1.0-x86_64.qcow2
 Compare it with the hash in the release notes. That hash is the digest of the
 artefact's layer in the registry, and that digest is named inside the manifest
 `cosign` signed — so matching it means you hold the bytes the project
-published, not merely a file that downloaded without error. [Downloads](/docs/guides/downloads/)
+published, not merely a file that downloaded without error. [Downloads](/docs/install/downloads/)
 explains the chain.
 
 ## 3. Describe the node
@@ -157,7 +157,7 @@ rm /var/lib/vz/snippets/corium-900.yaml
 
 ## What to read next
 
-- [Downloads](/docs/guides/downloads/) — the other ways to fetch an artefact, and how to
+- [Downloads](/docs/install/downloads/) — the other ways to fetch an artefact, and how to
   verify one
 - [Upgrades](/docs/guides/upgrades/) — moving this node to a later image, and which tag to
   follow
