@@ -450,12 +450,8 @@ jobs:
           # bunny.net uses the storage zone name as the access key and its
           # password as the secret. One credential, scoped to that zone, with
           # no reach into the rest of the account.
-          #
-          # The zone name is a variable, not a secret, and that is deliberate.
-          # It is an access key id, which is public by construction -- the
-          # password is the half that matters, and the storage endpoint
-          # answers 401 without it. Marking the name secret once broke this
-          # workflow in a way worth remembering: see RELEASING.md.
+          # The zone name is a variable on purpose: GitHub drops job outputs
+          # containing a secret, and this one is the project's own name.
           AWS_ACCESS_KEY_ID: ${{ vars.BUNNY_STORAGE_ZONE }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BUNNY_STORAGE_PASSWORD }}
           AWS_DEFAULT_REGION: ${{ vars.BUNNY_REGION }}
