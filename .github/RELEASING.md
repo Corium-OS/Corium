@@ -93,9 +93,41 @@ solving the purge problem first.
 
 CI uploads with the storage zone's own credentials -- the zone name is the S3
 access key and the zone password the secret -- which reach that zone and
-nothing else in the account. Repository secrets `BUNNY_STORAGE_ZONE` and
-`BUNNY_STORAGE_PASSWORD`, repository variables `BUNNY_REGION` and
+nothing else in the account. Repository secret `BUNNY_STORAGE_PASSWORD`;
+repository variables `BUNNY_STORAGE_ZONE`, `BUNNY_REGION` and
 `BUNNY_PULL_ZONE_URL`.
+
+**The zone name is a variable, and must stay one.** It is an access key id,
+which is public by construction -- the password is the half that matters, and
+the storage endpoint answers 401 without it. Marking it secret cost a release
+candidate, in a way worth reading twice:
+
+The zone is named after the project, so its value is the single most common
+word in this repository. GitHub redacts every occurrence of a secret's value,
+and **it drops job outputs that contain one** -- outputs passed between steps
+of the same job survive, outputs crossing a job boundary do not. So the
+artefacts job published its work, the release job received empty strings for
+every field whose value contained the project's name, and the only fields that
+arrived were the two SHA-256 hashes, because a hash is the one value that does
+not spell it. Logs read `IMAGE_NAME: ***-os/***` throughout, which is how the
+cause was eventually spotted.
+
+The general rule: never make a secret of a string that legitimately appears in
+ordinary output. Secrecy is not free, and GitHub enforces it in places that do
+not announce themselves.
+
+A note for anyone reaching for curl to debug an upload: bunny's two APIs do not
+name regions the same way. The S3 endpoint is `de-s3.storage.bunnycdn.com`,
+while the native API for that same region is plain `storage.bunnycdn.com` with
+no prefix -- `de.storage.bunnycdn.com` does not resolve. This workflow only
+uses S3, so it is unaffected; the trap is waiting for whoever reproduces an
+upload by hand.
+
+The credential grants delete as well as write, so it can erase the artefacts of
+past releases. Only read-only and full read-write zone passwords exist; there
+is no write-without-delete. That is an accepted risk rather than an oversight,
+and it is the reason nothing else in the release path holds an account-wide
+key.
 
 Two settings on the pull zone that are not obvious:
 
