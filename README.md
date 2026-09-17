@@ -142,7 +142,7 @@ attached to the release itself, and how to check what you got.
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
 - [**Downloads**](docs/install/downloads.md) — where the ISO and the qcow2 are published, and how to verify them
 - [**Proxmox**](docs/install/proxmox.md) — a node on a Proxmox host, start to finish
-- [**HA cluster**](docs/install/ha-cluster.md) — three controllers sharing a virtual IP
+- [**HA cluster**](docs/install/ha-cluster.md) — building a three-controller control plane by hand
 - [**OpenStack**](docs/install/openstack.md) — a node on an OpenStack cloud, UEFI image included
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
 - [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands

@@ -56,8 +56,8 @@ PAGES = [
      "A single node on a Proxmox host, from the published qcow2 to a cluster "
      "that schedules work, with the commands and the output from a real run."),
     ("install/ha-cluster.md", "install", "ha-cluster", "HA cluster", 302,
-     "Three controllers sharing a virtual IP on Proxmox: what the script does, "
-     "why the joining controllers wait for a token, and how to check the result."),
+     "Building a three-controller cluster by hand: what each node is told, why "
+     "the joiners wait for a token that does not exist yet, and how to check it."),
     ("install/openstack.md", "install", "openstack", "OpenStack", 303,
      "A node on an OpenStack cloud from the published qcow2: registering a UEFI "
      "image, and how the corium: block reaches it through the metadata service."),
