@@ -77,11 +77,8 @@ make push REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0
 **If you only want to install a release, skip this section.** Every release
 publishes a ready-made installer ISO and a qcow2 disk image, both signed, that
 you can download with `oras`, with `curl`, or from a browser -- no Linux host
-and no `sudo` required to obtain either. The commands are on the
-[latest release](https://github.com/Corium-OS/Corium/releases/latest).
-
-The qcow2 is the one the scripts in [`deploy/proxmox/`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox)
-expect for `DISK_IMAGE`.
+and no `sudo` required to obtain either. See [downloads](https://github.com/Corium-OS/Corium/blob/main/docs/downloads.md), which
+also covers how to check that what you received is what was published.
 
 Build your own when you have changed the image. Pick the artefact that matches
 where the node will run:

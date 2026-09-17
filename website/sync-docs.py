@@ -33,6 +33,9 @@ PAGES = [
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From an empty machine to a working Kubernetes node in five steps, with "
      "the mistakes that cost the most time."),
+    ("downloads.md", "guides", "downloads", "Downloads", 115,
+     "Where the installer ISO, the qcow2 and the image are published, why "
+     "nothing is attached to the release, and how to check what you got."),
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
