@@ -65,8 +65,9 @@ None of it can be undone. Work through this in order.
 
 The tag build publishes three things, in order, each gated on the one before:
 the signed image, the signed artefacts built from it (an installer ISO and a
-qcow2, from a single bootc-image-builder run), and the GitHub Release that
-points at all of them. The ISO build takes 20 to 35 minutes, so a release takes roughly an
+qcow2, one bootc-image-builder run each -- it refuses to produce an ISO and a
+disk image in the same request), and the GitHub Release that points at all of
+them. The ISO build takes 20 to 35 minutes, so a release takes roughly an
 hour of CI. If it fails, nothing announces a release that does not exist --
 re-run the workflow, which is idempotent on all three.
 
