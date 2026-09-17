@@ -461,10 +461,9 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](/docs/reference/adr-0004-management-api/).
 
-> **Partly implemented.** The daemon runs, `cctl` claims a node and reports on
-> it, and roles are enforced. Of the four management surfaces, node state is
-> done (`cctl status`); services and journals, upgrades, and node lifecycle are
-> not.
+> **Partly implemented.** Two of the four management surfaces are done: node
+> state (`cctl status`) and services and journals (`cctl services`,
+> `cctl restart`, `cctl logs`). Upgrades and node lifecycle are not.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -580,6 +579,50 @@ A field it could not determine is left out rather than shown as a dash or a
 zero. This is usually read just before doing something irreversible, and a
 blank is honest where a placeholder invites a guess. `--json` prints the node's
 reply verbatim.
+
+#### Services and journals
+
+```console
+$ cctl services 192.168.1.51
+  corium-apid.service              active/running     this API
+  corium-bootstrap.service         inactive/dead      first-boot configuration; runs once
+  k0sworker.service                active/running     the kubelet and container runtime
+  ...
+
+$ cctl logs 192.168.1.51 --unit k0sworker --since 15m
+21:04:47 info    k0sworker              starting kubelet
+21:04:48 warn    k0sworker              node not ready: waiting for CNI
+
+$ cctl logs 192.168.1.51 --follow
+```
+
+`--unit kernel` reads the kernel's own messages, which are in the journal too.
+Leaving `--unit` out reads every unit the API knows about — what you want when
+you do not yet know where the problem is. `--follow` streams until you stop it,
+for at most an hour.
+
+Units are named from a fixed list, not passed through. An API that takes a unit
+name and hands it to `systemctl` can start anything on the machine, which is a
+remote shell with extra steps.
+
+Restarting is a shorter list still, and needs `corium:operator`:
+
+```console
+$ cctl restart 192.168.1.51 --unit k0sworker
+k0sworker.service is now active/running
+
+$ cctl restart 192.168.1.51 --unit corium-bootstrap
+cctl: 403 Forbidden: corium-bootstrap.service: this unit is not one the API
+will restart (first-boot configuration; runs once)
+```
+
+That second refusal is the point of having two lists. Re-running the bootstrap
+on a node that has already joined a cluster destroys data, and no certificate
+should be able to ask for it.
+
+One thing to weigh before handing out `corium:readonly`: it reads journals, and
+journals are not sanitised. Whatever any software on the node has logged is in
+there.
 
 `curl` works too, which is half the reason the API speaks JSON over HTTP:
 

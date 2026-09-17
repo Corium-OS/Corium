@@ -1,6 +1,7 @@
 package cctl
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -9,11 +10,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 // requestTimeout bounds a single call. Every route this client speaks to
@@ -178,17 +182,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 	}
 
 	if response.StatusCode != http.StatusOK {
-		var failure struct {
-			Error string `json:"error"`
-		}
-
-		if err := json.Unmarshal(raw, &failure); err == nil && failure.Error != "" {
-			// The node's own words. It knows why it said no, and rewording it
-			// here would only lose detail.
-			return fmt.Errorf("%s: %s", response.Status, failure.Error)
-		}
-
-		return fmt.Errorf("%s from %s", response.Status, c.address)
+		return c.explain(response.Status, raw)
 	}
 
 	if into == nil {
@@ -200,6 +194,32 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 	}
 
 	return nil
+}
+
+// failure reads an error response that has not been consumed yet.
+func (c *Client) failure(response *http.Response) error {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponse))
+	if err != nil {
+		return fmt.Errorf("%s from %s", response.Status, c.address)
+	}
+
+	return c.explain(response.Status, raw)
+}
+
+// explain turns a node's refusal into this tool's error.
+//
+// The node's own words are used where it gave any: it knows why it said no,
+// and rewording it here would only lose detail.
+func (c *Client) explain(status string, body []byte) error {
+	var failure struct {
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(body, &failure); err == nil && failure.Error != "" {
+		return fmt.Errorf("%s: %s", status, failure.Error)
+	}
+
+	return fmt.Errorf("%s from %s", status, c.address)
 }
 
 // ClientCertificate loads the operator's own certificate, if it has one.
@@ -228,4 +248,108 @@ func OperatorCA(store *Store) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// Services lists the units the node will talk about.
+func (c *Client) Services(ctx context.Context) ([]systemd.Status, error) {
+	var reply struct {
+		Services []systemd.Status `json:"services"`
+	}
+
+	if err := c.call(ctx, http.MethodGet, "/v1/services", nil, &reply); err != nil {
+		return nil, err
+	}
+
+	return reply.Services, nil
+}
+
+// Restart cycles a unit and reports what state it landed in.
+func (c *Client) Restart(ctx context.Context, unit string) (*systemd.Status, error) {
+	var status systemd.Status
+
+	path := "/v1/services/" + url.PathEscape(unit) + "/restart"
+	if err := c.call(ctx, http.MethodPost, path, nil, &status); err != nil {
+		return nil, err
+	}
+
+	return &status, nil
+}
+
+// Logs streams a node's journal, calling onRecord for each entry as it arrives.
+//
+// It does not collect the records first. The point of following a log is to see
+// a line before the request ends, and buffering would defeat that at exactly
+// the moment somebody is watching a node come back.
+func (c *Client) Logs(ctx context.Context, options LogQuery, onRecord func(systemd.Record)) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://"+c.address+"/v1/logs?"+options.values().Encode(), nil)
+	if err != nil {
+		return fmt.Errorf("building the request: %w", err)
+	}
+
+	// A followed stream has no length and no deadline of its own; the node
+	// bounds it, and ^C ends it.
+	streaming := *c.http
+	streaming.Timeout = 0
+
+	response, err := streaming.Do(request)
+	if err != nil {
+		return fmt.Errorf("contacting %s: %w", c.address, err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		return c.failure(response)
+	}
+
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxResponse)
+
+	for scanner.Scan() {
+		var record systemd.Record
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			// A line this version does not understand is skipped rather than
+			// fatal: a newer node may send a field this client predates.
+			continue
+		}
+
+		onRecord(record)
+	}
+
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		return fmt.Errorf("reading the stream: %w", err)
+	}
+
+	return nil
+}
+
+// LogQuery is one request for a node's journal.
+type LogQuery struct {
+	Unit   string
+	Lines  int
+	Since  string
+	Follow bool
+}
+
+func (q LogQuery) values() url.Values {
+	values := url.Values{}
+
+	if q.Unit != "" {
+		values.Set("unit", q.Unit)
+	}
+
+	if q.Lines > 0 {
+		values.Set("lines", strconv.Itoa(q.Lines))
+	}
+
+	if q.Since != "" {
+		values.Set("since", q.Since)
+	}
+
+	if q.Follow {
+		values.Set("follow", "true")
+	}
+
+	return values
 }

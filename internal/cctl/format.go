@@ -3,9 +3,12 @@ package cctl
 import (
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 // FormatNode lays a node's report out for a person.
@@ -76,4 +79,30 @@ func FormatNode(w io.Writer, address string, node *nodeinfo.Node) {
 	if node.Health.UptimeSeconds > 0 {
 		line("uptime", (time.Duration(node.Health.UptimeSeconds) * time.Second).String())
 	}
+}
+
+// priorities are syslog levels, as journald reports them.
+var priorities = map[int]string{
+	0: "emerg", 1: "alert", 2: "crit", 3: "error",
+	4: "warn", 5: "notice", 6: "info", 7: "debug",
+}
+
+// FormatRecord prints one journal entry.
+//
+// The unit is shown because a log read without a unit filter is the common
+// case -- an operator who does not yet know where the problem is -- and a
+// stream of messages with no attribution is no use to them.
+func FormatRecord(w io.Writer, record systemd.Record) {
+	level, ok := priorities[record.Priority]
+	if !ok {
+		level = strconv.Itoa(record.Priority)
+	}
+
+	unit := strings.TrimSuffix(record.Unit, ".service")
+	if unit == "" {
+		unit = "kernel"
+	}
+
+	_, _ = fmt.Fprintf(w, "%s %-7s %-22s %s\n",
+		record.Time.Local().Format("15:04:05"), level, unit, record.Message)
 }

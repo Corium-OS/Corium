@@ -23,6 +23,7 @@ import (
 	"syscall"
 
 	"github.com/Corium-OS/Corium/internal/cctl"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 // Build metadata, injected at link time.
@@ -43,6 +44,9 @@ Commands:
   pki issue     Sign a client certificate for yourself
   enroll        Claim an unenrolled node, using the code on its console
   status        Report what a node is: image, digest, role, k0s, health
+  services      List the services this API knows about, and their state
+  restart       Restart k0s on a node
+  logs          Read a node's journal, optionally following it
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -75,6 +79,12 @@ func run() error {
 		return enrolCommand(ctx, args)
 	case "status":
 		return statusCommand(ctx, args)
+	case "services":
+		return servicesCommand(ctx, args)
+	case "restart":
+		return restartCommand(ctx, args)
+	case "logs":
+		return logsCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -413,6 +423,112 @@ func statusCommand(ctx context.Context, args []string) error {
 	cctl.FormatNode(os.Stdout, address, node)
 
 	return nil
+}
+
+func servicesCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl services", flag.ExitOnError)
+	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
+	fingerprint := flags.String("fingerprint", "", "override the remembered fingerprint")
+
+	client, _, err := target(flags, args, "cctl services <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	services, err := client.Services(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		state := service.Active
+		if service.Sub != "" {
+			state += "/" + service.Sub
+		}
+
+		fmt.Printf("  %-32s %-18s %s\n", service.Name, state, service.Purpose)
+	}
+
+	return nil
+}
+
+func restartCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl restart", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		unit        = flags.String("unit", "", "the unit to restart; required")
+	)
+
+	client, _, err := target(flags, args, "cctl restart <address> --unit <unit>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if *unit == "" {
+		return errors.New("--unit is required; `cctl services <address>` lists what can be restarted")
+	}
+
+	status, err := client.Restart(ctx, *unit)
+	if err != nil {
+		return err
+	}
+
+	// systemd accepting the job is not the service being up, and the node
+	// reports the state it actually landed in.
+	fmt.Printf("%s is now %s/%s\n", status.Name, status.Active, status.Sub)
+
+	return nil
+}
+
+func logsCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl logs", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		unit        = flags.String("unit", "", "a unit name, or `kernel`; default every unit")
+		lines       = flags.Int("lines", 0, "how many records to start from")
+		since       = flags.String("since", "", "only records newer than this, such as 15m")
+		follow      = flags.Bool("follow", false, "keep the stream open as records arrive")
+	)
+
+	client, _, err := target(flags, args, "cctl logs <address> [--unit <unit>]", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	query := cctl.LogQuery{Unit: *unit, Lines: *lines, Since: *since, Follow: *follow}
+
+	// Written straight out as each record arrives rather than collected: the
+	// point of following a log is seeing a line before the request ends.
+	return client.Logs(ctx, query, func(record systemd.Record) {
+		cctl.FormatRecord(os.Stdout, record)
+	})
+}
+
+// target parses the flags every node-facing command shares and connects.
+func target(
+	flags *flag.FlagSet, args []string, usage string, dir, fingerprint *string,
+) (*cctl.Client, string, error) {
+	rest, err := parseFlags(flags, args)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(rest) != 1 {
+		return nil, "", errors.New("usage: " + usage)
+	}
+
+	address := withDefaultPort(rest[0])
+
+	client, err := connect(*dir, address, *fingerprint)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return client, address, nil
 }
 
 // connect builds a client for an address, using the remembered fingerprint and

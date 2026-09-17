@@ -3,8 +3,10 @@ package cctl
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 func render(t *testing.T, node *nodeinfo.Node) string {
@@ -95,5 +97,52 @@ func TestFormatNodeIsPlainAboutAMachineThatIsNotANode(t *testing.T) {
 
 	if strings.Contains(report, "role") {
 		t.Errorf("report claims a role for a machine that has none:\n%s", report)
+	}
+}
+
+func TestFormatRecordAttributesEveryLine(t *testing.T) {
+	// A log read with no unit filter is the common case -- somebody who does
+	// not yet know where the problem is -- and unattributed messages are no
+	// use to them.
+	var out strings.Builder
+
+	FormatRecord(&out, systemd.Record{
+		Time:     time.Date(2026, 9, 17, 8, 14, 2, 0, time.UTC),
+		Unit:     "k0sworker.service",
+		Priority: 4,
+		Message:  "node not ready",
+	})
+
+	line := out.String()
+
+	for _, want := range []string{"warn", "k0sworker", "node not ready"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("line %q does not mention %q", line, want)
+		}
+	}
+
+	// The .service suffix is on every unit and so carries no information.
+	if strings.Contains(line, ".service") {
+		t.Errorf("line %q repeats the suffix every unit has", line)
+	}
+}
+
+func TestFormatRecordNamesTheKernel(t *testing.T) {
+	var out strings.Builder
+
+	FormatRecord(&out, systemd.Record{Priority: 3, Message: "I/O error"})
+
+	if !strings.Contains(out.String(), "kernel") {
+		t.Errorf("a record with no unit is not attributed: %q", out.String())
+	}
+}
+
+func TestFormatRecordSurvivesAnUnknownPriority(t *testing.T) {
+	var out strings.Builder
+
+	FormatRecord(&out, systemd.Record{Priority: 42, Message: "hello"})
+
+	if !strings.Contains(out.String(), "42") || !strings.Contains(out.String(), "hello") {
+		t.Errorf("line = %q, want the number shown rather than a blank", out.String())
 	}
 }

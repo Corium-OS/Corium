@@ -91,6 +91,27 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   the configuration, which after an edit describes an intention rather than a
   machine.
 
+- **Services and journals**, the second management surface. `cctl services`
+  lists what the API knows about and what each unit is for; `cctl logs` reads a
+  journal per unit or across all of them, with `--since`, `--follow` and
+  `--unit kernel` for the kernel's own messages; `cctl restart --unit k0sworker`
+  cycles k0s.
+
+  Units come from a fixed list rather than being passed through. An API that
+  takes a unit name and hands it to `systemctl` can start anything on the
+  machine, which is a remote shell with extra steps. Restarting is a shorter
+  list still: `corium-bootstrap.service` is readable and deliberately not
+  restartable, because re-running it on a node that has already joined a
+  cluster destroys data — no certificate can ask for that.
+
+  Reads need `corium:readonly` and restarts `corium:operator`. Worth knowing
+  before handing out the former: journals are not sanitised, so whatever any
+  software on the node has logged is readable with it.
+
+  Logs stream as newline-delimited JSON, flushed per record, so `--follow`
+  shows a line before the request ends. A followed stream is bounded at an
+  hour, and a request is capped at 10000 records.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

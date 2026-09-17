@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 // DefaultPort is where corium-apid listens.
@@ -68,6 +69,9 @@ type Server struct {
 	// constructed node rather than the one it happens to be running on.
 	inspector *nodeinfo.Inspector
 
+	// systemd is how services and journals are reached, for the same reason.
+	systemd *systemd.Manager
+
 	// claimed is closed when an enrolment succeeds, so that the process can
 	// come back up in its other shape rather than rebuilding TLS underneath a
 	// live listener.
@@ -83,6 +87,9 @@ type Server struct {
 // for tests; a real node is inspected as itself.
 func (s *Server) Inspect(inspector *nodeinfo.Inspector) { s.inspector = inspector }
 
+// Supervise replaces how the server reaches systemd, for the same reason.
+func (s *Server) Supervise(manager *systemd.Manager) { s.systemd = manager }
+
 // NewServer prepares a listener for whichever state the node is in.
 func NewServer(store *Store, address string) (*Server, error) {
 	server := &Server{
@@ -91,6 +98,7 @@ func NewServer(store *Store, address string) (*Server, error) {
 		claimed:   make(chan struct{}),
 		ready:     make(chan struct{}),
 		inspector: &nodeinfo.Inspector{},
+		systemd:   &systemd.Manager{},
 	}
 
 	enrolled, err := store.Enrolled()
@@ -247,6 +255,12 @@ func (s *Server) routes() http.Handler {
 	// diagnosing a bad certificate harder than it needs to be.
 	mux.HandleFunc("GET /v1/health", require(RoleReadOnly, s.handleHealth))
 	mux.HandleFunc("GET /v1/node", require(RoleReadOnly, s.handleNode))
+	mux.HandleFunc("GET /v1/services", require(RoleReadOnly, s.handleServices))
+	mux.HandleFunc("GET /v1/logs", require(RoleReadOnly, s.handleLogs))
+
+	// Restarting k0s takes a node out of service for as long as it takes to
+	// come back, which is an operator's call and not a reader's.
+	mux.HandleFunc("POST /v1/services/{unit}/restart", require(RoleOperator, s.handleRestart))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing

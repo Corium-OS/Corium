@@ -131,6 +131,9 @@ Off unless asked for, and covered by
 | Transport | — | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
 | Roles | — | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin`. Every route names the lowest role that may call it |
 | Node state | — | `cctl status`: role, cluster, booted and staged image digests, kernel, k0s version and service, greenboot verdict, uptime. Read-only |
+| Services | — | `cctl services` lists what the API knows about. Units come from a fixed list, never passed through |
+| Journals | — | `cctl logs`, per unit or across all of them, with `--since`, `--follow` and `--unit kernel`. Bounded: 10000 records, one hour of following |
+| Restarting k0s | — | `cctl restart --unit k0sworker`, at `corium:operator`. Units that run once — the bootstrap above all — are readable and not restartable |
 | Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its
