@@ -279,6 +279,7 @@ jobs:
       digest: ${{ steps.publish.outputs.digest }}
       blob: ${{ steps.publish.outputs.blob }}
       name: ${{ steps.publish.outputs.name }}
+      mirror: ${{ steps.mirror.outputs.url }}
 
     env:
       # A separate repository, not a tag on the image. containers-policy scopes
@@ -288,6 +289,11 @@ jobs:
       # two in one repository would put a thing that cannot boot in the tag
       # list of the thing that does.
       ISO_IMAGE: ghcr.io/corium-os/corium-iso
+      # A plain HTTPS mirror, for people who would rather click a link than
+      # install a tool. Self-hosted, so it is allowed to be down: see the
+      # mirror step for why that costs a release nothing.
+      MIRROR_ENDPOINT: https://s3.thoughtless.eu
+      MIRROR_BUCKET: corium-releases
 
     steps:
       - name: Make room for a 2.4 GB build
@@ -398,6 +404,38 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
 
+      - name: Mirror it to a plain HTTPS URL
+        id: mirror
+        # The signed artifact above is the release. This is a convenience copy
+        # on self-hosted storage, so it must never be able to take a release
+        # down with it: the step is allowed to fail, and the notes mention a
+        # mirror only when there is one to mention.
+        continue-on-error: true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RUSTFS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RUSTFS_SECRET_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          ISO_NAME: ${{ steps.publish.outputs.name }}
+        run: |
+          aws --endpoint-url "${MIRROR_ENDPOINT}" \
+            s3 cp "${ISO_NAME}" "s3://${MIRROR_BUCKET}/${ISO_NAME}" \
+            --only-show-errors
+
+          url="${MIRROR_ENDPOINT}/${MIRROR_BUCKET}/${ISO_NAME}"
+
+          # Anonymous read comes from a bucket policy on the bucket, not from
+          # a canned ACL -- the storage accepts --acl public-read and silently
+          # discards it. Ask for a byte as a stranger would rather than trust
+          # that: an advertised URL that 403s is worse than no mirror.
+          code="$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 "${url}")"
+          if [ "${code}" != "206" ] && [ "${code}" != "200" ]; then
+            echo "::warning::${url} answered ${code}; not advertising the mirror"
+            exit 1
+          fi
+
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+          echo "mirrored to ${url}"
+
   release:
     name: Publish the GitHub Release
     needs: [build, iso]
@@ -427,6 +465,7 @@ jobs:
           ISO_DIGEST: ${{ needs.iso.outputs.digest }}
           ISO_BLOB: ${{ needs.iso.outputs.blob }}
           ISO_NAME: ${{ needs.iso.outputs.name }}
+          ISO_MIRROR: ${{ needs.iso.outputs.mirror }}
         run: |
           # Re-running a tag build after a transient registry failure replays
           # the same push event. Publishing the image again is harmless;
@@ -526,7 +565,15 @@ jobs:
             printf 'curl -L -H "Authorization: Bearer ${token}" -o %s \\\n' "${ISO_NAME}"
             printf '  https://ghcr.io/v2/%s/blobs/%s\n' "${iso_repo}" "${ISO_BLOB}"
             printf '```\n\n'
-            printf 'Both give you the same bytes. Check them:\n\n'
+            if [ -n "${ISO_MIRROR}" ]; then
+              printf 'Or straight from a browser:\n\n'
+              printf '%s\n\n' "${ISO_MIRROR}"
+              printf 'That last one is a convenience mirror on self-hosted storage. It carries\n'
+              printf 'the same bytes, and the check below catches it if it ever does not, but\n'
+              printf 'the registry above is the release.\n\n'
+            fi
+
+            printf 'Every route gives the same bytes. Check them:\n\n'
             printf '```bash\n'
             printf 'cosign verify %s \\\n' "${ISO_DIGEST}"
             printf '  --certificate-identity-regexp %s \\\n' "'https://github.com/${GH_REPO}/.*'"
