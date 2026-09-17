@@ -65,7 +65,13 @@ make push REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0
 
 ## 2. Make something bootable
 
-Pick the artefact that matches where the node will run:
+**If you only want to install a release, skip this section.** Every release
+publishes a ready-made installer ISO, signed, that you can download with
+`oras` or `curl` -- no Linux host and no `sudo` required to obtain it. The
+commands are on the [latest release](https://github.com/Corium-OS/Corium/releases/latest).
+
+Build your own when you have changed the image. Pick the artefact that matches
+where the node will run:
 
 | Command | Produces | Use it for |
 |---|---|---|
