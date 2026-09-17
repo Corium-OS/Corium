@@ -309,7 +309,7 @@ jobs:
       # account-wide API key this workflow deliberately does not hold. Every
       # name carries its version, so the question never arises.
       MIRROR_ENDPOINT: https://${{ vars.BUNNY_REGION }}-s3.storage.bunnycdn.com
-      MIRROR_BUCKET: ${{ secrets.BUNNY_STORAGE_ZONE }}
+      MIRROR_BUCKET: ${{ vars.BUNNY_STORAGE_ZONE }}
       MIRROR_BASE_URL: ${{ vars.BUNNY_PULL_ZONE_URL }}
 
     steps:
@@ -450,7 +450,9 @@ jobs:
           # bunny.net uses the storage zone name as the access key and its
           # password as the secret. One credential, scoped to that zone, with
           # no reach into the rest of the account.
-          AWS_ACCESS_KEY_ID: ${{ secrets.BUNNY_STORAGE_ZONE }}
+          # The zone name is a variable on purpose: GitHub drops job outputs
+          # containing a secret, and this one is the project's own name.
+          AWS_ACCESS_KEY_ID: ${{ vars.BUNNY_STORAGE_ZONE }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BUNNY_STORAGE_PASSWORD }}
           AWS_DEFAULT_REGION: ${{ vars.BUNNY_REGION }}
           ISO_NAME: ${{ steps.publish.outputs.iso_name }}

@@ -93,9 +93,21 @@ solving the purge problem first.
 
 CI uploads with the storage zone's own credentials -- the zone name is the S3
 access key and the zone password the secret -- which reach that zone and
-nothing else in the account. Repository secrets `BUNNY_STORAGE_ZONE` and
-`BUNNY_STORAGE_PASSWORD`, repository variables `BUNNY_REGION` and
+nothing else in the account. Repository secret `BUNNY_STORAGE_PASSWORD`;
+repository variables `BUNNY_STORAGE_ZONE`, `BUNNY_REGION` and
 `BUNNY_PULL_ZONE_URL`.
+
+**The zone name must stay a variable.** GitHub drops job outputs containing a
+secret's value, and the zone is named after the project -- as a secret it
+silently emptied every output that spelled it. An access key id is public by
+construction anyway; the password is the half that matters.
+
+Debugging an upload with curl: the S3 endpoint is
+`de-s3.storage.bunnycdn.com`, but the native API for the same region is plain
+`storage.bunnycdn.com` -- `de.storage.bunnycdn.com` does not resolve.
+
+The zone password grants delete as well as write, so it can erase past
+releases. bunny.net offers no write-without-delete password; accepted risk.
 
 Two settings on the pull zone that are not obvious:
 
