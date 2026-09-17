@@ -36,6 +36,9 @@ PAGES = [
     ("downloads.md", "guides", "downloads", "Downloads", 115,
      "Where the installer ISO, the qcow2 and the image are published, why "
      "nothing is attached to the release, and how to check what you got."),
+    ("proxmox.md", "guides", "proxmox", "Proxmox", 118,
+     "A single node on a Proxmox host, from the published qcow2, with the "
+     "commands and the output from a real run."),
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),

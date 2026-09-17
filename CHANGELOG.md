@@ -79,7 +79,8 @@ the node is described in cloud-init.
   either. Every route gives the same bytes, and the hash to check them against
   is the one cosign signed rather than a checksum file alongside.
 - **Proxmox scripts** that create a single node from a qcow2, a node that
-  installs itself from the ISO, and a three-controller HA cluster.
+  installs itself from the ISO, and a three-controller HA cluster, with a
+  [walkthrough](docs/proxmox.md) written from a real run.
 - **An escape hatch at every level**: raw `write_files` and `runcmd`, and a
   verbatim k0s configuration patch that Corium neither validates nor alters.
 

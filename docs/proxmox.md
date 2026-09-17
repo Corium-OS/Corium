@@ -1,0 +1,155 @@
+# Deploying on Proxmox
+
+A single Corium node on a Proxmox host, from the published qcow2. Every command
+and every output below is from a real run on Proxmox VE 8.4.
+
+The scripts in [`deploy/proxmox/`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox)
+run on the Proxmox node itself, not on your laptop. Nothing here uses the web
+interface.
+
+## Before you start
+
+- A Proxmox host you can reach over SSH as `root`.
+- A storage that accepts snippets — `local` does by default. Check with
+  `pvesm status --content snippets`; if nothing is listed, add `snippets` to a
+  directory storage's content types in **Datacenter → Storage**.
+- A free VMID. `qm list` shows what is taken.
+- About 6 GB of RAM and 32 GB of disk free.
+
+## 1. Fetch the qcow2
+
+On the Proxmox host, so the bytes land where they are needed:
+
+```bash
+cd /var/lib/vz/template
+curl -fLO https://corium.b-cdn.net/corium-0.1.0-x86_64.qcow2
+```
+
+The exact URL for a release is in [its notes](https://github.com/Corium-OS/Corium/releases/latest),
+along with the two other ways to fetch it. A real run took 15 seconds for
+1.5 GB.
+
+## 2. Check what you downloaded
+
+```bash
+sha256sum corium-0.1.0-x86_64.qcow2
+```
+
+Compare it with the hash in the release notes. That hash is the digest of the
+artefact's layer in the registry, and that digest is named inside the manifest
+`cosign` signed — so matching it means you hold the bytes the project
+published, not merely a file that downloaded without error. [Downloads](downloads.md)
+explains the chain.
+
+## 3. Describe the node
+
+```yaml
+#cloud-config
+corium:
+  role: single
+  cluster:
+    name: homelab
+users:
+  - name: core
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: wheel
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA... you@example.com
+ssh_pwauth: false
+```
+
+Save it as `/root/corium-node.yaml`. Check it before booting anything:
+
+```bash
+corium-agent validate corium-node.yaml
+corium-node.yaml: valid (role single, cluster homelab)
+```
+
+## 4. Create the VM
+
+```bash
+VMID=900 VM_NAME=corium \
+  DISK_IMAGE=/var/lib/vz/template/corium-0.1.0-x86_64.qcow2 \
+  CLOUD_CONFIG=/root/corium-node.yaml \
+  MEMORY=6144 CORES=2 \
+  ./create-vm.sh
+```
+
+It imports the disk, resizes it, attaches the cloud-config as a custom
+cloud-init snippet, and stops:
+
+```
+unused0: successfully imported disk 'local-lvm:vm-900-disk-1'
+  Size of logical volume pve/vm-900-disk-1 changed from 10.00 GiB to 32.00 GiB.
+update VM 900: -cicustom user=local:snippets/corium-900.yaml
+update VM 900: -ipconfig0 ip=dhcp
+
+VM 900 (corium) created. Start it with:
+  qm start 900
+```
+
+`--cicustom` is what lets the `corium:` block through: it replaces Proxmox's
+generated user-data wholesale rather than merging with it.
+
+The defaults are `STORAGE=local-lvm`, `SNIPPET_STORAGE=local`, `BRIDGE=vmbr0`,
+`CORES=4`, `MEMORY=8192`, `DISK_SIZE=32G`, and DHCP.
+
+**If you set a static address**, set `NAMESERVER` too. Proxmox's `ipconfig0`
+carries an address and a gateway and nothing else, so a static node comes up
+with no resolver — and the failure is confusing, because the node pings, SSH
+works, and Kubernetes hangs pulling images with `lookup quay.io: Try again`.
+The script warns, but only if you let it.
+
+## 5. Start it and find it
+
+```bash
+qm start 900
+qm guest cmd 900 network-get-interfaces
+```
+
+The guest agent answered after about 30 seconds in a real run.
+
+## 6. Watch it become a cluster
+
+```bash
+ssh core@<address>
+```
+
+```console
+$ corium-agent version
+corium-agent 0.1.0 (d5a8f78)
+
+$ systemctl is-active corium-bootstrap k0scontroller
+active
+active
+
+$ sudo k0s kubectl get nodes
+NAME               STATUS   ROLES           AGE    VERSION
+corium-f725a239    Ready    control-plane   2m1s   v1.36.4+k0s
+```
+
+Two minutes from `qm start` to `Ready` on that run.
+
+The hostname is derived from the machine ID because the configuration did not
+set one. Give it `node.name` if you want something you chose.
+
+`role: single` passes `--no-taints`, so the node schedules ordinary workloads —
+there are no taints on it at all, and a pod runs without tolerations.
+
+## 7. When you are done
+
+```bash
+qm stop 900 && qm destroy 900
+rm /var/lib/vz/snippets/corium-900.yaml
+```
+
+`qm destroy` leaves the snippet behind.
+
+## What to read next
+
+- [Downloads](downloads.md) — the other ways to fetch an artefact, and how to
+  verify one
+- [Upgrades](upgrades.md) — moving this node to a later image, and which tag to
+  follow
+- [Configuration](reference.md) — every field of the `corium:` block
