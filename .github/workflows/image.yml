@@ -532,14 +532,20 @@ jobs:
           version="${TAG#v}"
 
           # Keep a Changelog sections look like "## [0.1.0] - 2026-09-16" and
-          # run to the next "## " heading or the end of the file. Matched with
-          # index() rather than a regex: a version number is mostly dots, and
-          # every one of them is a wildcard to a regex engine. "### Added" does
-          # not end a section, because in it "## " starts at column two.
+          # run to the next "## " heading, the link reference definitions at
+          # the foot of the file, or the end of it. Matched with index()
+          # rather than a regex: a version number is mostly dots, and every
+          # one of them is a wildcard to a regex engine. "### Added" does not
+          # end a section, because in it "## " starts at column two.
+          #
+          # The link definitions matter because the oldest section is last, so
+          # without that rule it swallows them. They render as nothing, which
+          # is exactly why the mistake would have gone unnoticed.
           section() {
             awk -v head="## [$1]" '
               index($0, head) == 1 { inside = 1; next }
               inside && index($0, "## ") == 1 { exit }
+              inside && /^\[[^]]+\]: / { exit }
               inside { print }
             ' CHANGELOG.md
           }
