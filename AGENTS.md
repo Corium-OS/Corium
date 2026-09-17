@@ -77,7 +77,7 @@ the maintainers — do not quietly work around them.
 ├── README.md
 ├── CHANGELOG.md               # what a user would notice, release by release
 ├── Containerfile              # the OS image build
-├── Makefile                   # build, test, lint, image targets
+├── mise.toml                  # pinned toolchain, and every task: `mise tasks`
 ├── build/
 │   ├── files/                 # overlay tree copied verbatim into the image
 │   │   ├── usr/
@@ -138,7 +138,8 @@ Consequences to respect:
   imported by third parties. Do not create a `pkg/` directory without a concrete external
   consumer.
 - Formatting is `gofmt` plus `goimports`. Linting is `golangci-lint`. Both are enforced in CI
-  and are not advisory.
+  and are not advisory. `mise.toml` pins all three, so `mise run fmt` and `mise run lint`
+  work on a machine that has never installed any of them.
 - Wrap errors with context using `fmt.Errorf("...: %w", err)`. Never discard an error with
   `_` without a comment explaining why it is safe.
 - Use `log/slog` for structured logging. The agent's output lands in the journal — make it
@@ -195,7 +196,7 @@ rest of the tree.
 - Pull requests describe the user-visible effect and the testing performed. If the change
   affects the `corium:` schema, the PR updates `docs/` and the examples in the same commit.
 - Anything under `docs/` also has copies on the documentation site. Re-run
-  `python3 website/sync-docs.py` and commit the result, or the Pages workflow fails after
+  `mise run docs-sync` and commit the result, or the Pages workflow fails after
   the merge — it does not run on pull requests, so nothing will warn you earlier.
 - Never commit secrets, tokens, kubeconfigs, or private keys. Not even in examples — use
   obvious placeholders.

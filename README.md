@@ -122,7 +122,7 @@ node silently joins the wrong cluster.
 
 ## Installable artefacts
 
-`make artefacts` produces, via `bootc-image-builder`:
+`mise run artefacts` produces, via `bootc-image-builder`:
 
 | Artefact | For |
 |---|---|

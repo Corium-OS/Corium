@@ -360,7 +360,7 @@ jobs:
             echo "::endgroup::"
           done
 
-          # bootc-image-builder floats on :latest, here as in the Makefile, so
+          # bootc-image-builder floats on :latest, here as in mise.toml, so
           # these are verifiable but not reproducible. Record which builder
           # produced them, since that is the part we can still be honest about.
           sudo podman image inspect --format '{{index .RepoDigests 0}}' \
@@ -668,7 +668,7 @@ jobs:
             printf 'take on trust: those hashes are the ones cosign signed, by way of each\n'
             printf 'manifest. A mirror, where offered, is a convenience on self-hosted\n'
             printf 'storage -- the registry is the release.\n\n'
-            printf 'A raw disk image is not published. `make artefacts IMAGE_TAG=%s` builds\n' "${version}"
+            printf 'A raw disk image is not published. `IMAGE_TAG=%s mise run artefacts` builds\n' "${version}"
             printf 'all three locally, on a Linux host with sudo.\n\n'
 
             printf -- '---\n\n'

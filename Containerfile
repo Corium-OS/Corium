@@ -4,7 +4,7 @@
 # versioned by digest, installed with bootc-image-builder, and upgraded by
 # booting a newer digest.
 #
-# Build:   make image
+# Build:   mise run image
 # Inspect: podman run --rm -it <image> bash
 
 ARG BASE_IMAGE=quay.io/fedora/fedora-bootc

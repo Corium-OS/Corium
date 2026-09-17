@@ -36,8 +36,8 @@ deployment path, say where it ran.
 ### Code
 
 - [ ] Everything added is in **English** — identifiers, comments, logs, docs, commit messages
-- [ ] `make test` passes
-- [ ] `make lint` and `make fmt` are clean
+- [ ] `mise run test` passes
+- [ ] `mise run lint` and `mise run fmt` are clean
 - [ ] New behaviour has tests; any bug fix starts with a test that reproduced it
 - [ ] No new dependency, configuration key, or abstraction was added without being asked for
 
