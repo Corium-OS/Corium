@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
 	"github.com/Corium-OS/Corium/internal/upgrade"
@@ -76,6 +77,9 @@ type Server struct {
 	// upgrades drives bootc, likewise.
 	upgrades *upgrade.Manager
 
+	// lifecycle does the things that cannot be undone by doing them again.
+	lifecycle *lifecycle.Manager
+
 	// claimed is closed when an enrolment succeeds, so that the process can
 	// come back up in its other shape rather than rebuilding TLS underneath a
 	// live listener.
@@ -97,6 +101,9 @@ func (s *Server) Supervise(manager *systemd.Manager) { s.systemd = manager }
 // Upgrades replaces how the server drives bootc, likewise.
 func (s *Server) Upgrades(manager *upgrade.Manager) { s.upgrades = manager }
 
+// Lifecycle replaces how the server acts on the machine, likewise.
+func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
+
 // NewServer prepares a listener for whichever state the node is in.
 //
 // how says what an unclaimed node asks of somebody claiming it. It is a
@@ -112,6 +119,7 @@ func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
 		inspector: &nodeinfo.Inspector{},
 		systemd:   &systemd.Manager{},
 		upgrades:  &upgrade.Manager{},
+		lifecycle: &lifecycle.Manager{},
 	}
 
 	enrolled, err := store.Enrolled()
@@ -281,6 +289,15 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/upgrade/stage", require(RoleOperator, s.handleStage))
 	mux.HandleFunc("POST /v1/upgrade/apply", require(RoleAdmin, s.handleApply))
 	mux.HandleFunc("POST /v1/upgrade/rollback", require(RoleAdmin, s.handleRollback))
+
+	// Cordon and drain take a node out of service and are reversible, which is
+	// operator work. Reboot, shutdown and reset are not reversible from here --
+	// nothing in this API can power a machine back on -- so they are admin.
+	mux.HandleFunc("POST /v1/lifecycle/cordon", require(RoleOperator, s.handleCordon))
+	mux.HandleFunc("POST /v1/lifecycle/drain", require(RoleOperator, s.handleDrain))
+	mux.HandleFunc("POST /v1/lifecycle/reboot", require(RoleAdmin, s.handleReboot))
+	mux.HandleFunc("POST /v1/lifecycle/shutdown", require(RoleAdmin, s.handleShutdown))
+	mux.HandleFunc("POST /v1/lifecycle/reset", require(RoleAdmin, s.handleReset))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing

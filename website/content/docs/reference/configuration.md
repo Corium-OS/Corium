@@ -461,9 +461,9 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](/docs/reference/adr-0004-management-api/).
 
-> **Partly implemented.** Three of the four management surfaces are done: node
-> state, services and journals, and upgrades. Node lifecycle — reboot,
-> shutdown, cordon, drain, reset — is not.
+> **Implemented, unreleased.** All four management surfaces are in place. What
+> is still missing is `cctl ca rotate`, the local `corium-agent api set-ca`
+> recovery path, and SELinux policy for the unit.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -661,6 +661,64 @@ trust them.
 `cctl rollback <node>` marks the previous image as the next to boot and
 deliberately does **not** reboot. Rollback exists because somebody is already
 having a bad day; the reboot stays theirs to schedule.
+
+#### Node lifecycle
+
+```console
+$ cctl cordon 192.168.1.51           # no new pods; the existing ones stay
+$ cctl drain 192.168.1.51            # cordons, then evicts
+$ cctl cordon 192.168.1.51 --undo    # back into service
+$ cctl reboot 192.168.1.51
+$ cctl shutdown 192.168.1.51
+```
+
+Cordon and drain need `corium:operator`; reboot, shutdown and reset need
+`corium:admin` — nothing in this API can power a machine back on.
+
+A drain that cannot finish is **not** forced. It usually means a pod disruption
+budget is saying this workload cannot lose a replica right now, which is
+exactly when overriding it is wrong, and the node is left cordoned so you can
+decide. The flags are the same ones `corium-upgrade-apply` uses, so a drain
+through the API and a drain during an upgrade behave identically.
+
+Only a controller can cordon or drain itself. A plain worker holds kubelet
+credentials, which cannot evict pods, and it says so rather than failing in a
+way that reads like a broken cluster.
+
+##### Reset
+
+The one call no other call can undo:
+
+```console
+$ cctl reset 192.168.1.51
+cctl: this erases worker-01 (192.168.1.51:7443): it leaves its cluster, forgets
+its owner and reboots unclaimed. Re-run with --confirm worker-01 to mean it
+
+$ cctl reset 192.168.1.51 --confirm worker-01
+Erasing worker-01...
+worker-01 has left its cluster and forgotten its owner. It is rebooting,
+and will come back unclaimed -- with a new fingerprint, so the one
+remembered here no longer matches.
+```
+
+The node's own name has to be sent back to it, because an address in a shell's
+history is a poor guard against this landing on the wrong machine. It is
+checked twice: by `cctl` against what the node calls itself, and by the node.
+
+The order is fixed and is the point. Drain, best effort — a node whose cluster
+has already gone is exactly the node somebody wants to reset. Then `k0s reset`,
+which takes it out of the cluster and wipes `/var/lib/k0s`. Then the bootstrap
+marker. **Only then** does the node forget its owner, and last of all it
+reboots. Doing it the other way round could leave a cluster member nobody owns,
+which is the one state this design exists to make unreachable.
+
+The serving identity goes too, not just the pinned CA: a machine handed on with
+the certificate its previous owner pinned is one that owner's tooling would
+still accept without a word.
+
+What the node comes back as depends on its configuration. One with
+`api.operatorCA` re-claims itself and re-bootstraps — a genuine reprovision.
+One in maintenance mode comes back unclaimed, with a new pairing code.
 
 One thing to weigh before handing out `corium:readonly`: it reads journals, and
 journals are not sanitised. Whatever any software on the node has logged is in

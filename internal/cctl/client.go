@@ -396,3 +396,43 @@ func (c *Client) Apply(ctx context.Context) error {
 func (c *Client) Rollback(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/v1/upgrade/rollback", []byte("{}"), nil)
 }
+
+// Cordon takes a node out of scheduling, or puts it back.
+func (c *Client) Cordon(ctx context.Context, undo bool) error {
+	path := "/v1/lifecycle/cordon"
+	if undo {
+		path += "?undo=true"
+	}
+
+	return c.call(ctx, http.MethodPost, path, []byte("{}"), nil)
+}
+
+// Drain evicts a node's workloads, cordoning it first.
+func (c *Client) Drain(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/lifecycle/drain", []byte("{}"), nil)
+}
+
+// Reboot restarts a node. It returns once the node has accepted.
+func (c *Client) Reboot(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/lifecycle/reboot", []byte("{}"), nil)
+}
+
+// Shutdown powers a node off. Nothing in this API can turn it back on.
+func (c *Client) Shutdown(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/lifecycle/shutdown", []byte("{}"), nil)
+}
+
+// Reset erases a node: it leaves its cluster, forgets its owner, and reboots
+// unclaimed.
+//
+// The node's own name has to be sent back to it. That is the node's rule
+// rather than this client's, and it is here because an address in a shell's
+// history is a poor guard against this landing on the wrong machine.
+func (c *Client) Reset(ctx context.Context, confirm string) error {
+	body, err := json.Marshal(map[string]string{"confirm": confirm})
+	if err != nil {
+		return fmt.Errorf("encoding the request: %w", err)
+	}
+
+	return c.call(ctx, http.MethodPost, "/v1/lifecycle/reset", body, nil)
+}

@@ -138,6 +138,9 @@ Off unless asked for, and covered by
 | Upgrades | — | `cctl upgrade <nodes...> --image`, one node at a time, stopping at the first that does not come back on the digest it was sent |
 | Image validation | — | A node refuses an image its own signing policy would accept unsigned. Not a label check: labels are forgeable |
 | Rollback | — | `cctl rollback <node>` marks the previous image as next to boot, and does not reboot |
+| Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`. A drain that a pod disruption budget refuses is not forced, and the node stays cordoned |
+| Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
+| Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order |
 | Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its
@@ -275,7 +278,7 @@ enough, not because they are wrong.
 |---|---|
 | **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) by dropping an image bundle in `<data-dir>/images/`. Corium can already bake one into the image with a `COPY`, but there is no `corium:` field for it and it is untested |
 | **Worker profiles as a modelled field** | Reachable through the patch today |
-| **Uninstalling or resetting a node** | `k0s reset` exists; Corium does not wrap it yet. [ADR 4](adr/0004-management-api.md) gives it a home as `cctl reset` — the one operation that takes a node out of its cluster and returns it to maintenance mode. On an image-based OS, reprovisioning is still often the better answer |
+
 
 ---
 

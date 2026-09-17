@@ -163,6 +163,28 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   `cctl enroll` no longer insists on `--code`, which is what the console banner
   of such a node tells you to run.
 
+- **Node lifecycle**, the last of the four surfaces. `cctl cordon`, `cctl drain`
+  and `cctl cordon --undo` at `corium:operator`; `cctl reboot`,
+  `cctl shutdown` and `cctl reset` at `corium:admin`, because nothing in this
+  API can power a machine back on.
+
+  A drain that cannot finish is not forced — a pod disruption budget refusing
+  an eviction is the system working — and the node is left cordoned rather than
+  quietly returned to service. The flags match `corium-upgrade-apply` so the
+  two paths behave identically, and the cordon marker is shared so a node
+  cordoned through the API still uncordons itself after an upgrade reboot. Only
+  a controller can cordon or drain itself; a worker says so rather than failing
+  in a way that reads like a broken cluster.
+
+  **`cctl reset` requires the node's own name**, checked by `cctl` against what
+  the node calls itself and again by the node: an address in a shell's history
+  is a poor guard against this landing on the wrong machine. The order is
+  fixed — drain, leave the cluster, erase the bootstrap, *then* forget the
+  owner, then reboot — because doing it the other way round could leave a
+  cluster member nobody owns, which is the one state the design exists to make
+  unreachable. The serving identity is erased too, so a machine handed on is
+  not one its previous owner's tooling still accepts.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

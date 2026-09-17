@@ -24,6 +24,10 @@ import (
 
 // StateDir is where a node keeps what it knows about its own management.
 //
+// It sits inside lifecycle.StateDir rather than beside it, so that erasing a
+// node's state erases this too and corium-apid needs one directory rather than
+// two that have to be kept in step.
+//
 // It sits under /var because that is the only part of the filesystem that
 // survives an OS upgrade, and because enrolment surviving a reboot is a
 // security property rather than a convenience: if it did not, power-cycling a
@@ -205,6 +209,26 @@ func (s *Store) Claim() (Claim, error) {
 	}
 
 	return claim, nil
+}
+
+// Forget erases everything that makes this node somebody's.
+//
+// The serving identity goes too, not just the CA. A machine handed on with the
+// certificate its previous owner pinned is a machine that owner's tooling will
+// still accept without a word -- and the whole value of the fingerprint is
+// that it means one machine.
+//
+// It is called last in a reset, after the node has already left its cluster,
+// so that there is no moment at which the machine is both a member and
+// unclaimed.
+func (s *Store) Forget() error {
+	for _, name := range []string{operatorCAFile, claimFile, serverCertFile, serverKeyFile} {
+		if err := os.Remove(s.path(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("removing %s: %w", name, err)
+		}
+	}
+
+	return nil
 }
 
 // Identity returns the node's serving certificate, minting one on first use.

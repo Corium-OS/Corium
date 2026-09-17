@@ -22,11 +22,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/source"
 )
 
@@ -70,8 +72,8 @@ func run() error {
 	var (
 		configPath = flags.String("config", "",
 			"read one configuration document instead of searching the source chain")
-		stateDir = flags.String("state-dir", api.StateDir,
-			"where the operator CA and the serving identity are kept")
+		stateDir = flags.String("state-dir", lifecycle.StateDir,
+			"Corium's state directory; the API keeps its own under <dir>/api")
 		listen = flags.String("listen", net.JoinHostPort("", strconv.Itoa(api.DefaultPort)),
 			"address to serve on")
 		showVersion = flags.Bool("version", false, "print version information and exit")
@@ -96,7 +98,11 @@ func run() error {
 }
 
 func serve(ctx context.Context, configPath, stateDir, listen string) error {
-	store := api.NewStore(stateDir)
+	// One directory, and the API's own state inside it. They were two flags
+	// for a while, which meant a daemon pointed at a test directory still
+	// cordoned and reset the real /var/lib/corium -- the two are not
+	// independent, and pretending they were only hid that.
+	store := api.NewStore(filepath.Join(stateDir, "api"))
 
 	// A node that has already been claimed serves the authenticated API
 	// whatever its configuration now says. Enrolment is one-way, and reading
@@ -136,6 +142,8 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 	if err != nil {
 		return err
 	}
+
+	server.Lifecycle(&lifecycle.Manager{Dir: stateDir})
 
 	return server.Serve(ctx)
 }

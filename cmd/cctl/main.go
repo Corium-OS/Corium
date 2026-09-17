@@ -49,6 +49,11 @@ Commands:
   logs          Read a node's journal, optionally following it
   upgrade       Move nodes to another OS image, one at a time
   rollback      Mark a node's previous image as the next to boot
+  cordon        Stop new pods being scheduled on a node (--undo to reverse)
+  drain         Evict a node's workloads, cordoning it first
+  reboot        Restart a node
+  shutdown      Power a node off
+  reset         Erase a node: leave its cluster, forget its owner, reboot
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -91,6 +96,14 @@ func run() error {
 		return upgradeCommand(ctx, args)
 	case "rollback":
 		return rollbackCommand(ctx, args)
+	case "cordon":
+		return cordonCommand(ctx, args)
+	case "drain":
+		return drainCommand(ctx, args)
+	case "reboot", "shutdown":
+		return powerCommand(ctx, command, args)
+	case "reset":
+		return resetCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -578,6 +591,137 @@ func rollbackCommand(ctx context.Context, args []string) error {
 	// would not help.
 	fmt.Printf("%s will boot its previous image next. Reboot it when you are ready:\n", address)
 	fmt.Printf("  cctl restart %s --unit k0sworker   # or reboot the machine\n", address)
+
+	return nil
+}
+
+func cordonCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl cordon", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		undo        = flags.Bool("undo", false, "put the node back into service")
+	)
+
+	client, address, err := target(flags, args, "cctl cordon <address> [--undo]", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Cordon(ctx, *undo); err != nil {
+		return err
+	}
+
+	if *undo {
+		fmt.Printf("%s is back in service\n", address)
+	} else {
+		fmt.Printf("%s takes no new pods. Its existing ones stay: `cctl drain` moves those.\n",
+			address)
+	}
+
+	return nil
+}
+
+func drainCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl drain", flag.ExitOnError)
+	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
+	fingerprint := flags.String("fingerprint", "", "override the remembered fingerprint")
+
+	client, address, err := target(flags, args, "cctl drain <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("draining %s...\n", address)
+
+	if err := client.Drain(ctx); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s is drained and cordoned. `cctl cordon %s --undo` returns it.\n",
+		address, address)
+
+	return nil
+}
+
+func powerCommand(ctx context.Context, command string, args []string) error {
+	flags := flag.NewFlagSet("cctl "+command, flag.ExitOnError)
+	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
+	fingerprint := flags.String("fingerprint", "", "override the remembered fingerprint")
+
+	client, address, err := target(flags, args, "cctl "+command+" <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if command == "shutdown" {
+		// Worth saying out loud, because this is the one call in the API that
+		// nothing in the API can undo.
+		fmt.Printf("Powering %s off. Nothing here can turn it back on.\n", address)
+	}
+
+	if command == "reboot" {
+		err = client.Reboot(ctx)
+	} else {
+		err = client.Shutdown(ctx)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s accepted; the connection will drop as it goes.\n", address)
+
+	return nil
+}
+
+func resetCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl reset", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		confirm     = flags.String("confirm", "",
+			"the node's own name, which it requires before erasing itself")
+	)
+
+	client, address, err := target(flags, args, "cctl reset <address> --confirm <node name>",
+		dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	// Asked of the node rather than assumed from the address, so that what is
+	// typed is checked against the machine that would actually be erased.
+	node, err := client.Node(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Checked here as well as on the node, so that a mistyped name is a
+	// refusal rather than a round trip that prints "erasing" first and then
+	// takes it back.
+	if *confirm != node.Hostname {
+		if *confirm == "" {
+			return fmt.Errorf("this erases %s (%s): it leaves its cluster, forgets its "+
+				"owner and reboots unclaimed. Re-run with --confirm %s to mean it",
+				node.Hostname, address, node.Hostname)
+		}
+
+		return fmt.Errorf("%s calls itself %s, not %q -- check you have the right address",
+			address, node.Hostname, *confirm)
+	}
+
+	fmt.Printf("Erasing %s...\n", node.Hostname)
+
+	if err := client.Reset(ctx, *confirm); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s has left its cluster and forgotten its owner. It is rebooting,\n"+
+		"and will come back unclaimed -- with a new fingerprint, so the one\n"+
+		"remembered here no longer matches.\n", node.Hostname)
 
 	return nil
 }
