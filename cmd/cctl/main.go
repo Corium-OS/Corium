@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/cctl"
 	"github.com/Corium-OS/Corium/internal/systemd"
@@ -54,6 +55,7 @@ Commands:
   reboot        Restart a node
   shutdown      Power a node off
   reset         Erase a node: leave its cluster, forget its owner, reboot
+  ca rotate     Hand nodes to a different operator CA
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -104,6 +106,8 @@ func run() error {
 		return powerCommand(ctx, command, args)
 	case "reset":
 		return resetCommand(ctx, args)
+	case "ca":
+		return caCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -722,6 +726,121 @@ func resetCommand(ctx context.Context, args []string) error {
 	fmt.Printf("%s has left its cluster and forgotten its owner. It is rebooting,\n"+
 		"and will come back unclaimed -- with a new fingerprint, so the one\n"+
 		"remembered here no longer matches.\n", node.Hostname)
+
+	return nil
+}
+
+func caCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 || args[0] != "rotate" {
+		return errors.New("ca needs a subcommand: rotate")
+	}
+
+	flags := flag.NewFlagSet("cctl ca rotate", flag.ExitOnError)
+
+	var (
+		dir    = flags.String("dir", "", "operator directory (default ~/.corium)")
+		newDir = flags.String("to", "",
+			"a second operator directory holding the CA to move to; required")
+		roleName = flags.String("role", "admin",
+			"the role of the certificate minted under the new CA")
+		lifetime = flags.Duration("lifetime", cctl.DefaultClientLifetime,
+			"how long that certificate is valid")
+	)
+
+	rest, err := parseFlags(flags, args[1:])
+	if err != nil {
+		return err
+	}
+
+	if len(rest) == 0 {
+		return errors.New("usage: cctl ca rotate <address>... --to <directory>")
+	}
+
+	if *newDir == "" {
+		return errors.New("--to is required: the directory holding the CA to move to, " +
+			"as made by `cctl pki init --dir <directory>`")
+	}
+
+	return rotate(ctx, *dir, *newDir, *roleName, *lifetime, rest)
+}
+
+// rotate moves a set of nodes to a new operator CA.
+//
+// The new credentials are minted first and sent to each node as proof, because
+// the mistake this is guarding against -- rotating to a CA you cannot issue
+// certificates under -- produces a node that only ever accepts somebody else,
+// and the way back is a trip to its console.
+func rotate(
+	ctx context.Context, dir, newDir, roleName string, lifetime time.Duration, addresses []string,
+) error {
+	role, err := cctl.ParseRole(roleName)
+	if err != nil {
+		return err
+	}
+
+	current, err := openStore(dir)
+	if err != nil {
+		return err
+	}
+
+	next, err := openStore(newDir)
+	if err != nil {
+		return err
+	}
+
+	operatorCA, err := cctl.OperatorCA(next)
+	if err != nil {
+		return err
+	}
+
+	name := os.Getenv("USER")
+	if name == "" {
+		name = "corium operator"
+	}
+
+	// Minted into the new directory, beside the CA that signed it, so the two
+	// sets of credentials never share a filename while both are in use.
+	if err := cctl.IssueTo(next, cctl.ClientCertFile, cctl.ClientKeyFile,
+		name, role, lifetime); err != nil {
+		return err
+	}
+
+	proof, err := os.ReadFile(next.Path(cctl.ClientCertFile))
+	if err != nil {
+		return fmt.Errorf("reading the certificate just minted: %w", err)
+	}
+
+	for _, argument := range addresses {
+		address := withDefaultPort(argument)
+
+		client, err := connectWith(current, address, "")
+		if err != nil {
+			return fmt.Errorf("%s: %w", address, err)
+		}
+
+		if err := client.RotateCA(ctx, operatorCA, proof); err != nil {
+			return fmt.Errorf("%s: %w", address, err)
+		}
+
+		fmt.Printf("%s now obeys the CA in %s\n", address, next.Dir())
+
+		// Carried over so the new directory can reach the node on its own: the
+		// node's fingerprint has not changed, only who may talk to it.
+		fingerprint, err := current.Fingerprint(address)
+		if err != nil {
+			return err
+		}
+
+		if err := next.Remember(address, fingerprint); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("\nEach node is restarting to pick the new CA up. From now on use\n"+
+		"  cctl <command> --dir %s\n"+
+		"and check one before you put the old directory away:\n"+
+		"  cctl health %s --dir %s\n",
+		next.Dir(), withDefaultPort(addresses[0]), next.Dir())
 
 	return nil
 }

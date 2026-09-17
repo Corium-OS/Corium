@@ -60,16 +60,28 @@ const (
 
 	// ClaimedOpenly is api.insecure: nothing was asked and nothing was proved.
 	ClaimedOpenly ClaimMethod = "open"
+
+	// ClaimedByRotation is an owner handing the node to another CA over the
+	// authenticated API.
+	ClaimedByRotation ClaimMethod = "rotation"
 )
 
 // Claim is what the node remembers about being claimed.
 type Claim struct {
 	Method ClaimMethod `json:"method"`
 	At     time.Time   `json:"at"`
+
+	// Tainted records that at some point this node was taken by somebody who
+	// proved nothing. It is sticky across rotations on purpose: an owner who
+	// acquired a node openly and then handed it to a second CA has not thereby
+	// made the first acquisition legitimate, and somebody auditing a fleet
+	// should still be able to find it.
+	Tainted bool `json:"tainted,omitempty"`
 }
 
-// Authenticated reports whether the claimant proved anything.
-func (c Claim) Authenticated() bool { return c.Method != ClaimedOpenly }
+// Authenticated reports whether this node's ownership was ever established
+// without anybody proving anything.
+func (c Claim) Authenticated() bool { return !c.Tainted }
 
 // ErrUnenrolled reports that no operator has claimed this node.
 var ErrUnenrolled = errors.New("node is not enrolled")
@@ -180,7 +192,20 @@ func (s *Store) Adopt(pemData []byte) error {
 // It is written after the CA, not before: a claim record without a pinned CA
 // would describe something that did not happen.
 func (s *Store) RecordClaim(method ClaimMethod) error {
-	encoded, err := json.Marshal(Claim{Method: method, At: time.Now().UTC()})
+	// A rotation inherits whatever taint the node already carried; every other
+	// method starts the record afresh and decides its own.
+	tainted := method == ClaimedOpenly
+
+	if method == ClaimedByRotation {
+		previous, err := s.Claim()
+		if err != nil {
+			return err
+		}
+
+		tainted = previous.Tainted
+	}
+
+	encoded, err := json.Marshal(Claim{Method: method, At: time.Now().UTC(), Tainted: tainted})
 	if err != nil {
 		return fmt.Errorf("encoding the claim record: %w", err)
 	}
@@ -209,6 +234,35 @@ func (s *Store) Claim() (Claim, error) {
 	}
 
 	return claim, nil
+}
+
+// Rotate replaces the pinned CA on a node that already has one.
+//
+// Unlike Adopt this overwrites, which is why it is a separate method rather
+// than a flag: enrolment being one-way is a property worth being unable to
+// reach by accident, and the two callers are not the same kind of caller.
+// Adopt answers a stranger at the door; this answers the owner.
+func (s *Store) Rotate(pemData []byte) error {
+	if _, err := config.ParseOperatorCA(pemData); err != nil {
+		return fmt.Errorf("refusing operator CA: %w", err)
+	}
+
+	enrolled, err := s.Enrolled()
+	if err != nil {
+		return err
+	}
+
+	if !enrolled {
+		// Rotating an unclaimed node would be enrolment by another name, and
+		// would skip the pairing code that guards it.
+		return ErrUnenrolled
+	}
+
+	if err := s.write(operatorCAFile, pemData, 0o644); err != nil {
+		return err
+	}
+
+	return s.RecordClaim(ClaimedByRotation)
 }
 
 // Forget erases everything that makes this node somebody's.

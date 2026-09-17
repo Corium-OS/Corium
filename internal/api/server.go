@@ -80,10 +80,12 @@ type Server struct {
 	// lifecycle does the things that cannot be undone by doing them again.
 	lifecycle *lifecycle.Manager
 
-	// claimed is closed when an enrolment succeeds, so that the process can
-	// come back up in its other shape rather than rebuilding TLS underneath a
-	// live listener.
-	claimed chan struct{}
+	// restart is closed when something has changed that the listener can only
+	// pick up by being rebuilt -- an enrolment, or a rotated CA. Rebuilding
+	// TLS underneath a live listener works until the one request that matters
+	// arrives mid-swap, so the process stops instead and systemd brings it
+	// back.
+	restart chan struct{}
 
 	// ready is closed once the listener is up and bound, at which point the
 	// address below is final. Closing the channel publishes it.
@@ -114,7 +116,7 @@ func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
 	server := &Server{
 		store:     store,
 		address:   address,
-		claimed:   make(chan struct{}),
+		restart:   make(chan struct{}),
 		ready:     make(chan struct{}),
 		inspector: &nodeinfo.Inspector{},
 		systemd:   &systemd.Manager{},
@@ -153,8 +155,18 @@ func (s *Server) PairingCode() string {
 	return s.enroller.Code()
 }
 
-// Claimed returns a channel closed when an operator enrols the node.
-func (s *Server) Claimed() <-chan struct{} { return s.claimed }
+// Restarting returns a channel closed when the process needs to come back up
+// for its listener to reflect a change.
+func (s *Server) Restarting() <-chan struct{} { return s.restart }
+
+// wantRestart asks for that, at most once.
+func (s *Server) wantRestart() {
+	select {
+	case <-s.restart:
+	default:
+		close(s.restart)
+	}
+}
 
 // Ready returns a channel closed once the listener is bound.
 func (s *Server) Ready() <-chan struct{} { return s.ready }
@@ -218,8 +230,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	case err := <-failed:
 		return err
 	case <-ctx.Done():
-	case <-s.claimed:
-		slog.Info("enrolled, restarting to serve the authenticated API")
+	case <-s.restart:
+		slog.Info("restarting so the listener picks up what changed")
 	}
 
 	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
@@ -299,6 +311,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/lifecycle/shutdown", require(RoleAdmin, s.handleShutdown))
 	mux.HandleFunc("POST /v1/lifecycle/reset", require(RoleAdmin, s.handleReset))
 
+	// Handing the node to a different CA decides who may do everything above.
+	mux.HandleFunc("POST /v1/ca/rotate", require(RoleAdmin, s.handleRotateCA))
+
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing
 	// from the shape of the answer.
@@ -373,17 +388,9 @@ func (s *Server) handleEnrol(w http.ResponseWriter, r *http.Request) {
 		OperatorCA: Fingerprint(certificate.Raw),
 	})
 
-	// Only now, and only once: the response has to reach the client before the
-	// process goes away underneath it.
-	s.finishClaim()
-}
-
-func (s *Server) finishClaim() {
-	select {
-	case <-s.claimed:
-	default:
-		close(s.claimed)
-	}
+	// Only now: the response has to reach the client before the process goes
+	// away underneath it.
+	s.wantRestart()
 }
 
 // handleNode reports what this machine is.

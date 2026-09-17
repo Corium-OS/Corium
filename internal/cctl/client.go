@@ -436,3 +436,20 @@ func (c *Client) Reset(ctx context.Context, confirm string) error {
 
 	return c.call(ctx, http.MethodPost, "/v1/lifecycle/reset", body, nil)
 }
+
+// RotateCA hands a node to a different operator CA.
+//
+// The proof certificate is not optional and the node enforces it: rotating to
+// a CA you cannot issue certificates under leaves a machine that will only
+// ever accept somebody else, and the way back is a trip to its console.
+func (c *Client) RotateCA(ctx context.Context, operatorCA, proof []byte) error {
+	body, err := json.Marshal(map[string]string{
+		"operatorCA": string(operatorCA),
+		"proof":      string(proof),
+	})
+	if err != nil {
+		return fmt.Errorf("encoding the request: %w", err)
+	}
+
+	return c.call(ctx, http.MethodPost, "/v1/ca/rotate", body, nil)
+}

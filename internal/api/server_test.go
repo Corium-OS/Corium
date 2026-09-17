@@ -230,9 +230,9 @@ func TestEnrolOverTheWire(t *testing.T) {
 	// The node tells the process to come back up in its other shape rather
 	// than rebuilding TLS under a live listener.
 	select {
-	case <-server.Claimed():
+	case <-server.Restarting():
 	case <-time.After(10 * time.Second):
-		t.Fatal("a successful enrolment did not close Claimed()")
+		t.Fatal("a successful enrolment did not ask for a restart")
 	}
 
 	enrolled, err := store.Enrolled()

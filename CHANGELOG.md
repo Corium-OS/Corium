@@ -185,6 +185,25 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   unreachable. The serving identity is erased too, so a machine handed on is
   not one its previous owner's tooling still accepts.
 
+- **`cctl ca rotate`, and a way back when the key is gone.** Rotation hands a
+  set of nodes to a different operator CA over the authenticated API. `cctl`
+  mints a certificate under the new CA and sends it as proof; the node verifies
+  it chains to the CA it is being asked to obey and refuses otherwise, because
+  rotating to a CA you cannot issue certificates under produces a node that
+  will only ever accept somebody else — and the way back is its console.
+  Rotation leaves cluster membership and node identity alone: only who may
+  manage it changes.
+
+  `corium-agent api set-ca --file` is that way back. It runs as root on the
+  node, opens no port and accepts no request, and the node keeps its cluster
+  membership — which is what makes it a recovery rather than a reset. It
+  refuses a node nobody has claimed, since installing a CA there would be
+  enrolment by another name.
+
+  Neither path launders a node taken through `api.insecure`: the record that
+  its ownership was established without anybody proving anything survives
+  rotation, and `cctl status` goes on saying so.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

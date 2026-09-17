@@ -99,6 +99,17 @@ func InitCA(store *Store, name string) error {
 // node reads it from. It cannot be changed afterwards without the CA key, so a
 // certificate is exactly as privileged as the person who signed it intended.
 func Issue(store *Store, commonName string, role api.Role, lifetime time.Duration) error {
+	return IssueTo(store, ClientCertFile, ClientKeyFile, commonName, role, lifetime)
+}
+
+// IssueTo signs one into named files.
+//
+// A rotation needs this: it mints credentials for the CA it is moving to while
+// the ones for the current CA are still what reaches the node, so the two
+// cannot share a filename.
+func IssueTo(
+	store *Store, certFile, keyFile, commonName string, role api.Role, lifetime time.Duration,
+) error {
 	caCert, caKey, err := loadCA(store)
 	if err != nil {
 		return err
@@ -144,11 +155,11 @@ func Issue(store *Store, commonName string, role api.Role, lifetime time.Duratio
 		return err
 	}
 
-	if err := store.Write(ClientKeyFile, keyPEM, 0o600); err != nil {
+	if err := store.Write(keyFile, keyPEM, 0o600); err != nil {
 		return err
 	}
 
-	return store.Write(ClientCertFile,
+	return store.Write(certFile,
 		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644)
 }
 

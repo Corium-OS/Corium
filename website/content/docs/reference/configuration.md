@@ -461,9 +461,9 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](/docs/reference/adr-0004-management-api/).
 
-> **Implemented, unreleased.** All four management surfaces are in place. What
-> is still missing is `cctl ca rotate`, the local `corium-agent api set-ca`
-> recovery path, and SELinux policy for the unit.
+> **Implemented, unreleased.** All four management surfaces are in place, along
+> with CA rotation and the local recovery path. SELinux policy for the unit is
+> still to write, and `cctl` has no release artefact yet.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -719,6 +719,61 @@ still accept without a word.
 What the node comes back as depends on its configuration. One with
 `api.operatorCA` re-claims itself and re-bootstraps — a genuine reprovision.
 One in maintenance mode comes back unclaimed, with a new pairing code.
+
+#### Changing who owns a node
+
+Make the new CA in a directory of its own, then hand the nodes over:
+
+```console
+$ cctl pki init --dir ~/.corium-2027 --name "corium operators 2027"
+$ cctl ca rotate node-1 node-2 node-3 --dir ~/.corium --to ~/.corium-2027
+node-1:7443 now obeys the CA in /home/you/.corium-2027
+...
+
+Each node is restarting to pick the new CA up. From now on use
+  cctl <command> --dir /home/you/.corium-2027
+and check one before you put the old directory away:
+  cctl health node-1:7443 --dir /home/you/.corium-2027
+```
+
+`cctl` mints a certificate under the new CA and sends it to each node as proof.
+The node verifies it chains to the CA it is being asked to obey, and refuses
+otherwise. The failure being guarded against is not recoverable over the
+network: rotate to a CA you cannot issue certificates under, and the node will
+only ever accept somebody else. What the proof establishes is bounded — that
+the caller has a certificate the new CA signed — so it catches the wrong file
+and the wrong directory rather than every possible mistake.
+
+Rotation does not touch a node's cluster membership or its identity. The
+fingerprint you have pinned stays valid; only who may manage it changes.
+
+##### When the key is gone
+
+If the CA's private key is lost there is nothing to rotate *with*, and the way
+back is the console:
+
+```console
+# corium-agent api set-ca --file operator-ca.pem
+This node now obeys "rescue operators" (SHA256:O09anWZnGcMtgNy...).
+
+The running daemon still has the old one loaded; restart it to
+pick this up:
+
+  systemctl restart corium-apid.service
+```
+
+It opens no port and accepts no request. Root on the machine already owns it,
+so this grants nothing that was not already granted — and the node keeps its
+cluster membership, which is what makes this a recovery rather than a reset.
+
+It refuses a node nobody has claimed: installing a CA there would be enrolment
+by another name, walking around the pairing code that guards it.
+
+One thing neither path clears. A node claimed through `api.insecure` is
+recorded as having been taken without authentication, and rotating it does not
+remove that: an owner who acquired a node by reaching it first has not made
+that legitimate by handing it to a second CA, and `cctl status` goes on saying
+so.
 
 One thing to weigh before handing out `corium:readonly`: it reads journals, and
 journals are not sanitised. Whatever any software on the node has logged is in

@@ -141,6 +141,8 @@ Off unless asked for, and covered by
 | Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`. A drain that a pod disruption budget refuses is not forced, and the node stays cordoned |
 | Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
 | Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order |
+| CA rotation | — | `cctl ca rotate <nodes...> --to <dir>`, at `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
+| Losing the CA key | — | `corium-agent api set-ca --file`, run as root on the node. Local only; the node keeps its cluster membership |
 | Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its
