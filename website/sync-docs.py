@@ -58,6 +58,9 @@ PAGES = [
     ("install/ha-cluster.md", "install", "ha-cluster", "HA cluster", 302,
      "Three controllers sharing a virtual IP on Proxmox: what the script does, "
      "why the joining controllers wait for a token, and how to check the result."),
+    ("install/openstack.md", "install", "openstack", "OpenStack", 303,
+     "A node on an OpenStack cloud from the published qcow2: registering a UEFI "
+     "image, and how the corium: block reaches it through the metadata service."),
     ("adr/0001-base-image.md", "reference", "adr-0001-base-image",
      "ADR 1 — Base image", 910,
      "Why the operating system is based on fedora-bootc rather than Fedora "
