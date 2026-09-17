@@ -1,9 +1,6 @@
 package config
 
 import (
-	"bytes"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -562,7 +559,8 @@ func (c *Config) validateAPI() []error {
 	return problems
 }
 
-// validateOperatorCA checks that an inline operator CA is what it claims to be.
+// validateOperatorCA checks an inline operator CA, reporting against the key
+// it was written under.
 //
 // This is worth doing early. The value is pasted by hand or templated by a
 // provisioning tool, and the failure mode of getting it wrong is a node that
@@ -570,56 +568,19 @@ func (c *Config) validateAPI() []error {
 // looks like a networking problem for as long as it takes somebody to check
 // the certificate.
 func validateOperatorCA(pemData string) []error {
-	block, rest := pem.Decode([]byte(pemData))
+	_, err := ParseOperatorCA([]byte(pemData))
+	if err == nil {
+		return nil
+	}
 
-	switch {
-	case block == nil:
-		return []error{errors.New(
-			"api.operatorCA: not PEM data; expected a -----BEGIN CERTIFICATE----- block")}
-	case block.Type != "CERTIFICATE":
-		// A private key here is the mistake worth catching by name: it would
-		// mean the operator has published the key that owns their whole fleet.
-		if strings.Contains(block.Type, "PRIVATE KEY") {
-			return []error{fmt.Errorf(
-				"api.operatorCA: this is a %s, not a certificate -- a node is given "+
-					"the CA certificate and never its key. Treat the key you just "+
-					"put in a configuration as compromised", block.Type)}
-		}
-
+	// The one problem worth more than a restatement: a key here has been
+	// written into a document that ends up in instance metadata, and saying
+	// only "wrong type" would let somebody fix the line and move on.
+	if errors.Is(err, ErrPrivateKey) {
 		return []error{fmt.Errorf(
-			"api.operatorCA: expected a CERTIFICATE block, got %q", block.Type)}
-	case len(bytes.TrimSpace(rest)) > 0:
-		// A chain would leave it ambiguous which certificate is the anchor,
-		// and the answer decides who can manage the node.
-		return []error{errors.New(
-			"api.operatorCA: expected exactly one certificate, got more than one")}
+			"api.operatorCA: %w -- a node is given the CA certificate and never its "+
+				"key. Treat the key you just put in a configuration as compromised", err)}
 	}
 
-	certificate, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return []error{fmt.Errorf("api.operatorCA: %w", err)}
-	}
-
-	var problems []error
-
-	if !certificate.IsCA {
-		problems = append(problems, errors.New(
-			"api.operatorCA: certificate is not a CA (basic constraints say CA:FALSE), "+
-				"so it cannot sign the client certificates it is here to vouch for"))
-	}
-
-	if certificate.KeyUsage != 0 && certificate.KeyUsage&x509.KeyUsageCertSign == 0 {
-		problems = append(problems, errors.New(
-			"api.operatorCA: certificate does not carry the certSign key usage"))
-	}
-
-	// Expiry is checked even though it makes validation depend on the clock.
-	// An expired anchor produces a node nobody can manage, and finding that
-	// out at first boot is the whole point of validating before mutating.
-	if now := time.Now(); now.After(certificate.NotAfter) {
-		problems = append(problems, fmt.Errorf(
-			"api.operatorCA: certificate expired on %s", certificate.NotAfter.Format(time.RFC3339)))
-	}
-
-	return problems
+	return []error{fmt.Errorf("api.operatorCA: %w", err)}
 }

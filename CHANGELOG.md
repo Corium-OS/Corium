@@ -30,6 +30,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   nothing to enrol against and joining a cluster unclaimed is the one outcome
   the design rules out. Nodes with no `api:` block are unaffected.
 
+- **The enrolment core behind maintenance mode**, still with no daemon in front
+  of it: the pairing code, the attempt limit, and the state a node keeps about
+  who owns it under `/var/lib/corium/api/`. A node is claimed once and stays
+  claimed across reboots, five wrong codes close enrolment until the next boot,
+  and the certificate a node serves with is minted on the node, so that no
+  private key is ever carried in a configuration. It adds no dependency: the
+  API will speak JSON over HTTP and mutual TLS rather than gRPC, so that an OS
+  image does not grow five modules behind a listener running as root.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

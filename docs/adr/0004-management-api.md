@@ -39,8 +39,9 @@ the machine exists.
 
 ## Decision
 
-Corium grows `corium-apid`, a Go daemon shipped in `/usr`, serving gRPC over
-mutual TLS on `7443/tcp`. The client is `cctl`. Trust is anchored in an
+Corium grows `corium-apid`, a Go daemon shipped in `/usr`, serving JSON over
+HTTP and mutual TLS on `7443/tcp`, on the standard library alone. The client is
+`cctl`. Trust is anchored in an
 **operator CA** whose certificate the node is given, and which signs the client
 certificates the node will accept.
 
@@ -344,6 +345,12 @@ process can reboot the machine. That is the argument for the surface being as
 small as it is, and the reason there is no `exec`. It also means SELinux policy
 is part of the work, not a follow-up.
 
+The daemon adds no third-party dependency. `net/http`, `crypto/tls` and
+`encoding/json` cover the transport, so the API ships to every node without
+enlarging what has to be trusted, audited or patched there. If that ever stops
+being true, it is a reason to revisit this record rather than a detail to
+absorb quietly.
+
 A node that opts in grows a listening port; a node that does not, does not.
 `7443` is clear of everything k0s binds — `6443`, `9443`, `8132`, `8133` — and
 of the kubelet's `10250`. Whether it should be reachable from anywhere but a
@@ -415,16 +422,35 @@ that has been running happily for a year should not acquire a new listening
 port by being upgraded. Off by default also means this ADR can be implemented
 without changing what any existing configuration does.
 
-**REST/JSON over HTTP instead of gRPC.** `curl` as a client is a real
-advantage and was weighed seriously. gRPC wins on the two things the API does
-most — streaming journals, and generating a client that does not drift from the
-server — and a gRPC-gateway can be added later for anyone who wants the `curl`
-back.
+**gRPC instead of JSON over HTTP.** This is what the first version of this
+record chose, on two real advantages: streaming is in the framework rather than
+hand-rolled, and the client is generated from the schema so it cannot drift
+from the server. Talos is the prior art and does exactly this.
+
+It is reversed here on the cost, which is specific to what Corium is rather
+than to APIs in general. `google.golang.org/grpc` brings `protobuf`, `x/net`,
+`x/sys` and `x/text` behind it, and this repository has one dependency today.
+Those modules would not land in an application — they would be baked into an
+operating system image, on every node, in the read-only `/usr`, behind a
+listener that runs as root. That is the one place in this project where
+"prefer the standard library" is not a style preference, and the guidance in
+`AGENTS.md` is explicit that every dependency here is attack surface that ships
+to every node.
+
+What is given up is smaller than it looks. `crypto/tls` does mutual TLS with
+client certificate verification directly, and it is the same code path either
+way. Streaming a journal is newline-delimited JSON and `http.Flusher`, which is
+a few dozen lines rather than a framework. The generated client is the real
+loss, and it is answered by the API surface being four endpoints rather than
+forty, and by the client living in this repository next to the server.
+
+`curl` working on a node that is half-broken turns out to be worth something
+too, which had been filed as a consolation and is closer to a feature.
 
 ## What this does not settle
 
-The wire schema, the proto package layout, and the `cctl` command tree. Those
-are the next pull requests. This record fixes the shape: off by default,
+The wire schema, the endpoint paths, and the `cctl` command tree. Those are the
+next pull requests. This record fixes the shape: off by default,
 node-local, four surfaces, no exec, mTLS anchored in an operator CA, three ways
 for that CA to arrive of which one requires nothing in cloud-init at all — and
 the rule that holds the last of them together, that a node nobody has claimed
