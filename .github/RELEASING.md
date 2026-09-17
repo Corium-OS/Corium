@@ -63,6 +63,12 @@ None of it can be undone. Work through this in order.
    with no matching section, so this is not optional.
 8. **Tag the release**: `vX.Y.Z`. This moves `latest`.
 
+The tag build publishes three things, in order, each gated on the one before:
+the signed image, the signed installer ISO, and the GitHub Release that points
+at both. The ISO build takes 20 to 35 minutes, so a release takes roughly an
+hour of CI. If it fails, nothing announces a release that does not exist --
+re-run the workflow, which is idempotent on all three.
+
 ---
 
 ## Verification before a release
@@ -90,6 +96,7 @@ not against a local build.
 | Three controllers with VIP failover | Hard-stop the holder: the VIP must answer from another controller's MAC, etcd must keep quorum, and the API must stay up | 1 h, 3 VMs |
 | Installing from the anaconda ISO | The documented path onto bare metal, and nothing else exercises it | 45 min |
 | Software RAID on spare disks | Assembled before k0s starts, surviving a reboot, and refusing to touch a disk that holds data | 20 min |
+| The published ISO installs | Download it the way the release notes say to, verify the signature, and install from it. It is built in CI from the signed image, on a path no local build exercises | 45 min |
 
 ### What is expensive, and skipped on purpose
 

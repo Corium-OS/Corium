@@ -130,6 +130,10 @@ node silently joins the wrong cluster.
 | `raw` | Bare metal, and most clouds' import paths |
 | `anaconda-iso` | Interactive or kickstarted bare-metal installs |
 
+You only need to build these if you have changed the image. Every release
+publishes the installer ISO ready-made and signed — see the
+[latest release](https://github.com/Corium-OS/Corium/releases/latest).
+
 ## Documentation
 
 - [**Comparison**](docs/comparison.md) — Talos, Kairos, Flatcar, and when not to use Corium
