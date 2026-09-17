@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 )
@@ -43,7 +45,13 @@ func lifecycleNode(t *testing.T, run lifecycle.Runner) (*authority, string, *Sto
 }
 
 // machine records what the node was asked to do to itself.
+//
+// It is mutex-guarded because the handler keeps working after the response has
+// been flushed -- reboot and shutdown answer first and act second, on purpose
+// -- so a test reading this while the handler is still writing to it is the
+// normal case rather than a rare one.
 type machine struct {
+	mu        sync.Mutex
 	calls     []string
 	reachable bool
 }
@@ -51,7 +59,10 @@ type machine struct {
 func (m *machine) runner() lifecycle.Runner {
 	return func(_ context.Context, name string, args ...string) ([]byte, error) {
 		line := strings.Join(append([]string{name}, args...), " ")
+
+		m.mu.Lock()
 		m.calls = append(m.calls, line)
+		m.mu.Unlock()
 
 		if strings.Contains(line, "kubectl get node") && !m.reachable {
 			return nil, errors.New("no access")
@@ -62,6 +73,9 @@ func (m *machine) runner() lifecycle.Runner {
 }
 
 func (m *machine) ran(fragment string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for _, call := range m.calls {
 		if strings.Contains(call, fragment) {
 			return true
@@ -69,6 +83,35 @@ func (m *machine) ran(fragment string) bool {
 	}
 
 	return false
+}
+
+// waitFor gives the handler the moment it needs to finish what it said it
+// would do after answering.
+func (m *machine) waitFor(t *testing.T, fragment string) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+
+	for time.Now().Before(deadline) {
+		if m.ran(fragment) {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Errorf("the node never ran %q", fragment)
+}
+
+// quiet asserts something was not run, after giving it a chance to be.
+func (m *machine) quiet(t *testing.T, fragment string) {
+	t.Helper()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if m.ran(fragment) {
+		t.Errorf("the node ran %q", fragment)
+	}
 }
 
 func TestCordonAndDrainNeedOperatorAndTheDestructiveOnesNeedAdmin(t *testing.T) {
@@ -90,9 +133,8 @@ func TestCordonAndDrainNeedOperatorAndTheDestructiveOnesNeedAdmin(t *testing.T) 
 		}
 	}
 
-	if m.ran("systemctl reboot") || m.ran("k0s reset") {
-		t.Error("a refused request still acted on the machine")
-	}
+	m.quiet(t, "systemctl reboot")
+	m.quiet(t, "k0s reset")
 }
 
 func TestAWorkerSaysItCannotDrainRatherThanFailing(t *testing.T) {
@@ -128,9 +170,7 @@ func TestResetRefusesWithoutTheNodeName(t *testing.T) {
 		}
 	}
 
-	if m.ran("k0s reset") {
-		t.Fatal("an unconfirmed reset erased the node")
-	}
+	m.quiet(t, "k0s reset")
 
 	enrolled, err := store.Enrolled()
 	if err != nil {
@@ -162,17 +202,17 @@ func TestResetLeavesTheClusterBeforeItForgetsItsOwner(t *testing.T) {
 		t.Fatalf("status = %d, want 202 (%v)", status, body)
 	}
 
+	// The reboot comes after the response, so it is waited for rather than
+	// assumed to have happened by the time the body arrived.
+	m.waitFor(t, "systemctl reboot")
+
 	if !m.ran("k0s reset") {
 		t.Error("the node did not leave its cluster")
 	}
 
-	// Drained first, best effort, and rebooted last.
+	// Drained first, best effort.
 	if !m.ran("kubectl drain") {
 		t.Error("the node was not drained before being erased")
-	}
-
-	if !m.ran("systemctl reboot") {
-		t.Error("the node did not reboot into its clean state")
 	}
 
 	enrolled, err := store.Enrolled()
