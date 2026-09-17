@@ -41,8 +41,11 @@ curl -L -H "Authorization: Bearer ${token}" -o corium-0.1.0-x86_64.iso \
 https://s3.thoughtless.eu/corium-releases/corium-0.1.0-x86_64.iso
 ```
 
-The third is a mirror. The bucket does not allow listing, so there is no index
-to browse — the release notes carry the link for each version.
+The third is a mirror, and its bucket is listable:
+<https://s3.thoughtless.eu/corium-releases/> shows everything published. A
+browser renders that as the raw S3 XML rather than as a page, so it is useful
+for seeing which versions exist and less useful for anything else — for a
+specific version, the release notes carry the link.
 
 ## Why nothing is attached to the release itself
 
