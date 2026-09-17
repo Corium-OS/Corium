@@ -47,6 +47,8 @@ Commands:
   services      List the services this API knows about, and their state
   restart       Restart k0s on a node
   logs          Read a node's journal, optionally following it
+  upgrade       Move nodes to another OS image, one at a time
+  rollback      Mark a node's previous image as the next to boot
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -85,6 +87,10 @@ func run() error {
 		return restartCommand(ctx, args)
 	case "logs":
 		return logsCommand(ctx, args)
+	case "upgrade":
+		return upgradeCommand(ctx, args)
+	case "rollback":
+		return rollbackCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -508,6 +514,76 @@ func logsCommand(ctx context.Context, args []string) error {
 	})
 }
 
+func upgradeCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl upgrade", flag.ExitOnError)
+
+	var (
+		dir    = flags.String("dir", "", "operator directory (default ~/.corium)")
+		image  = flags.String("image", "", "the image to move to; required")
+		settle = flags.Duration("settle", cctl.DefaultSettle,
+			"how long to wait for a node to come back")
+	)
+
+	rest, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
+	if len(rest) == 0 {
+		return errors.New("usage: cctl upgrade <address>... --image <image>")
+	}
+
+	if *image == "" {
+		return errors.New("--image is required")
+	}
+
+	store, err := openStore(*dir)
+	if err != nil {
+		return err
+	}
+
+	addresses := make([]string, 0, len(rest))
+	for _, argument := range rest {
+		addresses = append(addresses, withDefaultPort(argument))
+	}
+
+	// One at a time, stopping at the first node that does not come back. A
+	// rollout that carries on past a broken machine turns one outage into a
+	// cluster-wide one.
+	rollout := &cctl.Rollout{
+		Image:   *image,
+		Nodes:   addresses,
+		Settle:  *settle,
+		Out:     os.Stdout,
+		Connect: func(address string) (*cctl.Client, error) { return connectWith(store, address, "") },
+	}
+
+	return rollout.Run(ctx)
+}
+
+func rollbackCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl rollback", flag.ExitOnError)
+	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
+	fingerprint := flags.String("fingerprint", "", "override the remembered fingerprint")
+
+	client, address, err := target(flags, args, "cctl rollback <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Rollback(ctx); err != nil {
+		return err
+	}
+
+	// Deliberately not a reboot. Rollback exists because somebody is already
+	// having a bad day; taking the node down at a moment they did not choose
+	// would not help.
+	fmt.Printf("%s will boot its previous image next. Reboot it when you are ready:\n", address)
+	fmt.Printf("  cctl restart %s --unit k0sworker   # or reboot the machine\n", address)
+
+	return nil
+}
+
 // target parses the flags every node-facing command shares and connects.
 func target(
 	flags *flag.FlagSet, args []string, usage string, dir, fingerprint *string,
@@ -539,14 +615,31 @@ func connect(dir, address, fingerprint string) (*cctl.Client, error) {
 		return nil, err
 	}
 
+	return connectWith(store, address, fingerprint)
+}
+
+// connectWith is the same, for a store that is already open -- a rollout opens
+// one connection per node and should not reread the directory each time.
+func connectWith(store *cctl.Store, address, fingerprint string) (*cctl.Client, error) {
+	var err error
+
 	if fingerprint == "" {
 		if fingerprint, err = store.Fingerprint(address); err != nil {
 			return nil, err
 		}
+	} else if err := store.Remember(address, fingerprint); err != nil {
+		// A fingerprint typed on the command line is an operator saying "this
+		// is the machine", which is the same assertion `enroll` records. Two
+		// things need it: a node claimed from cloud-init, which cctl has never
+		// spoken to, and a node whose identity was reset. Without this they
+		// would need --fingerprint on every call forever -- and `upgrade`
+		// takes a list of nodes, where a single such flag means nothing.
+		return nil, err
 	}
 
 	if fingerprint == "" {
-		return nil, fmt.Errorf("%w for %s; enrol it first, or pass --fingerprint",
+		return nil, fmt.Errorf("%w for %s; enrol it, or pass --fingerprint once "+
+			"with the value from its console and it will be remembered",
 			cctl.ErrFingerprintUnknown, address)
 	}
 

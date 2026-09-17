@@ -461,9 +461,9 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](/docs/reference/adr-0004-management-api/).
 
-> **Partly implemented.** Two of the four management surfaces are done: node
-> state (`cctl status`) and services and journals (`cctl services`,
-> `cctl restart`, `cctl logs`). Upgrades and node lifecycle are not.
+> **Partly implemented.** Three of the four management surfaces are done: node
+> state, services and journals, and upgrades. Node lifecycle — reboot,
+> shutdown, cordon, drain, reset — is not.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -619,6 +619,47 @@ will restart (first-boot configuration; runs once)
 That second refusal is the point of having two lists. Re-running the bootstrap
 on a node that has already joined a cluster destroys data, and no certificate
 should be able to ask for it.
+
+#### Upgrades
+
+```console
+$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.2
+[1/3] node-1:7443
+        staged sha256:bbbb2222
+        draining and rebooting.......
+        up on sha256:bbbb2222
+[2/3] node-2:7443
+...
+```
+
+One node at a time, and it stops at the first that does not come back — a
+rollout that carries on past a broken machine turns one outage into a
+cluster-wide one. The error says how many were upgraded, because a
+half-upgraded cluster is a decision somebody has to make.
+
+Before each node it checks that the node is fit to lose: bootstrapped, k0s
+running, and the last boot not judged bad by greenboot. After each one it
+checks the node came back **on the digest it was sent to**, not merely that it
+answers.
+
+A node refuses an image its own signing policy would accept unsigned:
+
+```console
+$ cctl upgrade node-1 --image quay.io/fedora-ostree-desktops/silverblue:44
+cctl: 403 Forbidden: the node's signing policy does not require a signature
+for this image: quay.io/fedora-ostree-desktops/silverblue:44
+```
+
+This is the check that stops a typo rebasing a Kubernetes node onto a desktop.
+It is not a label check — anybody can label an image "Corium" — it is the
+policy in `/etc/containers/policy.json`, which the image ships requiring a
+cosign signature for Corium's own repository. Running your own derived images
+means adding your repository and key there, which is also how you say you
+trust them.
+
+`cctl rollback <node>` marks the previous image as the next to boot and
+deliberately does **not** reboot. Rollback exists because somebody is already
+having a bad day; the reboot stays theirs to schedule.
 
 One thing to weigh before handing out `corium:readonly`: it reads journals, and
 journals are not sanitised. Whatever any software on the node has logged is in

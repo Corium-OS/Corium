@@ -74,12 +74,26 @@ follow; `dmesg`. Units are named from an allowlist rather than passed through,
 so that the API is not a way to start arbitrary systemd units.
 
 **Upgrades**, the mechanism issue #2 spends most of its length on: stage an
-image, apply it, roll back. The node refuses an image that is not a Corium
-image — the signature is verified against the policy already shipped in
-`/etc/containers/policy.json`, and the image's labels are checked — so that a
-typo cannot rebase a cluster node onto Silverblue. Health gating and the
-one-node-at-a-time roll-out live in `cctl`, which knows about the other nodes;
-the daemon only ever knows about its own.
+image, apply it, roll back. The node refuses an image its own signing policy
+would accept unsigned, so that a typo cannot rebase a cluster node onto
+Silverblue. Health gating and the one-node-at-a-time roll-out live in `cctl`,
+which knows about the other nodes; the daemon only ever knows about its own.
+
+An earlier version of this record said the image's *labels* would be checked as
+well. They are not, for two reasons found while building it. A Corium node
+ships no skopeo, no podman and no jq — a container engine on the host is
+deliberately absent, because k0s supervises its own — and bootc's status output
+carries no labels, so there is nothing on the machine that can read them.
+More importantly, a label is not worth reading: anybody can write
+`LABEL org.opencontainers.image.title="Corium"`, so it catches a typo and
+nothing else.
+
+The signing policy catches the typo *and* the attacker, needs no tooling, and
+is enforced by the runtime at pull time regardless. It is also the right shape
+for the derived images Corium supports: an operator who builds their own adds
+their repository and key to `/etc/containers/policy.json`, and their image
+becomes acceptable because they said so rather than because it claimed to be
+Corium.
 
 **Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
 destructive and are marked as such in the schema. Reset is the strongest of

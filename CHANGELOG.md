@@ -112,6 +112,35 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   shows a line before the request ends. A followed stream is bounded at an
   hour, and a request is capped at 10000 records.
 
+- **Upgrades**, the third surface and the one [#2](https://github.com/Corium-OS/Corium/issues/2)
+  spends most of its length on. `cctl upgrade <nodes...> --image ghcr.io/...`
+  moves a fleet one node at a time, and **stops at the first node that does not
+  come back** — a rollout that carries on past a broken machine turns one
+  outage into a cluster-wide one. It checks each node is fit to lose before
+  taking it down, and afterwards that it came back *on the digest it was sent
+  to*, not merely that it answers.
+
+  A node refuses an image its own signing policy would accept unsigned, which
+  is what stops a typo rebasing a Kubernetes node onto a desktop image. This
+  replaces the label check [ADR 4](docs/adr/0004-management-api.md) originally
+  promised: a node ships no skopeo, podman or jq and bootc reports no labels,
+  so nothing on the machine can read them — and a label saying "Corium" can be
+  written by anybody, so it would have caught a typo and nothing else. The
+  policy catches the typo and the attacker. Running derived images means adding
+  your repository and key to `/etc/containers/policy.json`, which is also how
+  you say you trust them.
+
+  Applying goes through `corium-upgrade-apply.service` rather than
+  reimplementing it, so the drain that cancels rather than forces, and the
+  staged deployment that has to be unlocked first, keep working the way they
+  already did. `cctl rollback` marks the previous image as next to boot and
+  deliberately does not reboot.
+
+- **A fingerprint passed on the command line is remembered.** A node claimed
+  from cloud-init has never been spoken to by `cctl`, so it had no remembered
+  fingerprint and every call needed `--fingerprint` — including `cctl upgrade`,
+  which takes a list of nodes and where one such flag means nothing.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

@@ -18,6 +18,7 @@ import (
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
+	"github.com/Corium-OS/Corium/internal/upgrade"
 )
 
 // requestTimeout bounds a single call. Every route this client speaks to
@@ -29,7 +30,7 @@ const requestTimeout = 30 * time.Second
 const maxResponse = 1 << 20
 
 // ErrFingerprintUnknown reports an endpoint nobody has vouched for yet.
-var ErrFingerprintUnknown = errors.New("no fingerprint known for this node")
+var ErrFingerprintUnknown = errors.New("no fingerprint known")
 
 // Client talks to one node.
 type Client struct {
@@ -181,7 +182,9 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 		return fmt.Errorf("reading the response: %w", err)
 	}
 
-	if response.StatusCode != http.StatusOK {
+	// 202 is what a node returns when it has accepted a job it will not be
+	// around to finish -- applying an upgrade reboots it.
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
 		return c.explain(response.Status, raw)
 	}
 
@@ -352,4 +355,34 @@ func (q LogQuery) values() url.Values {
 	}
 
 	return values
+}
+
+// Stage asks a node to pull an image and prepare to boot it.
+func (c *Client) Stage(ctx context.Context, image string) (*upgrade.Staged, error) {
+	body, err := json.Marshal(map[string]string{"image": image})
+	if err != nil {
+		return nil, fmt.Errorf("encoding the request: %w", err)
+	}
+
+	var staged upgrade.Staged
+	if err := c.call(ctx, http.MethodPost, "/v1/upgrade/stage", body, &staged); err != nil {
+		return nil, err
+	}
+
+	return &staged, nil
+}
+
+// Apply tells a node to drain and reboot into what it has staged.
+//
+// It returns as soon as the node has accepted: the machine is about to go
+// away, and waiting for it to finish would mean waiting for this connection to
+// be cut.
+func (c *Client) Apply(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/upgrade/apply", []byte("{}"), nil)
+}
+
+// Rollback marks a node's previous image as the one to boot next. It does not
+// reboot.
+func (c *Client) Rollback(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/upgrade/rollback", []byte("{}"), nil)
 }

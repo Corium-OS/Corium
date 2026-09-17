@@ -134,6 +134,9 @@ Off unless asked for, and covered by
 | Services | — | `cctl services` lists what the API knows about. Units come from a fixed list, never passed through |
 | Journals | — | `cctl logs`, per unit or across all of them, with `--since`, `--follow` and `--unit kernel`. Bounded: 10000 records, one hour of following |
 | Restarting k0s | — | `cctl restart --unit k0sworker`, at `corium:operator`. Units that run once — the bootstrap above all — are readable and not restartable |
+| Upgrades | — | `cctl upgrade <nodes...> --image`, one node at a time, stopping at the first that does not come back on the digest it was sent |
+| Image validation | — | A node refuses an image its own signing policy would accept unsigned. Not a label check: labels are forgeable |
+| Rollback | — | `cctl rollback <node>` marks the previous image as next to boot, and does not reboot |
 | Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its

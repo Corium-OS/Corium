@@ -16,6 +16,7 @@ import (
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
+	"github.com/Corium-OS/Corium/internal/upgrade"
 )
 
 // DefaultPort is where corium-apid listens.
@@ -72,6 +73,9 @@ type Server struct {
 	// systemd is how services and journals are reached, for the same reason.
 	systemd *systemd.Manager
 
+	// upgrades drives bootc, likewise.
+	upgrades *upgrade.Manager
+
 	// claimed is closed when an enrolment succeeds, so that the process can
 	// come back up in its other shape rather than rebuilding TLS underneath a
 	// live listener.
@@ -90,6 +94,9 @@ func (s *Server) Inspect(inspector *nodeinfo.Inspector) { s.inspector = inspecto
 // Supervise replaces how the server reaches systemd, for the same reason.
 func (s *Server) Supervise(manager *systemd.Manager) { s.systemd = manager }
 
+// Upgrades replaces how the server drives bootc, likewise.
+func (s *Server) Upgrades(manager *upgrade.Manager) { s.upgrades = manager }
+
 // NewServer prepares a listener for whichever state the node is in.
 func NewServer(store *Store, address string) (*Server, error) {
 	server := &Server{
@@ -99,6 +106,7 @@ func NewServer(store *Store, address string) (*Server, error) {
 		ready:     make(chan struct{}),
 		inspector: &nodeinfo.Inspector{},
 		systemd:   &systemd.Manager{},
+		upgrades:  &upgrade.Manager{},
 	}
 
 	enrolled, err := store.Enrolled()
@@ -261,6 +269,13 @@ func (s *Server) routes() http.Handler {
 	// Restarting k0s takes a node out of service for as long as it takes to
 	// come back, which is an operator's call and not a reader's.
 	mux.HandleFunc("POST /v1/services/{unit}/restart", require(RoleOperator, s.handleRestart))
+
+	// Staging pulls an image and changes nothing else, so it sits with the
+	// other operator work. Applying takes the node out of service and rollback
+	// decides what it comes back as; both are admin.
+	mux.HandleFunc("POST /v1/upgrade/stage", require(RoleOperator, s.handleStage))
+	mux.HandleFunc("POST /v1/upgrade/apply", require(RoleAdmin, s.handleApply))
+	mux.HandleFunc("POST /v1/upgrade/rollback", require(RoleAdmin, s.handleRollback))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing
