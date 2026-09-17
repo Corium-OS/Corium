@@ -64,8 +64,9 @@ None of it can be undone. Work through this in order.
 8. **Tag the release**: `vX.Y.Z`. This moves `latest`.
 
 The tag build publishes three things, in order, each gated on the one before:
-the signed image, the signed installer ISO, and the GitHub Release that points
-at both. The ISO build takes 20 to 35 minutes, so a release takes roughly an
+the signed image, the signed artefacts built from it (an installer ISO and a
+qcow2, from a single bootc-image-builder run), and the GitHub Release that
+points at all of them. The ISO build takes 20 to 35 minutes, so a release takes roughly an
 hour of CI. If it fails, nothing announces a release that does not exist --
 re-run the workflow, which is idempotent on all three.
 
@@ -123,6 +124,7 @@ not against a local build.
 | Installing from the anaconda ISO | The documented path onto bare metal, and nothing else exercises it | 45 min |
 | Software RAID on spare disks | Assembled before k0s starts, surviving a reboot, and refusing to touch a disk that holds data | 20 min |
 | The published ISO installs | Download it the way the release notes say to, verify the signature, and install from it. It is built in CI from the signed image, on a path no local build exercises | 45 min |
+| The published qcow2 boots | Feed it to `deploy/proxmox/create-vm.sh` as `DISK_IMAGE`. This is the same artefact the HA check below consumes, so doing that one covers this | 15 min |
 
 ### What is expensive, and skipped on purpose
 

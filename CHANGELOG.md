@@ -64,8 +64,11 @@ the node is described in cloud-init.
 - **Installable artefacts** from `bootc-image-builder`: `qcow2` for Proxmox,
   KVM and libvirt, `raw` for bare metal and cloud imports, and an
   `anaconda-iso` that installs unattended.
-- **The installer ISO is published with every release**, so installing one no
-  longer requires a Linux host, `sudo`, and a privileged container. It is too
+- **The installer ISO and a qcow2 disk image are published with every
+  release**, so installing a node no longer requires a Linux host, `sudo`, and
+  a privileged container. The qcow2 is what the Proxmox scripts in
+  `deploy/proxmox/` take as `DISK_IMAGE`, which until now had to be built
+  before they could be used at all. It is too
   large to attach to a GitHub release, so it ships as a signed OCI artifact in
   the same registry: `oras pull`, or `curl` against the registry API for
   anyone without it, and a plain HTTPS link for anyone who would rather click

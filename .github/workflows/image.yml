@@ -263,8 +263,8 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  iso:
-    name: Build and publish the installer ISO
+  artefacts:
+    name: Build and publish the installable artefacts
     needs: build
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -275,20 +275,26 @@ jobs:
       id-token: write
 
     outputs:
-      reference: ${{ steps.publish.outputs.reference }}
-      digest: ${{ steps.publish.outputs.digest }}
-      blob: ${{ steps.publish.outputs.blob }}
-      name: ${{ steps.publish.outputs.name }}
-      mirror: ${{ steps.mirror.outputs.url }}
+      iso_reference: ${{ steps.publish.outputs.iso_reference }}
+      iso_digest: ${{ steps.publish.outputs.iso_digest }}
+      iso_blob: ${{ steps.publish.outputs.iso_blob }}
+      iso_name: ${{ steps.publish.outputs.iso_name }}
+      iso_mirror: ${{ steps.mirror.outputs.iso_url }}
+      qcow2_reference: ${{ steps.publish.outputs.qcow2_reference }}
+      qcow2_digest: ${{ steps.publish.outputs.qcow2_digest }}
+      qcow2_blob: ${{ steps.publish.outputs.qcow2_blob }}
+      qcow2_name: ${{ steps.publish.outputs.qcow2_name }}
+      qcow2_mirror: ${{ steps.mirror.outputs.qcow2_url }}
 
     env:
-      # A separate repository, not a tag on the image. containers-policy scopes
-      # match on whole path components, so ghcr.io/corium-os/corium-iso is
-      # outside the policy a node enforces for ghcr.io/corium-os/corium -- an
-      # ISO is downloaded by a person, never pulled by a node, and mixing the
-      # two in one repository would put a thing that cannot boot in the tag
-      # list of the thing that does.
+      # Separate repositories, not tags on the image. containers-policy scopes
+      # match on whole path components, so these sit outside the policy a node
+      # enforces for ghcr.io/corium-os/corium -- an installer is downloaded by
+      # a person, never pulled by a node, and mixing the two in one repository
+      # would put things that cannot boot in the tag list of the thing that
+      # does.
       ISO_IMAGE: ghcr.io/corium-os/corium-iso
+      QCOW2_IMAGE: ghcr.io/corium-os/corium-qcow2
       # A plain HTTPS mirror, for people who would rather click a link than
       # install a tool. Self-hosted, so it is allowed to be down: see the
       # mirror step for why that costs a release nothing.
@@ -303,7 +309,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build the ISO from the published image
+      - name: Build the artefacts from the published image
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
@@ -315,7 +321,7 @@ jobs:
           # seconds and freed space nothing needed.
           df -h /
 
-          # By digest, not by tag: this ISO installs the exact bytes that were
+          # By digest, not by tag: these install the exact bytes that were
           # signed a job ago, and nothing that moves in between.
           #
           # Pulling first is what bootc-image-builder expects -- using local
@@ -324,22 +330,25 @@ jobs:
           sudo podman pull "${IMAGE_DIGEST}"
 
           mkdir -p output
+          # --type takes more than one value, so both artefacts come out of a
+          # single osbuild run rather than two passes over the same image.
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             -v "${PWD}/output:/output" \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type anaconda-iso \
+            --type qcow2 \
             "${IMAGE_DIGEST}"
 
           # bootc-image-builder floats on :latest, here as in the Makefile, so
-          # the ISO is verifiable but not reproducible. Record which builder
-          # produced it, since that is the part we can still be honest about.
+          # these are verifiable but not reproducible. Record which builder
+          # produced them, since that is the part we can still be honest about.
           sudo podman image inspect --format '{{index .RepoDigests 0}}' \
             quay.io/centos-bootc/bootc-image-builder:latest
 
           sudo chown -R "$(id -u):$(id -g)" output
-          ls -l output/bootiso/
+          find output -type f -printf '%s\t%p\n'
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.2
@@ -359,82 +368,108 @@ jobs:
           # version 1.3.4" rather than downloading it.
           version: 1.3.3
 
-      - name: Publish and sign it
+      - name: Publish and sign them
         id: publish
-        run: |
-          version="${{ needs.build.outputs.version }}"
-          name="corium-${version}-x86_64.iso"
-
-          # oras records the file name in org.opencontainers.image.title, and
-          # that is what `oras pull` writes to disk. Name it before pushing, or
-          # everyone ends up with install.iso.
-          mv output/bootiso/install.iso "${name}"
-          blob="sha256:$(sha256sum "${name}" | cut -d' ' -f1)"
-          echo "${name} is $(du -h "${name}" | cut -f1), ${blob}"
-
-          oras push \
-            --artifact-type application/vnd.corium.installer.iso \
-            "${ISO_IMAGE}:${version}" \
-            "${name}:application/x-iso9660-image"
-
-          # Resolved rather than parsed out of the push output: this is the
-          # descriptor the registry stored, which is what gets signed.
-          digest="$(oras manifest fetch --descriptor "${ISO_IMAGE}:${version}" | jq -r .digest)"
-          reference="${ISO_IMAGE}@${digest}"
-
-          # Signed exactly like the image. cosign signs whatever is in a
-          # registry; an artifact manifest is no different from an image one.
-          cosign sign --yes "${reference}"
-          echo "signed (keyless) ${reference}"
-
-          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${reference}"
-          echo "signed (key) ${reference}"
-
-          {
-            echo "reference=${ISO_IMAGE}:${version}"
-            echo "digest=${reference}"
-            echo "blob=${blob}"
-            echo "name=${name}"
-          } >> "${GITHUB_OUTPUT}"
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          version="${{ needs.build.outputs.version }}"
 
-      - name: Mirror it to a plain HTTPS URL
+          # $1 key  $2 file bootc-image-builder wrote  $3 published file name
+          # $4 repository  $5 artifact type  $6 layer media type
+          publish() {
+            key="$1"; built="$2"; name="$3"; repo="$4"; artifact="$5"; media="$6"
+
+            # oras records the file name in org.opencontainers.image.title,
+            # and that is what `oras pull` writes to disk. Name it before
+            # pushing, or everyone ends up with install.iso and disk.qcow2.
+            mv "${built}" "${name}"
+            blob="sha256:$(sha256sum "${name}" | cut -d' ' -f1)"
+            echo "${name} is $(du -h "${name}" | cut -f1), ${blob}"
+
+            oras push --artifact-type "${artifact}" \
+              "${repo}:${version}" "${name}:${media}"
+
+            # Resolved rather than parsed out of the push output: this is the
+            # descriptor the registry stored, which is what gets signed.
+            digest="$(oras manifest fetch --descriptor "${repo}:${version}" | jq -r .digest)"
+            reference="${repo}@${digest}"
+
+            # Signed exactly like the image. cosign signs whatever is in a
+            # registry; an artifact manifest is no different from an image one.
+            cosign sign --yes "${reference}"
+            echo "signed (keyless) ${reference}"
+
+            cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${reference}"
+            echo "signed (key) ${reference}"
+
+            {
+              echo "${key}_reference=${repo}:${version}"
+              echo "${key}_digest=${reference}"
+              echo "${key}_blob=${blob}"
+              echo "${key}_name=${name}"
+            } >> "${GITHUB_OUTPUT}"
+          }
+
+          publish iso output/bootiso/install.iso \
+            "corium-${version}-x86_64.iso" "${ISO_IMAGE}" \
+            application/vnd.corium.installer.iso application/x-iso9660-image
+
+          publish qcow2 output/qcow2/disk.qcow2 \
+            "corium-${version}-x86_64.qcow2" "${QCOW2_IMAGE}" \
+            application/vnd.corium.disk.qcow2 application/x-qemu-disk
+
+      - name: Mirror them to plain HTTPS URLs
         id: mirror
-        # The signed artifact above is the release. This is a convenience copy
-        # on self-hosted storage, so it must never be able to take a release
-        # down with it: the step is allowed to fail, and the notes mention a
-        # mirror only when there is one to mention.
+        # The signed artifacts above are the release. These are convenience
+        # copies on self-hosted storage, so they must never be able to take a
+        # release down with them: the step is allowed to fail, and the notes
+        # mention a mirror only when there is one to mention.
         continue-on-error: true
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.RUSTFS_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.RUSTFS_SECRET_KEY }}
           AWS_DEFAULT_REGION: us-east-1
-          ISO_NAME: ${{ steps.publish.outputs.name }}
+          ISO_NAME: ${{ steps.publish.outputs.iso_name }}
+          QCOW2_NAME: ${{ steps.publish.outputs.qcow2_name }}
         run: |
-          aws --endpoint-url "${MIRROR_ENDPOINT}" \
-            s3 cp "${ISO_NAME}" "s3://${MIRROR_BUCKET}/${ISO_NAME}" \
-            --only-show-errors
+          # One failing upload must not suppress the other's URL, so each is
+          # advertised on its own merits.
+          failed=0
+          for pair in "iso:${ISO_NAME}" "qcow2:${QCOW2_NAME}"; do
+            key="${pair%%:*}"; name="${pair#*:}"
 
-          url="${MIRROR_ENDPOINT}/${MIRROR_BUCKET}/${ISO_NAME}"
+            if ! aws --endpoint-url "${MIRROR_ENDPOINT}" \
+              s3 cp "${name}" "s3://${MIRROR_BUCKET}/${name}" --only-show-errors
+            then
+              echo "::warning::${name} did not upload; not advertising it"
+              failed=1
+              continue
+            fi
 
-          # Anonymous read comes from a bucket policy on the bucket, not from
-          # a canned ACL -- the storage accepts --acl public-read and silently
-          # discards it. Ask for a byte as a stranger would rather than trust
-          # that: an advertised URL that 403s is worse than no mirror.
-          code="$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 "${url}")"
-          if [ "${code}" != "206" ] && [ "${code}" != "200" ]; then
-            echo "::warning::${url} answered ${code}; not advertising the mirror"
-            exit 1
-          fi
+            url="${MIRROR_ENDPOINT}/${MIRROR_BUCKET}/${name}"
 
-          echo "url=${url}" >> "${GITHUB_OUTPUT}"
-          echo "mirrored to ${url}"
+            # Anonymous read comes from a bucket policy on the bucket, not
+            # from a canned ACL -- the storage accepts --acl public-read and
+            # silently discards it. Ask for a byte as a stranger would rather
+            # than trust that: an advertised URL that 403s is worse than no
+            # mirror.
+            code="$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 "${url}")"
+            if [ "${code}" != "206" ] && [ "${code}" != "200" ]; then
+              echo "::warning::${url} answered ${code}; not advertising it"
+              failed=1
+              continue
+            fi
+
+            echo "${key}_url=${url}" >> "${GITHUB_OUTPUT}"
+            echo "mirrored to ${url}"
+          done
+          exit "${failed}"
 
   release:
     name: Publish the GitHub Release
-    needs: [build, iso]
+    needs: [build, artefacts]
     # Only a real tag push. workflow_dispatch can be pointed at a tag too, and
     # rebuilding a published image by hand must not try to create its Release a
     # second time.
@@ -457,11 +492,16 @@ jobs:
           # script: a tag name is chosen by whoever pushed it.
           TAG: ${{ github.ref_name }}
           DIGEST: ${{ needs.build.outputs.digest }}
-          ISO_REFERENCE: ${{ needs.iso.outputs.reference }}
-          ISO_DIGEST: ${{ needs.iso.outputs.digest }}
-          ISO_BLOB: ${{ needs.iso.outputs.blob }}
-          ISO_NAME: ${{ needs.iso.outputs.name }}
-          ISO_MIRROR: ${{ needs.iso.outputs.mirror }}
+          ISO_REFERENCE: ${{ needs.artefacts.outputs.iso_reference }}
+          ISO_DIGEST: ${{ needs.artefacts.outputs.iso_digest }}
+          ISO_BLOB: ${{ needs.artefacts.outputs.iso_blob }}
+          ISO_NAME: ${{ needs.artefacts.outputs.iso_name }}
+          ISO_MIRROR: ${{ needs.artefacts.outputs.iso_mirror }}
+          QCOW2_REFERENCE: ${{ needs.artefacts.outputs.qcow2_reference }}
+          QCOW2_DIGEST: ${{ needs.artefacts.outputs.qcow2_digest }}
+          QCOW2_BLOB: ${{ needs.artefacts.outputs.qcow2_blob }}
+          QCOW2_NAME: ${{ needs.artefacts.outputs.qcow2_name }}
+          QCOW2_MIRROR: ${{ needs.artefacts.outputs.qcow2_mirror }}
         run: |
           # Re-running a tag build after a transient registry failure replays
           # the same push event. Publishing the image again is harmless;
@@ -476,14 +516,10 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${ISO_DIGEST}" ] || [ -z "${ISO_BLOB}" ]; then
-            echo "::error::the ISO job published nothing" >&2
+          if [ -z "${ISO_DIGEST}" ] || [ -z "${QCOW2_DIGEST}" ]; then
+            echo "::error::the artefacts job published nothing" >&2
             exit 1
           fi
-
-          # ghcr.io/corium-os/corium-iso:0.1.0 -> corium-os/corium-iso
-          iso_repo="${ISO_REFERENCE#ghcr.io/}"
-          iso_repo="${iso_repo%%:*}"
 
           version="${TAG#v}"
 
@@ -548,41 +584,53 @@ jobs:
             printf 'cosign verify --key cosign.pub %s\n' "${DIGEST}"
             printf '```\n\n'
 
-            printf '### The installer ISO\n\n'
-            printf 'Nothing is attached to this release. The ISO is about 2.4 GB, past the\n'
-            printf '2 GiB limit for a release asset, so it is published as a signed OCI\n'
-            printf 'artifact in the same registry, under the same signing chain as the image.\n\n'
-            printf '```bash\n'
-            printf 'oras pull %s\n' "${ISO_REFERENCE}"
-            printf '```\n\n'
-            printf 'Or over plain HTTPS, with nothing beyond curl:\n\n'
-            printf '```bash\n'
-            printf 'token=$(curl -s "https://ghcr.io/token?scope=repository:%s:pull" | jq -r .token)\n' "${iso_repo}"
-            printf 'curl -L -H "Authorization: Bearer ${token}" -o %s \\\n' "${ISO_NAME}"
-            printf '  https://ghcr.io/v2/%s/blobs/%s\n' "${iso_repo}" "${ISO_BLOB}"
-            printf '```\n\n'
-            if [ -n "${ISO_MIRROR}" ]; then
-              printf 'Or straight from a browser:\n\n'
-              printf '%s\n\n' "${ISO_MIRROR}"
-              printf 'That last one is a convenience mirror on self-hosted storage. It carries\n'
-              printf 'the same bytes, and the check below catches it if it ever does not, but\n'
-              printf 'the registry above is the release.\n\n'
-            fi
+            printf '### Downloads\n\n'
+            printf 'Nothing is attached to this release: the ISO alone is past the 2 GiB\n'
+            printf 'limit for a release asset. Both are published as signed OCI artifacts in\n'
+            printf 'the same registry, under the same signing chain as the image.\n\n'
 
-            printf 'Every route gives the same bytes. Check them:\n\n'
-            printf '```bash\n'
-            printf 'cosign verify %s \\\n' "${ISO_DIGEST}"
-            printf '  --certificate-identity-regexp %s \\\n' "'https://github.com/${GH_REPO}/.*'"
-            printf '  --certificate-oidc-issuer https://token.actions.githubusercontent.com\n\n'
-            printf '# The signature covers the manifest, and the manifest names this blob.\n'
-            printf 'sha256sum %s\n' "${ISO_NAME}"
-            printf '#   -> %s\n' "${ISO_BLOB#sha256:}"
-            printf '```\n\n'
-            printf 'There is no separate checksum file to take on trust: that hash is the one\n'
-            printf 'cosign signed, by way of the manifest.\n\n'
-            printf 'The qcow2 and raw disk images are not published -- they install from the\n'
-            printf 'image directly. `make artefacts IMAGE_TAG=%s` builds all three locally, on\n' "${version}"
-            printf 'a Linux host with sudo.\n\n'
+            # One block per artefact, because the routes and the checks are
+            # identical and only the coordinates differ.
+            #   $1 heading  $2 what it is for  $3 repo:tag  $4 repo@digest
+            #   $5 blob digest  $6 file name  $7 mirror URL, possibly empty
+            artefact() {
+              printf '#### %s\n\n%s\n\n' "$1" "$2"
+              printf '```bash\n'
+              printf 'oras pull %s\n' "$3"
+              printf '```\n\n'
+              printf 'Without oras:\n\n'
+              printf '```bash\n'
+              repo="${3#ghcr.io/}"; repo="${repo%%:*}"
+              printf 'token=$(curl -s "https://ghcr.io/token?scope=repository:%s:pull" | jq -r .token)\n' "${repo}"
+              printf 'curl -L -H "Authorization: Bearer ${token}" -o %s \\\n' "$6"
+              printf '  https://ghcr.io/v2/%s/blobs/%s\n' "${repo}" "$5"
+              printf '```\n\n'
+              if [ -n "$7" ]; then
+                printf 'Or from a browser:\n\n%s\n\n' "$7"
+              fi
+              printf '```bash\n'
+              printf 'cosign verify %s \\\n' "$4"
+              printf '  --certificate-identity-regexp %s \\\n' "'https://github.com/${GH_REPO}/.*'"
+              printf '  --certificate-oidc-issuer https://token.actions.githubusercontent.com\n\n'
+              printf 'sha256sum %s\n' "$6"
+              printf '#   -> %s\n' "${5#sha256:}"
+              printf '```\n\n'
+            }
+
+            artefact 'Installer ISO' \
+              'Bare metal, interactive or kickstarted. Installs unattended.' \
+              "${ISO_REFERENCE}" "${ISO_DIGEST}" "${ISO_BLOB}" "${ISO_NAME}" "${ISO_MIRROR}"
+
+            artefact 'qcow2 disk image' \
+              'Proxmox, KVM and libvirt. This is what the scripts under `deploy/proxmox/` expect.' \
+              "${QCOW2_REFERENCE}" "${QCOW2_DIGEST}" "${QCOW2_BLOB}" "${QCOW2_NAME}" "${QCOW2_MIRROR}"
+
+            printf 'Every route gives the same bytes. There is no separate checksum file to\n'
+            printf 'take on trust: those hashes are the ones cosign signed, by way of each\n'
+            printf 'manifest. A mirror, where offered, is a convenience on self-hosted\n'
+            printf 'storage -- the registry is the release.\n\n'
+            printf 'A raw disk image is not published. `make artefacts IMAGE_TAG=%s` builds\n' "${version}"
+            printf 'all three locally, on a Linux host with sudo.\n\n'
 
             printf -- '---\n\n'
             printf 'New here: [quick start](https://github.com/%s/blob/%s/docs/quickstart.md).\n' "${GH_REPO}" "${TAG}"

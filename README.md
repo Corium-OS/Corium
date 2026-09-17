@@ -131,14 +131,16 @@ node silently joins the wrong cluster.
 | `anaconda-iso` | Interactive or kickstarted bare-metal installs |
 
 You only need to build these if you have changed the image. Every release
-publishes the installer ISO ready-made and signed — see the
-[latest release](https://github.com/Corium-OS/Corium/releases/latest).
+publishes the ISO and the qcow2 ready-made and signed: see
+[**Downloads**](docs/downloads.md) for where they live, why nothing is
+attached to the release itself, and how to check what you got.
 
 ## Documentation
 
 - [**Comparison**](docs/comparison.md) — Talos, Kairos, Flatcar, and when not to use Corium
 - [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
 - [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
+- [**Downloads**](docs/downloads.md) — where the ISO and the qcow2 are published, and how to verify them
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
 - [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
