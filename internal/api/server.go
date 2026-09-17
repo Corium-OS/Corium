@@ -99,6 +99,20 @@ func NewServer(store *Store, address string) (*Server, error) {
 // Unenrolled reports whether this server is waiting to be claimed.
 func (s *Server) Unenrolled() bool { return s.enroller != nil }
 
+// PairingCode is the code this node is showing on its console, or empty on a
+// node that has already been claimed.
+//
+// It is exported for the same reason it is printed: an operator needs it, and
+// so does a test standing in for one. It is never returned over the API, which
+// would defeat the point of it.
+func (s *Server) PairingCode() string {
+	if s.enroller == nil {
+		return ""
+	}
+
+	return s.enroller.Code()
+}
+
 // Claimed returns a channel closed when an operator enrols the node.
 func (s *Server) Claimed() <-chan struct{} { return s.claimed }
 

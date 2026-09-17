@@ -452,10 +452,10 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
-> **Partly implemented.** The daemon runs, serves TLS on `7443`, and enrolment
-> works. What does not exist yet is `cctl` — so enrolment is done with `curl`
-> for now, shown below — and the four management surfaces themselves. A claimed
-> node serves `GET /v1/health` and nothing more.
+> **Partly implemented.** The daemon runs, `cctl` claims a node and talks to
+> it, and the trust model is complete end to end. What does not exist yet are
+> the four management surfaces: a claimed node serves `GET /v1/health` and
+> nothing more.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -509,29 +509,55 @@ Enrolment pins the CA and releases the bootstrap, which proceeds from the
 cloud-init configuration the node has been holding all along. It sends a CA
 certificate and nothing else — it is not a way to configure a node.
 
-Until `cctl` exists, claim a node with `curl`. The API speaks JSON over HTTP,
-which is half the reason it was chosen over gRPC:
+Getting an operator CA, and a certificate to use it with:
 
 ```console
-$ curl --cacert /dev/null -k -X POST https://192.168.1.51:7443/v1/enroll \
-    -d "{\"code\": \"K7QM-93XF\",
-         \"operatorCA\": $(jq -Rs . < operator-ca.pem)}"
-{"enrolled":true,"operatorCA":"SHA256:KuLc7+18paKxpMRed6xJMCUYvtBo9Hd6osRKAkO+7Qo"}
+$ cctl pki init
+Created an operator CA in /home/you/.corium
+...
+$ cctl pki issue --role admin
+Signed a client certificate for "you" as corium:admin, valid for 2160h0m0s.
 ```
 
-Check the fingerprint in the reply against the one on the console before
-trusting the node. Afterwards the daemon restarts and requires a client
-certificate signed by the CA you just sent:
+`pki init` prints the certificate ready to paste into cloud-init, which is all
+mode A needs. The private key beside it never leaves your machine.
+
+Then claim the node, using both values from its console:
 
 ```console
-$ curl -k --cert operator.crt --key operator.key \
+$ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
+Claimed 192.168.1.51:7443.
+
+  node fingerprint  SHA256:tQ2f...9c1a
+  operator CA       SHA256:HklllX2CnKCQpdebtG2MO8K+Ft0Hwnfbv4Ly5KdFVDk
+
+The node is restarting to require your client certificate, and its
+bootstrap is released: it will now join the cluster its cloud-init
+configuration describes.
+```
+
+Leaving out `--fingerprint` shows what answered and asks you to confirm it
+against the console. It is refused when there is nobody there to ask: a script
+that confirms whatever answers has checked nothing while appearing to.
+
+Afterwards the fingerprint is remembered, so later calls need no flags:
+
+```console
+$ cctl health 192.168.1.51
+192.168.1.51:7443  ok  (authenticated as corium:admin)
+```
+
+`curl` works too, which is half the reason the API speaks JSON over HTTP:
+
+```console
+$ curl -k --cert ~/.corium/client.crt --key ~/.corium/client.key \
     https://192.168.1.51:7443/v1/health
 {"status":"ok","role":"corium:admin"}
 ```
 
 The `-k` is not a shortcut: the node signs its own certificate, because no
 private key is ever carried in a configuration. The fingerprint is the check,
-and `cctl` will pin it for you.
+and `cctl` pins it for you.
 
 Two consequences worth knowing before choosing this mode:
 

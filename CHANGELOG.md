@@ -55,6 +55,18 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   JSON over HTTP, which is half the reason it was chosen. A claimed node serves
   `GET /v1/health` and nothing else; the four management surfaces come next.
 
+- **`cctl`, the operator's client.** `cctl pki init` creates the operator CA —
+  and prints its certificate ready to paste into cloud-init — while
+  `cctl pki issue --role admin` signs a client certificate for you. The CA's
+  private key never leaves your machine, which is the property the whole scheme
+  rests on. `cctl enroll <node> --code <code>` claims a node in maintenance
+  mode and remembers its fingerprint, so later calls need no flags; omitting
+  `--fingerprint` shows what answered and asks you to confirm it against the
+  console, and refuses when there is nobody there to ask.
+
+  It is a workstation tool and is not shipped in the OS image. Build it with
+  `mise run build`.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

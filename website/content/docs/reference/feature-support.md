@@ -139,6 +139,7 @@ Off unless asked for, and covered by
 | Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |
 | Transport | — | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
 | Roles | — | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin` |
+| Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its
 configuration and waits, rather than joining first and being claimed later.
