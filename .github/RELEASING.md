@@ -71,31 +71,46 @@ them. The ISO build takes 20 to 35 minutes, so a release takes roughly an
 hour of CI. If it fails, nothing announces a release that does not exist --
 re-run the workflow, which is idempotent on all three.
 
-### The download mirror
+### The download host
 
-The ISO is also copied to `s3.thoughtless.eu/corium-releases`, which exists
-only so the release notes can offer a link someone can click. It is
-self-hosted, and the release path treats it accordingly:
+Both artefacts are also copied to a bunny.net storage zone and served from the
+CDN pull zone in front of it, so the release notes can offer a link rather
+than a command. The release path treats it as optional:
 
-- The step is `continue-on-error`. A mirror that is down costs a release
-  nothing.
-- It fetches a byte back as an anonymous client before advertising the URL,
-  because an advertised link that 403s is worse than no link.
-- The notes mention a mirror only when one exists, and say plainly that the
-  registry is the release and the mirror is a convenience.
+- The step is `continue-on-error`. A download host that is unreachable costs a
+  release nothing, and the notes offer a link only for an artefact whose
+  upload and read-back both succeeded.
+- It reads a byte back as an anonymous client before advertising anything,
+  retrying a few times because that request is also the CDN's first sight of
+  the object. An advertised URL that 403s is worse than no URL.
 
-Anonymous read comes from a bucket policy, not from a canned ACL -- the
-storage accepts `--acl public-read` and silently discards it. If the mirror
-ever starts refusing anonymous reads, that policy is the first thing to check:
+**Nothing published there is ever overwritten, and that is load-bearing.** The
+CDN does not watch its origin for changes: a replaced file keeps being served
+from cache until it expires, and purging needs an account-wide API key this
+workflow deliberately does not hold. Every artefact carries its version in its
+name, so the situation cannot arise. Do not add a `latest` alias there without
+solving the purge problem first.
 
-```bash
-aws --endpoint-url https://s3.thoughtless.eu \
-  s3api get-bucket-policy --bucket corium-releases
-```
+CI uploads with the storage zone's own credentials -- the zone name is the S3
+access key and the zone password the secret -- which reach that zone and
+nothing else in the account. Repository secrets `BUNNY_STORAGE_ZONE` and
+`BUNNY_STORAGE_PASSWORD`, repository variables `BUNNY_REGION` and
+`BUNNY_PULL_ZONE_URL`.
 
-CI writes with a `corium-ci` account scoped to that bucket alone -- it cannot
-read the other buckets on that storage, and cannot create new ones. Do not
-replace it with the storage's root credentials.
+Two settings on the pull zone that are not obvious:
+
+- **Optimize for Video Delivery** (cache slicing) must be on, or `Range`
+  requests are only honoured for content already cached. Without it a 2.4 GB
+  download cannot resume.
+- **Token Authentication** must stay off, or every URL needs a signature.
+
+The storage zone's S3 compatibility can only be enabled when the zone is
+created. If it is ever recreated, that box has to be ticked at the time; there
+is no way to add it afterwards.
+
+The account is prepaid: at zero balance the downloads stop while the registry
+keeps working. Storage is pennies, and the bill is essentially egress at about
+a cent per gigabyte.
 
 ---
 

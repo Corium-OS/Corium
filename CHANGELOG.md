@@ -75,9 +75,9 @@ the node is described in cloud-init.
   before they could be used at all. It is too
   large to attach to a GitHub release, so it ships as a signed OCI artifact in
   the same registry: `oras pull`, or `curl` against the registry API for
-  anyone without it, and a plain HTTPS link for anyone who would rather click
-  than run either. Every route gives the same bytes, and the hash to check
-  them against is the one cosign signed rather than a checksum file alongside.
+  anyone without it, and a CDN link for anyone who would rather click than run
+  either. Every route gives the same bytes, and the hash to check them against
+  is the one cosign signed rather than a checksum file alongside.
 - **Proxmox scripts** that create a single node from a qcow2, a node that
   installs itself from the ISO, and a three-controller HA cluster.
 - **An escape hatch at every level**: raw `write_files` and `runcmd`, and a
