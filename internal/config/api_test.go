@@ -237,3 +237,44 @@ func TestSecretSourceErrorsNameTheFieldTheyCameFrom(t *testing.T) {
 		t.Errorf("Validate() error = %q, must not blame join.tokenFrom", err)
 	}
 }
+
+func TestInsecureOnlyAppliesToMaintenanceMode(t *testing.T) {
+	ca := operatorCA(t)
+
+	// A key that silently does nothing is the mistake that costs an operator a
+	// reboot cycle to find, so the contradictions are refused.
+	for name, api := range map[string]API{
+		"with an inline CA":   {OperatorCA: ca, Insecure: true},
+		"with a CA source":    {OperatorCAFrom: &SecretSource{File: "/etc/ca.pem"}, Insecure: true},
+		"with the API off":    {Insecure: true},
+		"with an explicit no": {Enabled: enabled(false), Insecure: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := Config{Role: RoleSingle, API: api}
+			cfg.ApplyDefaults()
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "api.insecure") {
+				t.Errorf("Validate() = %v, want a complaint about api.insecure", err)
+			}
+		})
+	}
+}
+
+func TestInsecureMaintenanceIsAccepted(t *testing.T) {
+	cfg := Config{Role: RoleWorker, Join: Join{Token: "x"},
+		API: API{Enabled: enabled(true), Insecure: true}}
+	cfg.ApplyDefaults()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+
+	if !cfg.API.OpenEnrolment() {
+		t.Error("OpenEnrolment() = false on an insecure maintenance node")
+	}
+
+	if !cfg.API.HoldsBootstrap() {
+		t.Error("an open node still joins no cluster until it is claimed")
+	}
+}

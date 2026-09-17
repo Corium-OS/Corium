@@ -461,6 +461,7 @@ full by [ADR 4](adr/0004-management-api.md).
 | `enabled` | bool | `false` | Setting either key below implies `true`. False masks `corium-apid.service` |
 | `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
+| `insecure` | bool | `false` | Drop the pairing code. Maintenance mode only |
 
 Set at most one of `operatorCA` and `operatorCAFrom`.
 
@@ -679,7 +680,42 @@ Two consequences worth knowing before choosing this mode:
 
 Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
 because a certificate is not a secret, and the node's own serving key at `0600`
-because that one is — and it survives reboots and upgrades. A node that has been claimed never falls back to maintenance mode on
+because that one is — and it survives reboots and upgrades.
+
+##### Giving the pairing code up
+
+`api.insecure: true` drops it: the first client to reach an unclaimed node
+claims it, with nothing to prove. This is for a bench, a lab, a provisioning
+network you control end to end, or a PXE fleet where visiting consoles is not
+going to happen — mode C otherwise costs one console visit per machine.
+
+What bounds the risk is that an unclaimed node is in no cluster, so whoever
+wins the race gets a bare machine, and enrolment is still one-way, so the
+window shuts the moment anybody uses it. What they do get is that machine's
+future: the CA they pin is the CA it will obey.
+
+The node is loud about it. On the console:
+
+```
+  !! api.insecure is set: no pairing code is required, so the
+  !! first client to reach this port claims this node for good.
+```
+
+And afterwards, because a node holds the same pinned CA whichever way it was
+claimed and there would otherwise be no way to tell:
+
+```console
+$ cctl status 192.168.1.51
+192.168.1.51:7443
+
+  hostname     worker-01
+
+  !! This node was claimed without authentication (api.insecure).
+  !! Whoever reached it first chose the CA it now obeys.
+```
+
+Setting it anywhere it would do nothing — alongside an operator CA, or with the
+API off — is a validation error rather than being ignored. A node that has been claimed never falls back to maintenance mode on
 its own, or power-cycling a machine would be enough to take it.
 
 ### 3.12 Defaults

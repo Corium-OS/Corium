@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/api"
@@ -116,7 +117,16 @@ func (c *Client) Enrol(ctx context.Context, code string, operatorCA []byte) (*En
 	}
 
 	var result EnrolResult
+
 	if err := c.call(ctx, http.MethodPost, "/v1/enroll", body, &result); err != nil {
+		if code == "" && strings.Contains(err.Error(), "pairing code") {
+			// The node wants a code and none was sent. Saying so beats
+			// repeating "pairing code is not correct" at somebody who did not
+			// give one.
+			return nil, fmt.Errorf("%w -- this node requires the pairing code "+
+				"printed on its console; pass --code", err)
+		}
+
 		return nil, err
 	}
 

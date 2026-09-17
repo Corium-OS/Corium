@@ -146,3 +146,45 @@ func TestFormatRecordSurvivesAnUnknownPriority(t *testing.T) {
 		t.Errorf("line = %q, want the number shown rather than a blank", out.String())
 	}
 }
+
+func TestFormatNodeShoutsAboutAnUnauthenticatedClaim(t *testing.T) {
+	// The thing an operator is least likely to think to ask, and most needs to
+	// know: this machine's owner was decided by whoever reached it first.
+	report := render(t, &nodeinfo.Node{
+		Hostname:     "worker-01",
+		Bootstrapped: true,
+		Role:         "worker",
+		Management: nodeinfo.Management{
+			ClaimedBy:       "open",
+			Unauthenticated: true,
+		},
+	})
+
+	if !strings.Contains(report, "without authentication") {
+		t.Errorf("report does not say how the node was claimed:\n%s", report)
+	}
+}
+
+func TestFormatNodeShoutsAboutAnOpenNode(t *testing.T) {
+	report := render(t, &nodeinfo.Node{
+		Hostname:   "worker-01",
+		Management: nodeinfo.Management{OpenEnrolment: true},
+	})
+
+	if !strings.Contains(report, "first client to reach it owns it") {
+		t.Errorf("report does not warn that the node is open:\n%s", report)
+	}
+}
+
+func TestFormatNodeStaysQuietWhenTheClaimWasAuthenticated(t *testing.T) {
+	report := render(t, &nodeinfo.Node{
+		Hostname:     "worker-01",
+		Bootstrapped: true,
+		Role:         "worker",
+		Management:   nodeinfo.Management{ClaimedBy: "pairing-code"},
+	})
+
+	if strings.Contains(report, "!!") {
+		t.Errorf("a properly claimed node is being warned about:\n%s", report)
+	}
+}

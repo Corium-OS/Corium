@@ -98,7 +98,12 @@ func (s *Server) Supervise(manager *systemd.Manager) { s.systemd = manager }
 func (s *Server) Upgrades(manager *upgrade.Manager) { s.upgrades = manager }
 
 // NewServer prepares a listener for whichever state the node is in.
-func NewServer(store *Store, address string) (*Server, error) {
+//
+// how says what an unclaimed node asks of somebody claiming it. It is a
+// parameter rather than a setter because the answer decides what the listener
+// is, and a server that could be opened after it started would be a server
+// nobody could reason about.
+func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
 	server := &Server{
 		store:     store,
 		address:   address,
@@ -115,7 +120,7 @@ func NewServer(store *Store, address string) (*Server, error) {
 	}
 
 	if !enrolled {
-		if server.enroller, err = NewEnroller(store); err != nil {
+		if server.enroller, err = NewEnroller(store, how); err != nil {
 			return nil, err
 		}
 	}
@@ -369,7 +374,24 @@ func (s *Server) finishClaim() {
 // Read-only, and the endpoint the other surfaces are meant to be used after:
 // it is how an operator finds out what a node is before doing anything to it.
 func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.inspector.Collect(r.Context()))
+	node := s.inspector.Collect(r.Context())
+
+	// How this node came to be owned is not something the machine can be
+	// inspected for -- only the daemon knows -- so it is filled in here.
+	// Somebody auditing a fleet is entitled to find the nodes whose ownership
+	// was established by whoever reached them first.
+	if claim, err := s.store.Claim(); err == nil {
+		node.Management = nodeinfo.Management{
+			ClaimedBy:       string(claim.Method),
+			Unauthenticated: claim.Method != "" && !claim.Authenticated(),
+		}
+	}
+
+	if s.Unenrolled() && s.enroller.OpenToAnyone() {
+		node.Management.OpenEnrolment = true
+	}
+
+	writeJSON(w, http.StatusOK, node)
 }
 
 type healthResponse struct {

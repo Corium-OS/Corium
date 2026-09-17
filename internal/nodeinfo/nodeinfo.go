@@ -68,6 +68,28 @@ type Node struct {
 	OS         OS         `json:"os"`
 	Kubernetes Kubernetes `json:"kubernetes"`
 	Health     Health     `json:"health"`
+
+	// Management is filled in by the daemon rather than read from the machine,
+	// because only the daemon knows it. It is here so that one request answers
+	// "what is this node" completely, including the part an operator is least
+	// likely to think to ask about.
+	Management Management `json:"management,omitempty"`
+}
+
+// Management describes how this node can be, and was, managed.
+type Management struct {
+	// ClaimedBy is how ownership was established: configuration, pairing-code
+	// or open. Empty on a node claimed before this was recorded.
+	ClaimedBy string `json:"claimedBy,omitempty"`
+
+	// Unauthenticated is true when whoever claimed this node proved nothing.
+	// The node holds the same pinned CA either way, so without this there is
+	// no way to tell afterwards.
+	Unauthenticated bool `json:"unauthenticated,omitempty"`
+
+	// OpenEnrolment is true while the node will let anyone who reaches it
+	// claim it.
+	OpenEnrolment bool `json:"openEnrolment,omitempty"`
 }
 
 // OS describes the image this machine booted.

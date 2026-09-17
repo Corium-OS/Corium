@@ -289,6 +289,32 @@ That last sentence is also the cost: **mode C needs console access** — serial,
 IPMI, SOL, or the hypervisor's view. An operator with neither a console nor a
 PKI is not served by mode C, and should use mode A.
 
+#### And an opt-in that gives the code up
+
+`api.insecure: true` drops the pairing code: the first client to reach an
+unclaimed node claims it. That is Talos's model, argued against above, and it
+is offered anyway — with the argument left standing rather than rewritten,
+because it is still the reason this is not the default.
+
+What makes it defensible where it is used is the rule the rest of this record
+already enforces. An unclaimed node is in no cluster, so winning the race gets
+a bare machine; and enrolment is still one-way, so the window closes the moment
+anybody uses it. The cases it is for are real: a bench, a lab, a provisioning
+network controlled end to end, a PXE fleet where visiting consoles is not a
+thing anybody is going to do. Mode C otherwise asks for one console visit per
+machine, which is a price some fleets will not pay and will route around with
+something worse.
+
+Three things keep it honest. It is refused anywhere it would silently do
+nothing — with a CA configured, or with the API off — because a key that does
+nothing is the mistake that costs a reboot cycle to find. The node says so on
+its console, in words aimed at somebody who did not write the configuration
+that opened it. And the node **records that its claim was unauthenticated**,
+in `/var/lib/corium/api/claim.json`, which `cctl status` then shows: a node
+holds the same pinned CA whichever way it was claimed, so without that record
+there is no way to tell afterwards which of a fleet's machines were taken by
+whoever reached them first.
+
 #### The node's own certificate
 
 The node mints its serving key at first boot and self-signs it. No private key

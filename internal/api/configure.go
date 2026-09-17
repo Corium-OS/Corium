@@ -10,7 +10,7 @@ import (
 	"github.com/Corium-OS/Corium/internal/secret"
 )
 
-// Claim pins the operator CA a configuration names, if it names one.
+// ClaimFromConfig pins the operator CA a configuration names, if it names one.
 //
 // This is modes A and B of ADR 4 — the certificate inline, or fetched at first
 // boot — and it is what makes them differ from maintenance mode only in where
@@ -21,7 +21,7 @@ import (
 // It is idempotent. A node that is already claimed keeps the CA it has, and
 // says so rather than failing: a reboot must not turn a working node into a
 // broken one because the configuration it booted with has since been edited.
-func Claim(ctx context.Context, store *Store, cfg *config.Config) error {
+func ClaimFromConfig(ctx context.Context, store *Store, cfg *config.Config) error {
 	if cfg.API.Mode() != config.APIModeConfigured {
 		return nil
 	}
@@ -46,6 +46,10 @@ func Claim(ctx context.Context, store *Store, cfg *config.Config) error {
 
 	if err := store.Adopt(pemData); err != nil {
 		return fmt.Errorf("pinning the operator CA from the configuration: %w", err)
+	}
+
+	if err := store.RecordClaim(ClaimedFromConfiguration); err != nil {
+		return err
 	}
 
 	certificate, err := store.OperatorCA()

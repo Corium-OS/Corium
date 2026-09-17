@@ -35,6 +35,17 @@ func FormatNode(w io.Writer, address string, node *nodeinfo.Node) {
 	line("hostname", node.Hostname)
 	line("machine id", node.MachineID)
 
+	// Before anything else about the node, because it is the thing an operator
+	// is least likely to think to ask and most needs to know: this machine's
+	// owner was decided by whoever reached it first.
+	if node.Management.OpenEnrolment {
+		out("\n  !! This node is unclaimed and asks nothing of a claimant.\n" +
+			"  !! api.insecure is set, so the first client to reach it owns it.\n")
+	} else if node.Management.Unauthenticated {
+		out("\n  !! This node was claimed without authentication (api.insecure).\n" +
+			"  !! Whoever reached it first chose the CA it now obeys.\n")
+	}
+
 	if !node.Bootstrapped {
 		out("\n  This machine was provisioned without a Corium configuration,\n" +
 			"  so it runs no Kubernetes. That is a valid outcome, not a fault.\n")

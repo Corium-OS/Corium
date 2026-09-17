@@ -69,7 +69,7 @@ func startNode(t *testing.T) (*node, string, string) {
 func (n *node) start(t *testing.T) string {
 	t.Helper()
 
-	server, err := api.NewServer(n.store, n.address)
+	server, err := api.NewServer(n.store, n.address, api.RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

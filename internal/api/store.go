@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -33,7 +34,38 @@ const (
 	operatorCAFile = "operator-ca.pem"
 	serverKeyFile  = "server.key"
 	serverCertFile = "server.crt"
+	claimFile      = "claim.json"
 )
+
+// ClaimMethod records how a node's ownership was established.
+//
+// It is kept because the three are not equally trustworthy, and afterwards
+// there is no other way to tell them apart: a node holds the same pinned CA
+// either way. Somebody auditing a fleet is entitled to know which of its nodes
+// were claimed by whoever reached them first.
+type ClaimMethod string
+
+const (
+	// ClaimedFromConfiguration is modes A and B: the CA was named in the
+	// node's own configuration, so it was never unclaimed.
+	ClaimedFromConfiguration ClaimMethod = "configuration"
+
+	// ClaimedWithPairingCode is maintenance mode as it is meant to be used:
+	// somebody read a code off the console.
+	ClaimedWithPairingCode ClaimMethod = "pairing-code"
+
+	// ClaimedOpenly is api.insecure: nothing was asked and nothing was proved.
+	ClaimedOpenly ClaimMethod = "open"
+)
+
+// Claim is what the node remembers about being claimed.
+type Claim struct {
+	Method ClaimMethod `json:"method"`
+	At     time.Time   `json:"at"`
+}
+
+// Authenticated reports whether the claimant proved anything.
+func (c Claim) Authenticated() bool { return c.Method != ClaimedOpenly }
 
 // ErrUnenrolled reports that no operator has claimed this node.
 var ErrUnenrolled = errors.New("node is not enrolled")
@@ -137,6 +169,42 @@ func (s *Store) Adopt(pemData []byte) error {
 	// secret, and the fact that it is not is the reason the whole scheme can
 	// put it in cloud-init in clear.
 	return s.write(operatorCAFile, pemData, 0o644)
+}
+
+// RecordClaim notes how the node came to be owned.
+//
+// It is written after the CA, not before: a claim record without a pinned CA
+// would describe something that did not happen.
+func (s *Store) RecordClaim(method ClaimMethod) error {
+	encoded, err := json.Marshal(Claim{Method: method, At: time.Now().UTC()})
+	if err != nil {
+		return fmt.Errorf("encoding the claim record: %w", err)
+	}
+
+	return s.write(claimFile, encoded, 0o644)
+}
+
+// Claim returns how the node was claimed, if it knows.
+//
+// A node claimed by an earlier version has no record, which reads as an
+// unknown method rather than as an error: it is a missing note about the past,
+// not a broken node.
+func (s *Store) Claim() (Claim, error) {
+	data, err := os.ReadFile(s.path(claimFile))
+
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return Claim{}, nil
+	case err != nil:
+		return Claim{}, fmt.Errorf("reading the claim record: %w", err)
+	}
+
+	var claim Claim
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return Claim{}, fmt.Errorf("parsing the claim record: %w", err)
+	}
+
+	return claim, nil
 }
 
 // Identity returns the node's serving certificate, minting one on first use.

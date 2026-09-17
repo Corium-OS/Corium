@@ -141,6 +141,28 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   fingerprint and every call needed `--fingerprint` — including `cctl upgrade`,
   which takes a list of nodes and where one such flag means nothing.
 
+- **`api.insecure`, an opt-in that gives the pairing code up.** The first
+  client to reach an unclaimed node claims it, with nothing to prove — Talos's
+  model, which [ADR 4](docs/adr/0004-management-api.md) argues against and now
+  offers anyway, with the argument left standing as the reason it is not the
+  default. It is for a bench, a lab, a provisioning network you control end to
+  end, or a PXE fleet where one console visit per machine is not going to
+  happen.
+
+  What bounds it is the rule the design already enforces: an unclaimed node is
+  in no cluster, so winning the race gets a bare machine, and enrolment is
+  still one-way, so the window shuts the moment anybody uses it.
+
+  The node is loud about it, on the console and in the journal. It also
+  **records that its claim was unauthenticated** and reports it through
+  `cctl status` from then on — a node holds the same pinned CA whichever way it
+  was claimed, so without that record there is no way to tell afterwards which
+  of a fleet's machines were taken by whoever got there first. Setting the key
+  anywhere it would do nothing is a validation error rather than being ignored.
+
+  `cctl enroll` no longer insists on `--code`, which is what the console banner
+  of such a node tells you to run.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

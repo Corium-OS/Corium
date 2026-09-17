@@ -279,8 +279,10 @@ func enrolCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("cctl enroll", flag.ExitOnError)
 
 	var (
-		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
-		code        = flags.String("code", "", "the pairing code printed on the node's console")
+		dir  = flags.String("dir", "", "operator directory (default ~/.corium)")
+		code = flags.String("code", "",
+			"the pairing code printed on the node's console; a node with "+
+				"api.insecure set asks for none")
 		fingerprint = flags.String("fingerprint", "",
 			"the fingerprint printed beside it; without this you are asked to confirm")
 	)
@@ -292,10 +294,6 @@ func enrolCommand(ctx context.Context, args []string) error {
 
 	if len(rest) != 1 {
 		return errors.New("usage: cctl enroll <address> --code <code>")
-	}
-
-	if *code == "" {
-		return errors.New("--code is required; it is printed on the node's console")
 	}
 
 	address := withDefaultPort(rest[0])

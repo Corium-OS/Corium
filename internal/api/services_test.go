@@ -22,7 +22,7 @@ func claimedNode(t *testing.T, run systemd.Runner) (*authority, string, *Store) 
 		t.Fatalf("Adopt() error = %v", err)
 	}
 
-	server, err := NewServer(store, "127.0.0.1:0")
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

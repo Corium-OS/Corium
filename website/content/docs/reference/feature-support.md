@@ -137,6 +137,7 @@ Off unless asked for, and covered by
 | Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
 | Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
 | Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |
+| Open enrolment | `api.insecure` | Drops the pairing code: the first client to reach the node claims it. For benches and controlled provisioning networks. The node says so on its console and records that its claim was unauthenticated |
 | Transport | — | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
 | Roles | — | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin`. Every route names the lowest role that may call it |
 | Node state | — | `cctl status`: role, cluster, booted and staged image digests, kernel, k0s version and service, greenboot verdict, uptime. Read-only |

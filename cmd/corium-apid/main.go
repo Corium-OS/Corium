@@ -107,8 +107,12 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 		return err
 	}
 
+	// A node that has already been claimed asks nothing of anybody: enrolment
+	// is over, so how it would have been claimed no longer applies.
+	how := api.RequirePairingCode
+
 	if !enrolled {
-		mode, err := claimFromConfiguration(ctx, store, configPath)
+		mode, cfg, err := claimFromConfiguration(ctx, store, configPath)
 		if err != nil {
 			return err
 		}
@@ -118,9 +122,17 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 
 			return errDisabled
 		}
+
+		if cfg != nil && cfg.API.OpenEnrolment() {
+			slog.Warn("api.insecure is set: this node will be claimed by the first "+
+				"client that reaches it, with nothing to prove",
+				"listen", listen)
+
+			how = api.OpenToAnyone
+		}
 	}
 
-	server, err := api.NewServer(store, listen)
+	server, err := api.NewServer(store, listen, how)
 	if err != nil {
 		return err
 	}
@@ -135,31 +147,33 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 // provisioned without a Corium block is a valid outcome — somebody wanted a
 // host, not a Kubernetes node — and the answer for the API is the same as for
 // the rest of the agent: do nothing, and say so.
-func claimFromConfiguration(ctx context.Context, store *api.Store, path string) (config.APIMode, error) {
+func claimFromConfiguration(
+	ctx context.Context, store *api.Store, path string,
+) (config.APIMode, *config.Config, error) {
 	cfg, err := load(ctx, path)
 
 	switch {
 	case errors.Is(err, config.ErrNoCoriumBlock), errors.Is(err, source.ErrNotFound):
 		slog.Info("no corium configuration found, management API stays off")
 
-		return config.APIModeDisabled, nil
+		return config.APIModeDisabled, nil, nil
 
 	case err != nil:
-		return config.APIModeDisabled, err
+		return config.APIModeDisabled, nil, err
 	}
 
 	if err := cfg.Validate(); err != nil {
-		return config.APIModeDisabled, fmt.Errorf("invalid configuration: %w", err)
+		return config.APIModeDisabled, nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	mode := cfg.API.Mode()
 	slog.Info("management API mode resolved", "mode", mode)
 
-	if err := api.Claim(ctx, store, cfg); err != nil {
-		return mode, err
+	if err := api.ClaimFromConfig(ctx, store, cfg); err != nil {
+		return mode, cfg, err
 	}
 
-	return mode, nil
+	return mode, cfg, nil
 }
 
 func load(ctx context.Context, path string) (*config.Config, error) {
