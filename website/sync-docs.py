@@ -37,9 +37,6 @@ PAGES = [
     ("downloads.md", "guides", "downloads", "Downloads", 115,
      "Where the installer ISO, the qcow2 and the image are published, why "
      "nothing is attached to the release, and how to check what you got."),
-    ("proxmox.md", "guides", "proxmox", "Proxmox", 118,
-     "A single node on a Proxmox host, from the published qcow2, with the "
-     "commands and the output from a real run."),
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
@@ -55,6 +52,9 @@ PAGES = [
     ("reference.md", "reference", "configuration", "Configuration", 210,
      "Every field of the corium: schema, where the configuration comes from, "
      "and what Corium does with it."),
+    ("install/proxmox.md", "install", "proxmox", "Proxmox", 301,
+     "A single node on a Proxmox host, from the published qcow2 to a cluster "
+     "that schedules work, with the commands and the output from a real run."),
     ("adr/0001-base-image.md", "reference", "adr-0001-base-image",
      "ADR 1 — Base image", 910,
      "Why the operating system is based on fedora-bootc rather than Fedora "
@@ -72,17 +72,12 @@ PAGES = [
 # Links between documents change shape on the site: docs/reference.md becomes
 # /docs/reference/configuration/, and a link to a source file has to point at
 # GitHub because the site does not serve the repository.
+# Derived from PAGES rather than written out again. This was a second list
+# once, and it drifted the first time a page was added: links to the new page
+# kept resolving to GitHub, which looks deliberate and reads as a dead end.
 PAGE_URLS = {
-    "quickstart.md": "/docs/guides/quickstart/",
-    "concepts.md": "/docs/guides/concepts/",
-    "features.md": "/docs/reference/feature-support/",
-    "comparison.md": "/docs/reference/comparison/",
-    "upgrades.md": "/docs/guides/upgrades/",
-    "raid.md": "/docs/guides/raid/",
-    "reference.md": "/docs/reference/configuration/",
-    "adr/0001-base-image.md": "/docs/reference/adr-0001-base-image/",
-    "adr/0002-root-filesystem.md": "/docs/reference/adr-0002-root-filesystem/",
-    "adr/0003-software-raid-scope.md": "/docs/reference/adr-0003-software-raid-scope/",
+    source: f"/docs/{section}/{slug}/"
+    for source, section, slug, *_ in PAGES
 }
 
 REPO_BLOB = "https://github.com/Corium-OS/Corium/blob/main"
