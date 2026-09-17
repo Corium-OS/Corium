@@ -39,10 +39,14 @@ the machine exists.
 
 ## Decision
 
-Corium grows `corium-apid`, a Go daemon shipped in `/usr` and enabled on every
-node, serving gRPC over mutual TLS on `7443/tcp`. The client is `cctl`. Trust is
-anchored in an **operator CA** whose certificate the node is given, and which
-signs the client certificates the node will accept.
+Corium grows `corium-apid`, a Go daemon shipped in `/usr`, serving gRPC over
+mutual TLS on `7443/tcp`. The client is `cctl`. Trust is anchored in an
+**operator CA** whose certificate the node is given, and which signs the client
+certificates the node will accept.
+
+The daemon is off unless a node is told to run it, and a node that has not yet
+been claimed by an operator is not a cluster member. Those two are as much a
+part of this decision as the API surface itself.
 
 ### What it manages
 
@@ -68,8 +72,10 @@ one-node-at-a-time roll-out live in `cctl`, which knows about the other nodes;
 the daemon only ever knows about its own.
 
 **Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
-destructive and are marked as such in the schema: reset wipes `/var/lib/k0s`
-and takes the node out of the cluster.
+destructive and are marked as such in the schema. Reset is the strongest of
+them: it takes the node out of the cluster, wipes `/var/lib/k0s`, and drops the
+machine back to unenrolled — it is the one operation that returns a node to
+maintenance mode, and it cannot leave it half-way.
 
 ### What it does not manage
 
@@ -83,19 +89,49 @@ kubeconfig on the operator's behalf. `kubectl` is not a gap.
 
 No package installation, no file writing, no configuration.
 
+### Whether it runs at all
+
+The API is opt-in, and the default is off:
+
+```yaml
+corium:
+  api:
+    enabled: true
+```
+
+A node with no `api:` block behaves exactly as a Corium node behaves today — no
+daemon, no listening port, nothing to authenticate against, managed over the
+console and SSH. Every existing configuration and every example in this
+repository keeps working unchanged and gains no new attack surface by being
+upgraded.
+
+This is not only a compatibility convenience. A privileged daemon listening on
+every machine in a fleet is a legitimate thing to refuse, and an operator who
+refuses it should be able to say so in one line rather than by masking a unit
+after the fact. `enabled: false`, written explicitly, masks
+`corium-apid.service` at bootstrap so that nothing later re-enables it quietly.
+
+Setting `operatorCA` or `operatorCAFrom` implies `enabled: true`, because
+naming the CA that owns a node is an unambiguous statement that the node should
+be manageable. Setting either of them *alongside* `enabled: false` is a
+validation error rather than a precedence puzzle: the configuration says two
+contradictory things, and the agent's contract is to fail before it mutates
+anything.
+
 ### How trust is established
 
-A node needs exactly one thing to be manageable: the certificate of the CA that
-signs operator client certificates. Note what that is — a **certificate**, not a
-key. It is public material. It can be pasted into a Git repository, a Terraform
-module, or an instance's metadata without leaking anything, which is what makes
-the first of the three modes below defensible rather than a compromise.
+A node that runs the API needs exactly one thing to be manageable: the
+certificate of the CA that signs operator client certificates. Note what that
+is — a **certificate**, not a key. It is public material. It can be pasted into
+a Git repository, a Terraform module, or an instance's metadata without leaking
+anything, which is what makes the first of the three modes below defensible
+rather than a compromise.
 
 The private key of that CA lives on the operator's workstation or in whatever
 mints short-lived client certificates for the team. It never reaches a node.
 
-**Mode A — the certificate, in clear, in cloud-init.** The default, and the one
-to reach for when a PKI already exists.
+**Mode A — the certificate, in clear, in cloud-init.** The mode to reach for
+when a PKI already exists.
 
 ```yaml
 corium:
@@ -127,16 +163,25 @@ cluster, and because an operator who would rather have metadata carry a pointer
 than material should not have to argue for it. It reuses the machinery in
 `internal/bootstrap/token.go` unchanged.
 
-**Mode C — maintenance mode.** Neither key set. The node boots, bootstraps k0s
-as usual, and `corium-apid` starts *unenrolled*: it serves TLS with a
+**Mode C — maintenance mode.** `enabled: true` and neither key set:
+
+```yaml
+corium:
+  role: worker
+  api:
+    enabled: true
+```
+
+The node boots, reads its configuration, validates it — and stops before
+bootstrapping k0s. `corium-apid` starts *unenrolled*: it serves TLS with a
 self-signed certificate and answers exactly one RPC, `Enroll`. On the console,
 on the serial port and in the journal it prints a pairing code and its own
 certificate fingerprint:
 
 ```
-Corium node is unenrolled and waiting for an operator.
+Corium node is unenrolled and is not in a cluster.
 
-  address      192.168.1.51:7443
+  address       192.168.1.51:7443
   pairing code  K7QM-93XF
   fingerprint   SHA256:tQ2f...9c1a
 
@@ -146,7 +191,44 @@ Corium node is unenrolled and waiting for an operator.
 `cctl enroll` presents the code and the operator CA certificate. The node
 compares the code in constant time, writes the certificate to
 `/var/lib/corium/api/operator-ca.pem` with mode `0644`, marks itself enrolled,
-and restarts into the normal mTLS listener. From that point `Enroll` is gone.
+restarts into the normal mTLS listener — and only then releases the bootstrap,
+which proceeds from the cloud-init configuration it has been holding all along.
+
+#### A node in maintenance mode is not in a cluster
+
+That ordering is the load-bearing part, not an implementation detail.
+
+The alternative — bootstrap first, enrol whenever somebody gets round to it —
+produces a node that is running workloads, holds a kubelet credential and a
+share of the cluster's secrets, and will obey the first stranger to reach an
+unauthenticated port. It is the worst combination available: the machine is
+valuable *and* it is unclaimed. Making the two states mutually exclusive
+removes that combination from the design rather than defending it.
+
+What an attacker can win by racing an unenrolled node is therefore a bare
+machine that has joined nothing. That is still worth protecting — see below —
+but it is a bounded loss, and it is a loss the operator finds out about,
+because the node they were waiting on never appears in the cluster.
+
+The same rule runs the other way and gives `reset` its meaning: a node cannot
+go back to maintenance mode while it is a cluster member. Returning to
+maintenance is a reset — the node leaves the cluster, `/var/lib/k0s` is wiped,
+and it comes back up unenrolled and unbootstrapped, ready to be handed to
+somebody else. There is no operation that leaves a machine both in a cluster
+and unclaimed.
+
+Enrolment does not carry configuration. `cctl enroll` sends a CA certificate
+and nothing else; the node's role, its join token and everything else still
+come from cloud-init. This is not Talos's `apply-config` with a different name,
+and decisions 6 and 7 are untouched.
+
+The cost is real and belongs in this record: **mode C is not zero touch.** A
+three-node cluster in mode C is three consoles to visit before any node joins
+anything, and `waitFor` on a join token does not help, because the joiner is
+not waiting on the token — it is waiting on a human. Modes A and B remain fully
+unattended, and an operator who wants both unattended provisioning and no
+secret in the metadata already has mode A, since the value there is not a
+secret.
 
 The code is minted per boot from the kernel CSPRNG, uses an alphabet without
 the characters people transcribe wrongly, and is worth around forty bits. It is
@@ -162,21 +244,35 @@ the documented first step, and verifying the node's identity is opt-in through
 `--cert-fingerprint`. That is a reasonable trade for Talos, where the prize for
 winning the race is a machine that has no configuration yet.
 
-Here the prize is different. A node in mode C has already joined the cluster —
-it is running workloads, it has a kubelet credential, and `Enroll` hands
-whoever wins the ability to drain it, rebase it onto another image, or reset
-it. Provisioning networks are shared, and a node can sit unenrolled for as long
-as it takes somebody to get to it. An open port is the wrong default for that
-window.
+A Corium node in mode C holds nothing either, which is the whole point of the
+section above — so the argument has to be made on what happens next rather than
+on what is there now.
 
-The code closes the window in both directions, which is the part worth
+An unenrolled node is not an empty machine. It is a machine holding a validated
+configuration, a join token, and the intention to become a cluster member the
+moment somebody claims it. Enrolling it is not reading its state; it is
+acquiring the node for the rest of its life, since the CA it pins is the CA it
+will obey until it is reset. Two things follow. An attacker who wins the race
+gets a machine that proceeds to join the cluster with credentials the operator
+supplied, under an attacker's CA. An attacker who merely wants to be a nuisance
+wins by enrolling and doing nothing: the node is now claimed, the operator's own
+enrolment fails, and recovering it means a physical reset.
+
+Neither is catastrophic. Both are avoided entirely by a code that takes one
+line of console output to read, and provisioning networks are shared often
+enough that the window is not theoretical.
+
+The code also closes the window in the other direction, which is the part worth
 noticing: the code authenticates the operator to the node, and the fingerprint
-printed beside it authenticates the node to the operator. Both values arrive
-over the console, which is a channel an attacker on the network does not have.
+printed beside it authenticates the node to the operator. An operator who skips
+the fingerprint has not leaked anything — the CA certificate is public — but
+has no way to tell a node that enrolled from an impostor that answered. Both
+values arrive over the console, which is a channel an attacker on the network
+does not have.
 
-The cost is honest and should be stated: **mode C needs console access** —
-serial, IPMI, SOL, or the hypervisor's view. An operator with neither a console
-nor a PKI is not served by mode C, and should use mode A.
+That last sentence is also the cost: **mode C needs console access** — serial,
+IPMI, SOL, or the hypervisor's view. An operator with neither a console nor a
+PKI is not served by mode C, and should use mode A.
 
 #### The node's own certificate
 
@@ -193,19 +289,36 @@ pinning unless `--fingerprint` was passed.
 
 #### Precedence, and why enrolment is sticky
 
-`operatorCA` wins over `operatorCAFrom`, and setting both is a validation error,
-matching the existing rule for `token` and `tokenFrom`. Maintenance mode is
-what happens when neither is set.
+The whole resolution, in order:
+
+| `api:` | Result |
+|---|---|
+| absent, or `enabled: false` | No daemon, no port. The node bootstraps as it does today |
+| `operatorCA` set | Mode A |
+| `operatorCAFrom` set | Mode B |
+| `enabled: true`, neither set | Mode C: maintenance, and bootstrap is held |
+| `enabled: false` with either key set | Validation error |
+| both keys set | Validation error, matching `token` and `tokenFrom` |
 
 Enrolment is recorded in `/var/lib/corium/api/`, and `/var` survives upgrades
 and reboots. A node that has been enrolled — by any of the three modes — does
 not return to maintenance mode when it reboots. This is not a detail: if it
 did, anybody able to power-cycle a machine could take it, and the pairing code
-would be protecting a door that reopens on its own. Re-enrolment is an explicit
-local action, `cctl reset-enrollment` run on the node itself.
+would be protecting a door that reopens on its own. It is also implied by the
+rule above, since a rebooting cluster member would otherwise come back up
+unenrolled and still in the cluster.
 
-Replacing the operator CA on a running node is done over the authenticated API,
-`cctl ca rotate`, never by going back through maintenance mode.
+Getting back to maintenance mode therefore means resetting the node, with
+everything that implies. That is deliberately more than an operator who has
+merely lost their CA key should have to do, so the recovery path is a different
+one: `corium-agent api set-ca --file operator-ca.pem`, run as root on the node.
+It is a local command, not a network operation — it opens no port and accepts
+no unauthenticated RPC — and root on the console already owns the machine, so
+it grants nothing that was not already granted. The cluster keeps running
+throughout.
+
+Replacing the operator CA on a *reachable* node is done over the authenticated
+API, `cctl ca rotate`. Neither path goes back through maintenance mode.
 
 ### Authorisation
 
@@ -231,19 +344,32 @@ process can reboot the machine. That is the argument for the surface being as
 small as it is, and the reason there is no `exec`. It also means SELinux policy
 is part of the work, not a follow-up.
 
-Every node grows a listening port. `7443` is clear of everything k0s binds —
-`6443`, `9443`, `8132`, `8133` — and of the kubelet's `10250`. Whether it
-should be reachable from anywhere but a management network is the operator's
-decision, and the documentation will say so.
+A node that opts in grows a listening port; a node that does not, does not.
+`7443` is clear of everything k0s binds — `6443`, `9443`, `8132`, `8133` — and
+of the kubelet's `10250`. Whether it should be reachable from anywhere but a
+management network is the operator's decision, and the documentation will say
+so.
+
+Mode C puts `corium-bootstrap.service` behind enrolment, which means the unit
+ordering has to be got right rather than assumed. The service already carries a
+comment about an ordering cycle that systemd resolved by silently deleting the
+job, so the gate is a target the daemon reaches rather than another `After=`
+edge on `cloud-final.service`. A node parked in maintenance mode must also read
+as parked and not as failed: greenboot must not mark the deployment bad, the
+unit must not sit in `failed`, and `systemctl list-units` should make the state
+obvious to somebody who did not provision the machine.
 
 Losing the operator CA key means losing the ability to manage every node that
-trusts it. This is recoverable and the recovery is unglamorous: console in, run
-`cctl reset-enrollment`, enrol again. Nodes keep running Kubernetes throughout,
-because none of this is in the data path.
+trusts it, and the recovery is now a local one rather than a reset: console in,
+`corium-agent api set-ca --file`, done. Nodes keep running Kubernetes
+throughout, because none of this is in the data path. Losing the key is
+therefore an inconvenience proportional to the number of consoles, not an
+outage.
 
-The `corium:` block gains one optional key with two spellings, in a schema whose
-stated ambition is that every line be optional. `api:` absent means maintenance
-mode, which is a working configuration and not a degraded one.
+The `corium:` block gains one optional key with three spellings under it. `api:`
+absent is the default and means no API at all, which keeps the promise that
+every line of a Corium configuration is optional — and keeps this ADR from
+changing the behaviour of a single node already in service.
 
 ## Alternatives considered
 
@@ -274,6 +400,21 @@ serving certificate signed by it, no fingerprint pinning anywhere — and it is
 ruled out by the same sentence: it puts a private key in the configuration. If
 that key is in cloud-init, mode C has no reason to exist.
 
+**Letting an unenrolled node join the cluster and enrol later.** This is what
+the first draft of this record said, and it is worth keeping here because it is
+the obvious design and it is wrong. It makes mode C fully unattended, which is
+a genuine advantage, and it costs a node that is simultaneously valuable and
+unclaimed — running workloads, holding cluster credentials, and waiting to obey
+whoever reaches an unauthenticated port first. The pairing code was invented to
+defend that state. Deleting the state is better than defending it.
+
+**An always-on API with no way to switch it off.** Fewer states, one less key,
+and a fleet where `cctl` always works. Rejected because a privileged daemon
+listening on every machine is a reasonable thing to veto, and because a node
+that has been running happily for a year should not acquire a new listening
+port by being upgraded. Off by default also means this ADR can be implemented
+without changing what any existing configuration does.
+
 **REST/JSON over HTTP instead of gRPC.** `curl` as a client is a real
 advantage and was weighed seriously. gRPC wins on the two things the API does
 most — streaming journals, and generating a client that does not drift from the
@@ -283,6 +424,8 @@ back.
 ## What this does not settle
 
 The wire schema, the proto package layout, and the `cctl` command tree. Those
-are the next pull requests. This record fixes the shape: node-local, four
-surfaces, no exec, mTLS anchored in an operator CA, and three ways for that CA
-to arrive of which one requires nothing to be put in cloud-init at all.
+are the next pull requests. This record fixes the shape: off by default,
+node-local, four surfaces, no exec, mTLS anchored in an operator CA, three ways
+for that CA to arrive of which one requires nothing in cloud-init at all — and
+the rule that holds the last of them together, that a node nobody has claimed
+is a node in no cluster.
