@@ -1,0 +1,39 @@
+# SELinux types for Corium's own state.
+#
+# This module declares types and nothing else. It confines no process: there is
+# no domain here, no transition, and no allow rule. corium-apid and
+# corium-agent run as unconfined_service_t like every other service on this
+# image, which is the same position corium-agent has always been in.
+#
+# What it buys is a name. The operator CA a node obeys and the private key it
+# serves with are not ordinary machine state, and giving them a type of their
+# own means a confined domain -- written later, on a machine, from real AVC
+# denials rather than from guesses -- has something to hang rules on. Without
+# it, that work would start by relabelling files on nodes already in service.
+#
+# Note what is deliberately *not* labelled: /var/lib/corium itself. Five things
+# read that directory, and two of them are outside this project's control --
+# systemd evaluating ConditionPathExists= for corium-bootstrap.service and
+# corium-uncordon.service, and the greenboot health check reading
+# `bootstrapped`. Getting the greenboot one wrong does not fail visibly: it
+# fails the check, and three failed checks roll the node back to its previous
+# OS image. A relabelling that can cause fleet-wide rollbacks is a poor trade
+# for a label, so the parent keeps var_lib_t and only the subtree that nothing
+# else reads is named here.
+
+policy_module(corium, 1.0.0)
+
+########################################
+#
+# Declarations
+#
+
+# The node's management state: /var/lib/corium/api.
+#
+# files_type() is what makes this usable as a file type at all -- it adds the
+# file_type and non_security_file_type attributes that the rest of the policy
+# reasons about. Unconfined domains reach every file_type, which is why
+# labelling this changes nothing today and is safe to ship ahead of the policy
+# that will use it.
+type corium_api_var_lib_t;
+files_type(corium_api_var_lib_t)

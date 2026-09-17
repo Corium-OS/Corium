@@ -453,8 +453,8 @@ The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
 > **Implemented, unreleased.** All four management surfaces are in place, along
-> with CA rotation and the local recovery path. SELinux policy for the unit is
-> still to write, and `cctl` has no release artefact yet.
+> with CA rotation and the local recovery path. The daemon runs unconfined
+> under SELinux — see below — and `cctl` has no release artefact yet.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -765,6 +765,49 @@ recorded as having been taken without authentication, and rotating it does not
 remove that: an owner who acquired a node by reaching it first has not made
 that legitimate by handing it to a second CA, and `cctl status` goes on saying
 so.
+
+#### Where the daemon stands with SELinux
+
+`corium-apid` runs as `unconfined_service_t`, like `corium-agent` and every
+other service on the image. There is no confined domain for it yet, and the
+image ships types without rules: `/var/lib/corium/api` is labelled
+`corium_api_var_lib_t` so the operator CA and the node's serving key have a
+name to hang a policy on, but nothing is denied by it today.
+
+`/var/lib/corium` itself keeps `var_lib_t`, deliberately. Five things read it,
+and two are outside this project: systemd evaluating `ConditionPathExists=` for
+`corium-bootstrap.service` and `corium-uncordon.service`, and the greenboot
+health check reading `bootstrapped`. Getting the greenboot one wrong does not
+fail visibly — it fails the check, and three failed checks roll the node back
+to its previous image. That is a poor trade for a label.
+
+What the daemon touches, which is what a confined domain has to allow:
+
+| Access | What for |
+|---|---|
+| bind `7443/tcp` | the listener |
+| read/write `/var/lib/corium/api/**` | the operator CA, the serving key, the claim record |
+| read/remove `/var/lib/corium/{bootstrapped,node.json,cordoned-by-corium}` | reporting the node's role, and resetting it |
+| write `/var/lib/corium/cordoned-by-corium` | cordon |
+| read `/etc/machine-id`, `/etc/os-release`, `/proc/uptime`, `/proc/sys/kernel/osrelease` | `cctl status` |
+| read `/etc/containers/policy.json` | refusing an image the node would take unsigned |
+| read `/var/lib/cloud/**` | finding the `corium:` block on first start |
+| write `/dev/console` | the pairing code, for somebody who cannot log in yet |
+| execute `bootc`, `k0s`, `systemctl`, `journalctl` | every surface |
+
+Writing the domain wants a machine, not a desk. Boot a node, put it in
+permissive mode, exercise every command, and build the module from what was
+actually denied:
+
+```console
+$ sudo semanage permissive -a corium_apid_t     # once the domain exists
+$ cctl status … && cctl logs … && cctl upgrade … && cctl reset …
+$ sudo ausearch -m AVC -ts recent | audit2allow -M corium-apid
+```
+
+Rules derived from real denials rather than guessed at is the difference
+between a policy that confines the daemon and one that stops it answering on a
+fleet.
 
 One thing to weigh before handing out `corium:readonly`: it reads journals, and
 journals are not sanitised. Whatever any software on the node has logged is in

@@ -204,6 +204,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   its ownership was established without anybody proving anything survives
   rotation, and `cctl status` goes on saying so.
 
+- **SELinux types for the node's management state.** `/var/lib/corium/api` now
+  carries `corium_api_var_lib_t` rather than the generic `var_lib_t`, so the
+  operator CA a node obeys and the key it serves with have a name a confined
+  domain can be written against later. The module declares types and nothing
+  else: no domain, no transition, no rules. `corium-apid` runs as
+  `unconfined_service_t`, which is where `corium-agent` has always been.
+
+  `/var/lib/corium` itself is deliberately left alone. Five things read it, two
+  of them outside this project — systemd evaluating `ConditionPathExists=`, and
+  the greenboot health check reading `bootstrapped`. A relabelling that breaks
+  the greenboot check does not fail visibly; it rolls nodes back to their
+  previous image after three boots, which is a poor trade for a label.
+
+  The reference now lists everything the daemon touches, and the procedure for
+  building the domain from real denials on a machine rather than from guesses.
+
 ### Fixed
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a

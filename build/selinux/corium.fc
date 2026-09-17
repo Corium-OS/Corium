@@ -1,0 +1,8 @@
+# Where Corium's types belong on disk.
+#
+# The directory is created at boot by /usr/lib/tmpfiles.d/corium.conf rather
+# than baked into the image -- /var belongs to the machine, not to the image --
+# so this is what tells systemd-tmpfiles which label to create it with, and
+# what restorecon would restore it to.
+
+/var/lib/corium/api(/.*)?    gen_context(system_u:object_r:corium_api_var_lib_t,s0)
