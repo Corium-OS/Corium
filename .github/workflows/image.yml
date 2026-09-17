@@ -295,11 +295,22 @@ jobs:
       # does.
       ISO_IMAGE: ghcr.io/corium-os/corium-iso
       QCOW2_IMAGE: ghcr.io/corium-os/corium-qcow2
-      # A plain HTTPS mirror, for people who would rather click a link than
-      # install a tool. Self-hosted, so it is allowed to be down: see the
-      # mirror step for why that costs a release nothing.
-      MIRROR_ENDPOINT: https://s3.thoughtless.eu
-      MIRROR_BUCKET: corium-releases
+      # A plain HTTPS download, for people who would rather click a link than
+      # install a tool.
+      #
+      # Two hosts, not one: artefacts are written to a bunny.net storage zone
+      # and read from the CDN pull zone in front of it. Writing to one and
+      # advertising the other is the whole point -- the storage endpoint is
+      # not meant to serve public traffic.
+      #
+      # Nothing is ever overwritten, which matters more here than it looks.
+      # The CDN does not watch its origin for changes: a replaced file keeps
+      # being served from cache until it expires, and purging needs an
+      # account-wide API key this workflow deliberately does not hold. Every
+      # name carries its version, so the question never arises.
+      MIRROR_ENDPOINT: https://${{ vars.BUNNY_REGION }}-s3.storage.bunnycdn.com
+      MIRROR_BUCKET: ${{ secrets.BUNNY_STORAGE_ZONE }}
+      MIRROR_BASE_URL: ${{ vars.BUNNY_PULL_ZONE_URL }}
 
     steps:
       - name: Log in to the registry
@@ -436,9 +447,12 @@ jobs:
         # mention a mirror only when there is one to mention.
         continue-on-error: true
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.RUSTFS_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.RUSTFS_SECRET_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
+          # bunny.net uses the storage zone name as the access key and its
+          # password as the secret. One credential, scoped to that zone, with
+          # no reach into the rest of the account.
+          AWS_ACCESS_KEY_ID: ${{ secrets.BUNNY_STORAGE_ZONE }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BUNNY_STORAGE_PASSWORD }}
+          AWS_DEFAULT_REGION: ${{ vars.BUNNY_REGION }}
           ISO_NAME: ${{ steps.publish.outputs.iso_name }}
           QCOW2_NAME: ${{ steps.publish.outputs.qcow2_name }}
         run: |
@@ -456,14 +470,23 @@ jobs:
               continue
             fi
 
-            url="${MIRROR_ENDPOINT}/${MIRROR_BUCKET}/${name}"
+            # What was written is not what is read: the URL is the CDN's.
+            url="${MIRROR_BASE_URL}/${name}"
 
-            # Anonymous read comes from a bucket policy on the bucket, not
-            # from a canned ACL -- the storage accepts --acl public-read and
-            # silently discards it. Ask for a byte as a stranger would rather
-            # than trust that: an advertised URL that 403s is worse than no
-            # mirror.
-            code="$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 "${url}")"
+            # Ask for a byte as a stranger would rather than trust that the
+            # upload made it public. An advertised URL that 403s is worse than
+            # no link at all, and the first request also warms the edge.
+            #
+            # Retried because this is the CDN's first sight of the object and
+            # it has to reach back to storage for it.
+            code=000
+            for attempt in 1 2 3 4 5; do
+              code="$(curl -s -o /dev/null -w '%{http_code}' -r 0-0 "${url}")"
+              case "${code}" in 200|206) break ;; esac
+              echo "attempt ${attempt}: ${url} answered ${code}"
+              sleep $((attempt * 5))
+            done
+
             if [ "${code}" != "206" ] && [ "${code}" != "200" ]; then
               echo "::warning::${url} answered ${code}; not advertising it"
               failed=1

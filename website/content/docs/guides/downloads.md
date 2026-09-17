@@ -37,15 +37,12 @@ token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pul
 curl -L -H "Authorization: Bearer ${token}" -o corium-0.1.0-x86_64.iso \
   https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<the digest from the release notes>
 
-# 3. From a browser, no tooling at all.
-https://s3.thoughtless.eu/corium-releases/corium-0.1.0-x86_64.iso
+# 3. From a browser, no tooling at all. The release notes carry the link.
+https://<cdn>/corium-0.1.0-x86_64.iso
 ```
 
-The third is a mirror, and its bucket is listable:
-<https://s3.thoughtless.eu/corium-releases/> shows everything published. A
-browser renders that as the raw S3 XML rather than as a page, so it is useful
-for seeing which versions exist and less useful for anything else — for a
-specific version, the release notes carry the link.
+The third is a CDN copy. There is no index to browse, so the link for a given
+version lives in that version's release notes rather than being guessable.
 
 ## Why nothing is attached to the release itself
 
@@ -68,15 +65,18 @@ someone who just wants to try an operating system: route 1 means installing a
 tool, route 2 means a token and a digest. Neither is a link you can send to a
 colleague.
 
-So the same bytes are also copied to plain HTTPS storage. Two things are worth
-being clear about:
+So the same bytes are also served from a CDN. Two things are worth being clear
+about:
 
-- **It is self-hosted, and it is allowed to be down.** If it is, the release
-  still happened and the first two routes still work. Release notes only offer
-  a mirror link when the upload and an anonymous read-back both succeeded.
-- **It is a convenience, not the release.** If the mirror and the registry ever
+- **It is allowed to be down.** If it is, the release still happened and the
+  first two routes still work. Release notes offer a download link only when
+  the upload and a read-back as an anonymous client both succeeded.
+- **It is a convenience, not the release.** If the CDN and the registry ever
   disagreed, the registry is right. You do not have to take that on trust —
   the check below is what settles it.
+
+Nothing published there is ever overwritten. Every file carries its version in
+its name, so a URL that worked once keeps meaning the same bytes.
 
 ## Checking what you downloaded
 
@@ -119,10 +119,10 @@ the manifest    ->  names this layer digest
 sha256sum       ->  the file you hold has that digest
 ```
 
-Each link is checkable on its own, and none of them depends on the mirror being
-honest. That is why a mirror on somebody's home server is an acceptable place
-to fetch a 2.4 GB file from, and why a checksum file sitting beside it would
-not have been.
+Each link is checkable on its own, and none of them depends on the download
+host being honest. That is what makes it reasonable to fetch 2.4 GB from
+whichever route is fastest for you, and why a checksum file sitting beside the
+download would not have added anything.
 
 ## Building them yourself
 
