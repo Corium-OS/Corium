@@ -69,6 +69,32 @@ at both. The ISO build takes 20 to 35 minutes, so a release takes roughly an
 hour of CI. If it fails, nothing announces a release that does not exist --
 re-run the workflow, which is idempotent on all three.
 
+### The download mirror
+
+The ISO is also copied to `s3.thoughtless.eu/corium-releases`, which exists
+only so the release notes can offer a link someone can click. It is
+self-hosted, and the release path treats it accordingly:
+
+- The step is `continue-on-error`. A mirror that is down costs a release
+  nothing.
+- It fetches a byte back as an anonymous client before advertising the URL,
+  because an advertised link that 403s is worse than no link.
+- The notes mention a mirror only when one exists, and say plainly that the
+  registry is the release and the mirror is a convenience.
+
+Anonymous read comes from a bucket policy, not from a canned ACL -- the
+storage accepts `--acl public-read` and silently discards it. If the mirror
+ever starts refusing anonymous reads, that policy is the first thing to check:
+
+```bash
+aws --endpoint-url https://s3.thoughtless.eu \
+  s3api get-bucket-policy --bucket corium-releases
+```
+
+CI writes with a `corium-ci` account scoped to that bucket alone -- it cannot
+read the other buckets on that storage, and cannot create new ones. Do not
+replace it with the storage's root credentials.
+
 ---
 
 ## Verification before a release
