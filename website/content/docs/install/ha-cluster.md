@@ -38,6 +38,11 @@ VMIDS="142 143 144" \
 
 `MEMORY`, `CORES` and `DISK_SIZE` default to 4096, 2 and 32G per controller.
 
+**`SSH_KEY` has to be a key this host holds the private half of.** The script
+SSHes from the Proxmox node into the controllers to deliver the join token, so
+a key from your laptop puts you in the right place with the wrong identity —
+the run fails at `Permission denied (publickey)` with three VMs already built.
+
 **The script destroys any VM already holding one of those VMIDs**, unlike
 `create-vm.sh` which refuses. Check `qm list` before you run it.
 
@@ -73,17 +78,45 @@ controllers come up with no resolver and Kubernetes hangs pulling images.
 
 ## Check it
 
-```bash
-ssh core@192.168.0.201 sudo k0s kubectl get nodes
-ssh core@192.168.0.201 sudo k0s etcd member-list
+```console
+$ sudo k0s kubectl get nodes -o wide
+NAME              STATUS   ROLES           VERSION       INTERNAL-IP
+corium-7c17d087   Ready    control-plane   v1.36.4+k0s   192.168.0.201
+corium-87025d9c   Ready    control-plane   v1.36.4+k0s   192.168.0.202
+corium-5c5d785f   Ready    control-plane   v1.36.4+k0s   192.168.0.203
+
+$ sudo k0s etcd member-list
+{"members":{"corium-5c5d785f":"https://192.168.0.203:2380", ...}}
 ```
 
-Three nodes `Ready`, three etcd members. The API also answers on the VIP
-itself, which is what a kubeconfig should point at.
+Each node registers **its own address**, not the virtual IP. That distinction
+is the difference between a cluster that works and one that works until the
+first failover.
 
-To watch a failover, stop whichever controller currently holds the VIP and
-confirm it answers from another. ARP is the honest way to tell which one that
-is — the address alone will not say.
+The API answers on the VIP, which is what a kubeconfig should point at:
+
+```console
+$ curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.0.200:6443/readyz
+401
+```
+
+401 is the right answer: the server is there and declining an unauthenticated
+request.
+
+## Watch it fail over
+
+The address alone will not tell you which controller holds the VIP. ARP will:
+
+```bash
+ip neigh flush dev vmbr0
+ping -c2 192.168.0.200 >/dev/null
+ip neigh show 192.168.0.200        # compare the MAC against each node's
+```
+
+Stop that controller and ask again. On a real run the VIP moved within five
+seconds, the API kept answering, etcd held quorum at two of three, and the
+cluster carried on scheduling. Starting the controller again brought it back
+`Ready` inside fifteen seconds.
 
 ## When you are done
 
@@ -92,7 +125,16 @@ for id in 142 143 144; do qm stop "$id"; qm destroy "$id" --purge; done
 rm -f /var/lib/vz/snippets/corium-14*.yaml
 ```
 
-`qm destroy` leaves the cloud-init snippets behind.
+`qm destroy` leaves the cloud-init snippets behind, and the Proxmox host keeps
+the controllers' old host keys. Rebuilding onto the same addresses then greets
+you with `REMOTE HOST IDENTIFICATION HAS CHANGED`, which is alarming and
+harmless:
+
+```bash
+for ip in 192.168.0.201 192.168.0.202 192.168.0.203; do
+  ssh-keygen -f /root/.ssh/known_hosts -R "$ip"
+done
+```
 
 ## What to read next
 
