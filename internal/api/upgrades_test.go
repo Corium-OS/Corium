@@ -46,7 +46,9 @@ const shippedPolicy = `{
 
 const stagedStatus = `{"status":{"staged":{"image":{
   "image":{"image":"ghcr.io/corium-os/corium:0.2"},
-  "version":"0.2.0","imageDigest":"sha256:bbbb"}}}}`
+  "version":"0.2.0","imageDigest":"sha256:bbbb"}},
+  "rollback":{"image":{"image":{"image":"ghcr.io/corium-os/corium:0.1"},
+  "imageDigest":"sha256:aaaa"}}}}`
 
 func bootc(status string) upgrade.Runner {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -152,6 +154,19 @@ func TestApplyingWithNothingStagedIsAConflict(t *testing.T) {
 	// Nothing is wrong with the request; the node simply has nothing to apply.
 	if status != http.StatusConflict {
 		t.Errorf("status = %d, want 409", status)
+	}
+}
+
+func TestRollbackOnANodeWithNowhereToGoIsAConflict(t *testing.T) {
+	// A node that has only ever booted one image. Nothing is wrong with the
+	// request, and reporting a server error would read like something broke.
+	ca, address, store := upgradeNode(t, shippedPolicy, bootc(`{"status":{}}`))
+
+	status, body := postRaw(t, client(t, store, ca.issue(t, RoleAdmin)),
+		"https://"+address+"/v1/upgrade/rollback", "{}")
+
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%v)", status, body)
 	}
 }
 

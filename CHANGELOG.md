@@ -204,23 +204,43 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   its ownership was established without anybody proving anything survives
   rotation, and `cctl status` goes on saying so.
 
-- **SELinux types for the node's management state.** `/var/lib/corium/api` now
-  carries `corium_api_var_lib_t` rather than the generic `var_lib_t`, so the
-  operator CA a node obeys and the key it serves with have a name a confined
-  domain can be written against later. The module declares types and nothing
-  else: no domain, no transition, no rules. `corium-apid` runs as
-  `unconfined_service_t`, which is where `corium-agent` has always been.
+- **The daemon's SELinux position is documented rather than changed.** It runs
+  as `unconfined_service_t`, which is where `corium-agent` has always been.
 
-  `/var/lib/corium` itself is deliberately left alone. Five things read it, two
-  of them outside this project — systemd evaluating `ConditionPathExists=`, and
-  the greenboot health check reading `bootstrapped`. A relabelling that breaks
-  the greenboot check does not fail visibly; it rolls nodes back to their
-  previous image after three boots, which is a poor trade for a label.
+  A types-only policy module was written and then withdrawn: `semodule` writes
+  the whole policy store into `/var/lib/selinux`, and `/var` on a bootc image
+  is seeded at install and never updated, so the module would never reach an
+  upgraded node — and `bootc container lint` refused the image outright. The
+  build failed on a real Debian host while CI passed, which is its own finding.
 
   The reference now lists everything the daemon touches, and the procedure for
-  building the domain from real denials on a machine rather than from guesses.
+  building a confined domain from real denials on a machine rather than from
+  guesses. That is the input the work needs; the rest wants a node, not a desk.
 
 ### Fixed
+
+- **Staging an upgrade never worked on a real node.** `bootc switch` takes
+  `--apply` as a bare boolean, and the explicit `--apply=false` this passed was
+  rejected outright — every upgrade failed with "unexpected value 'false' for
+  '--apply'", while every test that stubbed bootc out passed. Staging is now
+  the absence of the flag, and the test asserts it never appears.
+
+- **The daemon's own hardening broke two surfaces.** `ProtectSystem=strict`
+  mounts the whole hierarchy read-only including `/run`, and bootc writes
+  `/run/bootc/storage` while staging; it is gone, because a daemon that rebases
+  the operating system cannot have the operating system read-only.
+  `RestrictAddressFamilies` did not list `AF_NETLINK`, which `k0s reset` needs
+  to clean up a node's network links — without it a reset failed after k0s had
+  already stopped. Everything else in the unit was verified on a real node to
+  survive a `bootc switch` and a `k0s reset`.
+
+- **`cctl rollback` on a node with nowhere to go back to reported a server
+  error.** A node that has only ever booted one image is in that state on
+  purpose; it is a 409 now.
+
+- **The console printed a command nobody could run.** A wildcard listener
+  reports itself as `[::]:7443`, so the banner told an operator to run
+  `cctl enroll [::]:7443`. It now prints an address of the node's own.
 
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
   secret source was reported as `join.tokenFrom` whichever key it was reached

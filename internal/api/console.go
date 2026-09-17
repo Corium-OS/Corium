@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 )
 
@@ -35,13 +36,49 @@ func (s *Server) announce(identity tls.Certificate, address string) {
 		return
 	}
 
-	slog.Warn("node is unenrolled and is not in a cluster",
-		"address", address, "fingerprint", fingerprint)
+	// The bound address, not the reachable one: a wildcard listener reports
+	// itself as [::]:7443, and printing `cctl enroll [::]:7443` on a console
+	// gives somebody a command that cannot be run. Swap in an address of this
+	// machine's own.
+	reachable := reachableAddress(address)
 
-	banner := s.enroller.Banner(address, fingerprint)
+	slog.Warn("node is unenrolled and is not in a cluster",
+		"address", reachable, "fingerprint", fingerprint)
+
+	banner := s.enroller.Banner(reachable, fingerprint)
 
 	fmt.Print(banner)
 	writeConsole(banner)
+}
+
+// reachableAddress turns a listening address into one somebody could type.
+//
+// A daemon told to listen on every interface reports [::]:7443, which is true
+// and useless. The port is what matters and is kept; the host is replaced with
+// this machine's first routable address, and left alone when the listener was
+// already bound to one.
+func reachableAddress(listening string) string {
+	host, port, err := net.SplitHostPort(listening)
+	if err != nil {
+		return listening
+	}
+
+	if host != "" && host != "::" && host != "0.0.0.0" {
+		return listening
+	}
+
+	for _, ip := range localAddresses() {
+		// Loopback would be just as unhelpful to somebody reading a console.
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.To4() == nil {
+			continue
+		}
+
+		return net.JoinHostPort(ip.String(), port)
+	}
+
+	// Nothing routable to offer. The port alone still tells an operator what
+	// to aim at once they know the node's address.
+	return listening
 }
 
 // writeConsole is best effort. A container, a test, or a machine with no

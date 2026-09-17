@@ -84,7 +84,17 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 
 // handleRollback marks the previous deployment as the next to boot.
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
-	if err := s.upgrades.Rollback(r.Context()); err != nil {
+	err := s.upgrades.Rollback(r.Context())
+
+	switch {
+	case err == nil:
+	case errors.Is(err, upgrade.ErrNoRollback):
+		// 409: nothing is wrong with the request, and a node that has only
+		// ever booted one image has nowhere to go back to.
+		writeError(w, http.StatusConflict, err.Error())
+
+		return
+	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 
 		return

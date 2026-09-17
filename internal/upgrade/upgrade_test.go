@@ -188,20 +188,24 @@ func TestStageDoesNotReboot(t *testing.T) {
 		t.Errorf("staged = %+v, want the digest read back", staged)
 	}
 
-	// The difference between staging and rebooting the node is one flag, so it
-	// is asserted rather than assumed.
+	// Staging is the absence of --apply, not the presence of --apply=false:
+	// bootc takes it as a bare boolean and rejects a value, which is how an
+	// explicit `--apply=false` failed on every real node while passing a test
+	// that only checked the string was there. Assert the flag is absent.
 	var switched bool
 
 	for _, call := range commands.calls {
-		if len(call) > 2 && call[1] == "switch" {
+		joined := strings.Join(call, " ")
+
+		if len(call) > 1 && call[1] == "switch" {
 			switched = true
 
-			if call[2] != "--apply=false" {
-				t.Errorf("switch called as %v, want --apply=false", call)
+			if strings.Contains(joined, "--apply") {
+				t.Errorf("switch called as %v, which would reboot the node", call)
 			}
 		}
 
-		if strings.Contains(strings.Join(call, " "), "reboot") {
+		if strings.Contains(joined, "reboot") {
 			t.Errorf("staging ran %v", call)
 		}
 	}
@@ -259,10 +263,31 @@ func TestApplyWithNothingStagedIsRefused(t *testing.T) {
 	}
 }
 
+// A node that has upgraded at least once, and so has somewhere to go back to.
+const withRollback = `{"status":{"rollback":{"image":{
+  "image":{"image":"ghcr.io/corium-os/corium:0.1"},"imageDigest":"sha256:aaaa"}}}}`
+
+func TestRollbackNeedsSomewhereToGoBackTo(t *testing.T) {
+	// A node that has only ever booted one image is in this state on purpose.
+	// Surfacing bootc's own refusal as a failure of the API would read like
+	// something is broken when nothing is.
+	commands := &recorder{status: `{"status":{}}`}
+
+	if err := (&Manager{Run: commands.runner()}).Rollback(t.Context()); !errors.Is(err, ErrNoRollback) {
+		t.Fatalf("Rollback() = %v, want %v", err, ErrNoRollback)
+	}
+
+	for _, call := range commands.calls {
+		if strings.Contains(strings.Join(call, " "), "rollback") {
+			t.Error("a refused rollback still ran bootc rollback")
+		}
+	}
+}
+
 func TestRollbackDoesNotReboot(t *testing.T) {
 	// Rollback exists because somebody is already having a bad day. Taking the
 	// node out of service at a moment they did not choose would not help.
-	commands := &recorder{}
+	commands := &recorder{status: withRollback}
 
 	if err := (&Manager{Run: commands.runner()}).Rollback(t.Context()); err != nil {
 		t.Fatalf("Rollback() error = %v", err)

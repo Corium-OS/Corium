@@ -114,22 +114,6 @@ COPY --from=agent-builder /out/corium-apid /usr/bin/corium-apid
 COPY build/files/usr /usr
 COPY build/files/etc /etc
 
-# --- SELinux ---------------------------------------------------------------
-#
-# Types only: no domain, no transition, no allow rules. See build/selinux/
-# corium.te for what this does and does not claim to do.
-#
-# -N does not try to reload the running kernel's policy, which there is no
-# point attempting inside a container build. The module lands in the store, and
-# the image's final relabelling pass applies the contexts.
-COPY build/selinux/ /tmp/selinux/
-RUN dnf install -y --setopt=install_weak_deps=False selinux-policy-devel \
-	&& make -C /tmp/selinux -f /usr/share/selinux/devel/Makefile corium.pp \
-	&& semodule -N -i /tmp/selinux/corium.pp \
-	&& dnf remove -y selinux-policy-devel \
-	&& dnf clean all \
-	&& rm -rf /tmp/selinux /var/cache/* /var/lib/dnf /var/log/dnf*
-
 # --- Service wiring --------------------------------------------------------
 #
 # Enabled at build time so the preset is baked into the image rather than

@@ -720,6 +720,11 @@ What the node comes back as depends on its configuration. One with
 `api.operatorCA` re-claims itself and re-bootstraps — a genuine reprovision.
 One in maintenance mode comes back unclaimed, with a new pairing code.
 
+It also comes back on whatever image was **staged**, if one was. Reset reboots,
+and a reboot takes the staged deployment — so a node reset with an upgrade
+waiting comes up on the new image rather than the one it was running. Check
+`cctl status` before resetting if that matters.
+
 #### Changing who owns a node
 
 Make the new CA in a directory of its own, then hand the nodes over:
@@ -778,17 +783,23 @@ so.
 #### Where the daemon stands with SELinux
 
 `corium-apid` runs as `unconfined_service_t`, like `corium-agent` and every
-other service on the image. There is no confined domain for it yet, and the
-image ships types without rules: `/var/lib/corium/api` is labelled
-`corium_api_var_lib_t` so the operator CA and the node's serving key have a
-name to hang a policy on, but nothing is denied by it today.
+other service on the image. There is no confined domain for it, and no policy
+module ships.
 
-`/var/lib/corium` itself keeps `var_lib_t`, deliberately. Five things read it,
-and two are outside this project: systemd evaluating `ConditionPathExists=` for
-`corium-bootstrap.service` and `corium-uncordon.service`, and the greenboot
-health check reading `bootstrapped`. Getting the greenboot one wrong does not
-fail visibly — it fails the check, and three failed checks roll the node back
-to its previous image. That is a poor trade for a label.
+A types-only module was tried and withdrawn. `semodule` writes the whole policy
+store into `/var/lib/selinux`, and `/var` on a bootc image is seeded at install
+and never updated afterwards — so the module would never reach a node that
+upgraded into it, and `bootc container lint` refuses the image for putting 1279
+files in `/var`. The same build passed in CI and failed on a real host, which
+is worth knowing before trusting either.
+
+What the unit does enforce was checked on a node rather than reasoned about.
+`ProtectSystem=strict` had to go: it mounts everything read-only including
+`/run`, and bootc writes `/run/bootc/storage` while staging an image.
+`RestrictAddressFamilies` had to gain `AF_NETLINK`, which `k0s reset` needs to
+clean up a node's links. Everything else — `NoNewPrivileges`, `ProtectHome`,
+`PrivateTmp`, `RestrictNamespaces`, `MemoryDenyWriteExecute`,
+`LockPersonality` — survived a real `bootc switch` and a real `k0s reset`.
 
 What the daemon touches, which is what a confined domain has to allow:
 

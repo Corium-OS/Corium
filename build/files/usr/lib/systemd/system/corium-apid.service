@@ -49,19 +49,31 @@ StandardError=journal
 NoNewPrivileges=yes
 ProtectHome=yes
 PrivateTmp=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is here because `k0s reset` needs it: cleaning up a node's
+# network links goes through netlink, and without it the reset fails with
+# "failed to get link list from netlink: address family not supported by
+# protocol" after k0s has already stopped -- leaving a node out of its cluster
+# and still owned. Found on a real node; every test that stubbed k0s out passed.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 
-# /var/lib/corium is the only place it writes. Reading is unaffected, so it can
-# still find cloud-init's merged document under /var/lib/cloud.
+# Note what is absent, and why, because both were tried on a real node.
 #
-# Note what is absent: DeviceAllow. Setting it would switch DevicePolicy from
-# auto to closed, and the banner goes to /dev/console.
-ProtectSystem=strict
-ReadWritePaths=/var/lib/corium
+# ProtectSystem=strict mounts the whole hierarchy read-only bar /dev, /proc and
+# /sys -- including /run. bootc writes /run/bootc/storage while staging an
+# image, so every upgrade failed with "Read-only file system (os error 30)"
+# while every test that stubbed bootc out passed. A daemon that rebases the
+# operating system cannot have the operating system read-only; saying otherwise
+# was theatre that happened to break the feature.
+#
+# DeviceAllow would switch DevicePolicy from auto to closed, and the pairing
+# code goes to /dev/console.
+#
+# Everything above this comment was verified to survive a real `bootc switch`:
+# the namespace, memory and privilege restrictions all stay.
 
 [Install]
 # cloud-init.target rather than multi-user.target, for the ordering-cycle

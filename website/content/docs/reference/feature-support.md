@@ -149,7 +149,7 @@ Off unless asked for, and covered by
 | Rollback | — | `cctl rollback <node>` marks the previous image as next to boot, and does not reboot |
 | Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`. A drain that a pod disruption budget refuses is not forced, and the node stays cordoned |
 | Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
-| Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order |
+| Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |
 | CA rotation | — | `cctl ca rotate <nodes...> --to <dir>`, at `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
 | Losing the CA key | — | `corium-agent api set-ca --file`, run as root on the node. Local only; the node keeps its cluster membership |
 | SELinux | — | The daemon runs unconfined, as the agent always has. `/var/lib/corium/api` carries a type of its own so a confined domain has an anchor; the parent keeps `var_lib_t` because greenboot and systemd read it |

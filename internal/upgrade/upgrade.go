@@ -53,6 +53,13 @@ var (
 
 	// ErrBadReference reports an image reference that is not one.
 	ErrBadReference = errors.New("not a valid image reference")
+
+	// ErrNoRollback reports a node with nothing to roll back to.
+	//
+	// A node that has only ever booted one image is in this state, which is
+	// ordinary rather than broken: there is no earlier deployment to return
+	// to, and there will not be one until it has upgraded at least once.
+	ErrNoRollback = errors.New("no previous image to roll back to")
 )
 
 // referencePattern is a deliberately strict take on an image reference:
@@ -88,9 +95,16 @@ func (m *Manager) Stage(ctx context.Context, image string) (*Staged, error) {
 	ctx, cancel := context.WithTimeout(ctx, pullTimeout)
 	defer cancel()
 
-	// --apply=false is explicit rather than relying on the default: the
-	// difference between this and rebooting the node is one flag.
-	if _, err := m.run(ctx, "bootc", "switch", "--apply=false", image); err != nil {
+	// No --apply. It is a bare boolean in bootc's CLI, not a value flag, so
+	// the explicit `--apply=false` this used to pass was rejected outright --
+	// "unexpected value 'false' for '--apply'" -- and staging failed on every
+	// real node while passing every test that stubbed the command out.
+	//
+	// Staging is therefore the absence of a flag rather than the presence of
+	// one, which is the weaker guarantee. The test below asserts --apply never
+	// appears, since that is now the only thing standing between this and
+	// rebooting the machine.
+	if _, err := m.run(ctx, "bootc", "switch", image); err != nil {
 		return nil, fmt.Errorf("staging %s: %w", image, err)
 	}
 
@@ -179,11 +193,42 @@ func (m *Manager) Apply(ctx context.Context) error {
 // and the whole reason rollback exists is that somebody is already having a
 // bad day.
 func (m *Manager) Rollback(ctx context.Context) error {
+	// Asked before acting, so that a node with nothing to return to says so
+	// rather than surfacing bootc's own refusal as a server error. A node that
+	// has only ever booted one image is in this state on purpose.
+	available, err := m.hasRollback(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !available {
+		return ErrNoRollback
+	}
+
 	if _, err := m.run(ctx, "bootc", "rollback"); err != nil {
 		return fmt.Errorf("rolling back: %w", err)
 	}
 
 	return nil
+}
+
+func (m *Manager) hasRollback(ctx context.Context) (bool, error) {
+	output, err := m.run(ctx, "bootc", "status", "--format", "json")
+	if err != nil {
+		return false, fmt.Errorf("reading bootc status: %w", err)
+	}
+
+	var status struct {
+		Status struct {
+			Rollback *json.RawMessage `json:"rollback"`
+		} `json:"status"`
+	}
+
+	if err := json.Unmarshal(output, &status); err != nil {
+		return false, fmt.Errorf("parsing bootc status: %w", err)
+	}
+
+	return status.Status.Rollback != nil, nil
 }
 
 func (m *Manager) run(ctx context.Context, name string, args ...string) ([]byte, error) {

@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -511,5 +512,29 @@ func TestBannerSaysWhenTheNodeIsOpen(t *testing.T) {
 
 	if strings.Contains(banner, "--code") {
 		t.Errorf("banner offers a code the node does not want:\n%s", banner)
+	}
+}
+
+func TestTheBannerPrintsAnAddressSomebodyCanType(t *testing.T) {
+	// A wildcard listener reports itself as [::]:7443, which is true and
+	// useless: `cctl enroll [::]:7443` is not a command anybody can run, and
+	// the console is the one place where what is printed has to be typed back.
+	for _, listening := range []string{"[::]:7443", "0.0.0.0:7443", ":7443"} {
+		got := reachableAddress(listening)
+
+		if got == listening {
+			t.Errorf("reachableAddress(%q) = %q, want a routable host", listening, got)
+		}
+
+		if _, port, err := net.SplitHostPort(got); err != nil || port != "7443" {
+			t.Errorf("reachableAddress(%q) = %q, want the port kept", listening, got)
+		}
+	}
+
+	// An address that was already specific is left alone.
+	for _, listening := range []string{"192.168.1.51:7443", "127.0.0.1:9000"} {
+		if got := reachableAddress(listening); got != listening {
+			t.Errorf("reachableAddress(%q) = %q, want it unchanged", listening, got)
+		}
 	}
 }
