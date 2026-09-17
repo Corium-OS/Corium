@@ -131,7 +131,7 @@ node silently joins the wrong cluster.
 | `anaconda-iso` | Interactive or kickstarted bare-metal installs |
 
 You only need to build these if you have changed the image. Every release
-publishes the installer ISO ready-made and signed — see the
+publishes the ISO and the qcow2 ready-made and signed — see the
 [latest release](https://github.com/Corium-OS/Corium/releases/latest).
 
 ## Documentation
