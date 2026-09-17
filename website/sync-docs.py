@@ -55,6 +55,9 @@ PAGES = [
     ("install/proxmox.md", "install", "proxmox", "Proxmox", 301,
      "A single node on a Proxmox host, from the published qcow2 to a cluster "
      "that schedules work, with the commands and the output from a real run."),
+    ("install/ha-cluster.md", "install", "ha-cluster", "HA cluster", 302,
+     "Three controllers sharing a virtual IP on Proxmox: what the script does, "
+     "why the joining controllers wait for a token, and how to check the result."),
     ("adr/0001-base-image.md", "reference", "adr-0001-base-image",
      "ADR 1 — Base image", 910,
      "Why the operating system is based on fedora-bootc rather than Fedora "
