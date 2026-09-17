@@ -12,6 +12,30 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **An `api:` block, ahead of the daemon it configures.** The schema and its
+  validation land first so the rest can be built against something settled.
+  `api.enabled` turns the management API on; `api.operatorCA` and
+  `api.operatorCAFrom` name the CA whose client certificates a node will
+  accept; `enabled: true` with neither asks for maintenance mode, where a node
+  waits to be claimed from the console rather than joining a cluster unclaimed.
+  The value is a CA *certificate* and never a key, which is what makes writing
+  it in clear in cloud-init safe. See [ADR 4](docs/adr/0004-management-api.md).
+
+  `corium-apid` itself is not written yet, and the block is honest about it
+  rather than silently inert: a node that names an operator CA bootstraps as
+  before and says in the journal that nothing is serving the API, and a node
+  asking for maintenance mode **refuses to bootstrap**, because there is
+  nothing to enrol against and joining a cluster unclaimed is the one outcome
+  the design rules out. Nodes with no `api:` block are unaffected.
+
+### Fixed
+
+- **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
+  secret source was reported as `join.tokenFrom` whichever key it was reached
+  through, which sent you to a line that was not the one at fault.
+
 ### Changed
 
 - **Building from source uses [mise](https://mise.jdx.dev) instead of make.**

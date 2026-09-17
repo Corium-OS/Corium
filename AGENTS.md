@@ -66,6 +66,7 @@ the maintainers — do not quietly work around them.
 | 8 | `corium-agent` and all tooling are written in **Go** | Same ecosystem as k0s and Kubernetes; static binaries drop cleanly into a read-only `/usr` |
 | 9 | **Every abstraction has an escape hatch** | `corium:` covers the common path; raw `write_files`, `runcmd`, and a verbatim k0s config patch must always remain available |
 | 10 | **Software RAID covers spare disks, not the root filesystem** | A root array is an install-time decision the `corium:` block is read too late to make, and the bootc path for one is broken upstream. See [ADR 3](docs/adr/0003-software-raid-scope.md) |
+| 11 | **The management API is node-local, off by default, and a node it has not claimed is in no cluster** | One daemon per node answering for that node keeps the fleet-management non-goal intact. Off by default so no node in service grows a listening port by being upgraded. Holding the bootstrap until enrolment removes the state where a machine is both valuable and unclaimed, rather than defending it. See [ADR 4](docs/adr/0004-management-api.md) |
 
 ---
 

@@ -1,6 +1,6 @@
 # 4. A node-local management API, and how an operator comes to be trusted by it
 
-Status: proposed
+Status: accepted
 
 ## Context
 
