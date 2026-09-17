@@ -330,16 +330,24 @@ jobs:
           sudo podman pull "${IMAGE_DIGEST}"
 
           mkdir -p output
-          # --type takes more than one value, so both artefacts come out of a
-          # single osbuild run rather than two passes over the same image.
-          sudo podman run --rm --privileged \
-            --security-opt label=type:unconfined_t \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
-            -v "${PWD}/output:/output" \
-            quay.io/centos-bootc/bootc-image-builder:latest \
-            --type anaconda-iso \
-            --type qcow2 \
-            "${IMAGE_DIGEST}"
+          # One run per artefact. --type does take more than one value, but
+          # bootc-image-builder counts ISOs and disks separately and refuses a
+          # request containing both: "cannot mix ISO/disk images in request".
+          # qcow2 and raw together would be fine; an ISO with either is not.
+          #
+          # The cost is small. The image above is pulled once and both runs
+          # read it out of the same local storage.
+          for type in anaconda-iso qcow2; do
+            echo "::group::building ${type}"
+            sudo podman run --rm --privileged \
+              --security-opt label=type:unconfined_t \
+              -v /var/lib/containers/storage:/var/lib/containers/storage \
+              -v "${PWD}/output:/output" \
+              quay.io/centos-bootc/bootc-image-builder:latest \
+              --type "${type}" \
+              "${IMAGE_DIGEST}"
+            echo "::endgroup::"
+          done
 
           # bootc-image-builder floats on :latest, here as in the Makefile, so
           # these are verifiable but not reproducible. Record which builder
