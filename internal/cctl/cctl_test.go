@@ -2,10 +2,14 @@ package cctl
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,4 +340,64 @@ func readCertificate(t *testing.T, path string) *x509.Certificate {
 	}
 
 	return certificate
+}
+
+func TestACertificateFromTheWrongCAIsDiagnosed(t *testing.T) {
+	// Go sends no certificate at all when the one it holds was signed by a CA
+	// the server did not name as acceptable, so the node answers "certificate
+	// required" -- which reads like the client sent nothing, and sends people
+	// looking in the wrong place. The cause is almost always a rotated CA.
+	trusted := initialised(t)
+
+	stranger := NewStore(t.TempDir())
+	if err := InitCA(stranger, "somebody else"); err != nil {
+		t.Fatalf("InitCA() error = %v", err)
+	}
+
+	if err := Issue(stranger, "them", api.RoleAdmin, DefaultClientLifetime); err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+
+	// A node that accepts only the trusted CA.
+	trustedPEM, err := OperatorCA(trusted)
+	if err != nil {
+		t.Fatalf("OperatorCA() error = %v", err)
+	}
+
+	certificate, err := config.ParseOperatorCA(trustedPEM)
+	if err != nil {
+		t.Fatalf("ParseOperatorCA() error = %v", err)
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(certificate)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	server.TLS = &tls.Config{
+		ClientCAs:  pool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
+	}
+	server.StartTLS()
+
+	t.Cleanup(server.Close)
+
+	theirs, err := ClientCertificate(stranger)
+	if err != nil {
+		t.Fatalf("ClientCertificate() error = %v", err)
+	}
+
+	address := strings.TrimPrefix(server.URL, "https://")
+
+	_, err = Dial(address, api.Fingerprint(server.Certificate().Raw), theirs...).Node(t.Context())
+	if err == nil {
+		t.Fatal("Node() = nil, want the handshake to fail")
+	}
+
+	for _, want := range []string{"does not accept your certificate", "rotated"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to mention %q", err, want)
+		}
+	}
 }

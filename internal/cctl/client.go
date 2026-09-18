@@ -41,6 +41,10 @@ type Client struct {
 	// seen is the fingerprint the node actually presented, recorded whether or
 	// not it was the expected one, so a caller can show it to a human.
 	seen string
+
+	// offered records that a client certificate was loaded, which is what
+	// makes "the node wanted one" diagnosable rather than merely true.
+	offered bool
 }
 
 // Dial prepares a client for an address.
@@ -51,7 +55,7 @@ type Client struct {
 // fingerprint proves everything. Passing an empty one accepts whatever answers
 // and records it, which is only appropriate while reading the console.
 func Dial(address, expected string, clientCertificates ...tls.Certificate) *Client {
-	client := &Client{address: address}
+	client := &Client{address: address, offered: len(clientCertificates) > 0}
 
 	client.http = &http.Client{
 		Timeout: requestTimeout,
@@ -182,7 +186,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("contacting %s: %w", c.address, err)
+		return c.reach(err)
 	}
 
 	defer func() { _ = response.Body.Close() }()
@@ -207,6 +211,29 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 	}
 
 	return nil
+}
+
+// reach turns a connection failure into something worth reading.
+//
+// One of these is worth singling out. "remote error: tls: certificate
+// required" means the node asked for a client certificate and got none -- and
+// Go sends none, silently, when the certificate it holds was signed by a CA
+// the server did not name as acceptable. So the most likely cause is not a
+// missing certificate at all: it is a certificate signed by a CA this node no
+// longer trusts, which is what happens to every other operator directory after
+// somebody rotates it.
+//
+// The raw alert reads like the client sent nothing, which sends people looking
+// in the wrong place.
+func (c *Client) reach(err error) error {
+	if c.offered && strings.Contains(err.Error(), "certificate required") {
+		return fmt.Errorf("%s does not accept your certificate: it is signed by a CA "+
+			"this node no longer trusts. If its CA was rotated, use the directory it "+
+			"was rotated to; otherwise the node was claimed by somebody else and the "+
+			"way back is `corium-agent api set-ca` on its console", c.address)
+	}
+
+	return fmt.Errorf("contacting %s: %w", c.address, err)
 }
 
 // failure reads an error response that has not been consumed yet.
@@ -307,7 +334,7 @@ func (c *Client) Logs(ctx context.Context, options LogQuery, onRecord func(syste
 
 	response, err := streaming.Do(request)
 	if err != nil {
-		return fmt.Errorf("contacting %s: %w", c.address, err)
+		return c.reach(err)
 	}
 
 	defer func() { _ = response.Body.Close() }()
@@ -478,7 +505,7 @@ func (c *Client) raw(ctx context.Context, path string) ([]byte, error) {
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("contacting %s: %w", c.address, err)
+		return nil, c.reach(err)
 	}
 
 	defer func() { _ = response.Body.Close() }()

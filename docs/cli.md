@@ -461,6 +461,21 @@ The status codes are chosen so that the code alone tells you where to look.
 | `409` | Nothing is wrong; the node cannot do it in this state | The node: unclaimed, nothing staged, no rollback, a worker asked to drain |
 | `500` | The node failed at it | Its journal: `cctl logs <node> --unit corium-apid` |
 
+A handshake that fails before any of those is its own case:
+
+```console
+$ cctl status 192.168.1.51
+cctl: 192.168.1.51:7443 does not accept your certificate: it is signed by a CA
+this node no longer trusts.
+```
+
+The raw TLS alert for this is `certificate required`, which reads as though the
+client sent nothing. It usually did — Go sends no certificate at all when the
+one it holds was signed by a CA the server did not name as acceptable — so the
+real cause is a CA that was rotated out from under this directory. Use the
+directory it was rotated to, or recover the node from its console with
+`corium-agent api set-ca`.
+
 A `409` is worth dwelling on, because it is the one that is easy to read as a
 fault and usually is not. A node with nothing staged, or with no earlier image
 to roll back to, or a worker that holds no credentials able to evict a pod, are

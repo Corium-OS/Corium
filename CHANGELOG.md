@@ -228,6 +228,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **`tls: certificate required` now says what it means.** Go sends no client
+  certificate at all when the one it holds was signed by a CA the server did
+  not name as acceptable, so a node whose CA has been rotated answers as though
+  the client sent nothing — and the raw alert sends people looking for a
+  missing certificate rather than a rotated CA. `cctl` knows it offered one,
+  and says so.
+
 - **`cctl drain` said which nodes it works on, and not what to do about it.**
   Cordon and drain work on controllers only — a node acts on itself, and
   evicting a pod needs cluster admin credentials that only a controller holds
