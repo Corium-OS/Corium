@@ -155,6 +155,18 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   `corium:` block, so cloud-init carrying nothing but an SSH key is enough to
   mask a baked-in configuration. The ISO is the artefact this works for.
 
+- **`cctl` is published with each release**, for linux and macOS on amd64 and
+  arm64, and installable with `mise use -g ubi:Corium-OS/Corium[exe=cctl]`.
+  Until now it was built from a checkout and the documentation said plainly
+  that this was a gap rather than a decision; it is closed.
+
+  The archives are attached to the release rather than pushed to the registry
+  the ISO and the qcow2 live in, because the reasoning that keeps those out
+  points the other way for a three-megabyte binary fetched by a person setting
+  up a workstation: the installers people already use read release assets. A
+  single signed `SHA256SUMS` covers every archive, under the same key as the OS
+  image. There is no Windows build, because nobody has run `cctl` there once.
+
 ### Changed
 
 - **Building from source uses [mise](https://mise.jdx.dev) instead of make.**

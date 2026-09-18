@@ -17,7 +17,10 @@ it holds the private key that owns a fleet, and nothing holding that key belongs
 in an operating system image. A node ships `corium-agent`, which does the local
 work, and `corium-apid`, which answers `cctl` over the network.
 
-Build it with `mise run build`; there is no release artefact yet.
+Install it with `mise use -g ubi:Corium-OS/Corium[exe=cctl]`, or take an
+archive from the [release page](https://github.com/Corium-OS/Corium/releases/latest)
+— see [downloads](/docs/install/downloads/#installing-cctl) for verifying what you
+fetched. From a checkout, `mise run build`.
 
 ---
 

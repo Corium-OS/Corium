@@ -73,6 +73,10 @@ for command in corium-agent corium-apid cctl; do
 done
 '''
 
+[tasks."cctl-dist"]
+description = "Cross-compile cctl for every platform a release ships"
+run = "./build/scripts/cctl-dist.sh"
+
 [tasks."build-linux"]
 description = "Build the static linux/amd64 binaries for the OS image"
 run = '''

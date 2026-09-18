@@ -513,9 +513,63 @@ jobs:
       # The only job that writes to the repository, so the grant stays here
       # rather than at the top of the file where it would widen the build too.
       contents: write
+      # Keyless signing for the checksum file, same trust model as the image.
+      id-token: write
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # cctl reports the version it was built from, and the build derives
+          # that with `git describe`. A shallow checkout has no tags to
+          # describe against, so the binary would ship saying it was some
+          # commit rather than the release it is.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build cctl for every platform
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # The version is taken from the tag rather than from `git describe`,
+          # so that a release binary reports the release and never a
+          # describe-flavoured variant of it.
+          VERSION="${TAG#v}" \
+          COMMIT="$(git rev-parse --short HEAD)" \
+          OUTPUT_DIR="${RUNNER_TEMP}/artefacts" \
+            ./build/scripts/cctl-dist.sh
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # cosign v2, for the same reason the image and the artefacts use it.
+          cosign-release: v2.6.5
+
+      - name: Sign the checksums
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cd "${RUNNER_TEMP}/artefacts/cli"
+
+          # One signature over the checksum file rather than one per archive.
+          # The checksums cover the binaries, so this covers everything
+          # underneath it, and the release page stays readable.
+          if [ -n "${COSIGN_PRIVATE_KEY}" ]; then
+            cosign sign-blob --yes --key env://COSIGN_PRIVATE_KEY \
+              --output-signature SHA256SUMS.sig \
+              SHA256SUMS
+          else
+            cosign sign-blob --yes \
+              --output-signature SHA256SUMS.sig \
+              --output-certificate SHA256SUMS.pem \
+              SHA256SUMS
+          fi
+
+          ls -l
 
       - name: Create the Release
         env:
@@ -540,7 +594,12 @@ jobs:
           # the same push event. Publishing the image again is harmless;
           # creating the Release again is not.
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "::notice::${TAG} already has a Release; leaving it alone"
+            # The notes are left alone -- they may have been edited by a
+            # person -- but the assets are replaced. A re-run exists because
+            # something failed the first time, and a Release created with a
+            # half-finished upload is exactly the state worth repairing.
+            echo "::notice::${TAG} already has a Release; refreshing its attached files"
+            gh release upload "${TAG}" "${RUNNER_TEMP}"/artefacts/cli/* --clobber
             exit 0
           fi
 
@@ -623,10 +682,29 @@ jobs:
             printf 'cosign verify --key cosign.pub %s\n' "${DIGEST}"
             printf '```\n\n'
 
-            printf '### Downloads\n\n'
-            printf 'Nothing is attached to this release: the ISO alone is past the 2 GiB\n'
-            printf 'limit for a release asset. Both are published as signed OCI artifacts in\n'
-            printf 'the same registry, under the same signing chain as the image.\n\n'
+            printf '### cctl\n\n'
+            printf 'The command line client, attached below for linux and macOS on amd64\n'
+            printf 'and arm64. With [mise](https://mise.jdx.dev):\n\n'
+            printf '```bash\n'
+            printf 'mise use -g ubi:%s[exe=cctl]\n' "${GH_REPO}"
+            printf '```\n\n'
+            printf 'Or by hand, verifying what you downloaded:\n\n'
+            printf '```bash\n'
+            printf 'curl -fsSLO https://github.com/%s/releases/download/%s/cctl_%s_linux_amd64.tar.gz\n' \
+              "${GH_REPO}" "${TAG}" "${version}"
+            printf 'curl -fsSLO https://github.com/%s/releases/download/%s/SHA256SUMS\n' "${GH_REPO}" "${TAG}"
+            printf 'sha256sum --check --ignore-missing SHA256SUMS\n'
+            printf 'tar -xzf cctl_%s_linux_amd64.tar.gz\n' "${version}"
+            printf '```\n\n'
+            printf 'The checksums are signed with the same key as the image:\n\n'
+            printf '```bash\n'
+            printf 'cosign verify-blob --key cosign.pub --signature SHA256SUMS.sig SHA256SUMS\n'
+            printf '```\n\n'
+
+            printf '### The ISO and the disk image\n\n'
+            printf 'Not attached here: the ISO alone is past the 2 GiB limit for a release\n'
+            printf 'asset. Both are published as signed OCI artifacts in the same registry,\n'
+            printf 'under the same signing chain as the image.\n\n'
 
             # One block per artefact, because the routes and the checks are
             # identical and only the coordinates differ.
@@ -682,4 +760,5 @@ jobs:
             --title "Corium ${version}" \
             --notes-file "${RUNNER_TEMP}/notes.md" \
             --verify-tag \
-            --prerelease="${prerelease}"
+            --prerelease="${prerelease}" \
+            "${RUNNER_TEMP}"/artefacts/cli/*
