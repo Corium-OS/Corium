@@ -14,6 +14,82 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **A management API, and `cctl` to drive it.** A node can now be read,
+  restarted, upgraded, drained and reset without an SSH session — which on an
+  immutable OS was always a poor fit, since the shell you land in is a shell
+  over a system where almost nothing you type persists. `corium-apid` serves
+  JSON over HTTP and mutual TLS on `7443`, and is **off unless asked for**: a
+  node with no `api:` block runs no daemon and binds no port, exactly as before.
+
+  Trust is anchored in an operator CA. A node is given its *certificate* and
+  never its key, which is what makes `api.operatorCA` safe to write in clear in
+  cloud-init — unlike a join token, a certificate leaks nothing. `cctl pki init`
+  makes the CA and prints it ready to paste; `cctl pki issue --role admin`
+  signs the certificate a node checks on every call. Three roles, carried in
+  the certificate's organisation, and every route names the lowest one that may
+  use it.
+
+  See [ADR 4](docs/adr/0004-management-api.md) for the whole decision, and
+  [docs/cli.md](docs/cli.md) for every command.
+
+- **Maintenance mode, for nodes nothing should be told in advance.** Set
+  `api.enabled: true` with no CA and the node validates its configuration, then
+  **stops before bootstrapping k0s**, printing a single-use pairing code and
+  its certificate fingerprint on the console. `cctl enroll` claims it and
+  releases the bootstrap.
+
+  A node waiting to be claimed is in no cluster, and the rule holds both ways:
+  a node cannot return to maintenance mode while it is a member, so `cctl reset`
+  takes it out of the cluster on the way. Enrolment is one-way and survives
+  reboots — otherwise power-cycling a machine would be enough to take it.
+
+  It is not zero touch: three nodes means three consoles. `api.operatorCA`
+  gives you unattended provisioning with nothing secret in the metadata, since
+  the certificate is not a secret. `api.insecure` drops the pairing code for a
+  bench or a controlled provisioning network, and the node then records that
+  its ownership was established without anybody proving anything — which
+  `cctl status` reports from then on, and which rotating the CA does not clear.
+
+- **Four things you can do to a node.**
+
+  *State* — `cctl status`: role, cluster, the booted and staged image with
+  their digests, kernel, k0s version and service, greenboot's verdict, uptime.
+  A field the node could not determine is left out rather than shown as a dash:
+  this is read just before something irreversible.
+
+  *Services and journals* — `cctl services`, `cctl logs` per unit or across all
+  of them, with `--since`, `--follow` and `--unit kernel`. Units come from a
+  fixed list; an API that hands a unit name to `systemctl` can start anything
+  on the machine. Restarting is a shorter list still — `corium-bootstrap` is
+  readable and deliberately not restartable.
+
+  *Upgrades* — `cctl upgrade <nodes...> --image`, one node at a time, stopping
+  at the first that does not come back **on the digest it was sent to**. A node
+  refuses an image its own signing policy would accept unsigned, which is what
+  stops a typo rebasing a Kubernetes node onto a desktop. `cctl rollback` marks
+  the previous image as next to boot and does not reboot.
+
+  *Lifecycle* — `cctl cordon`, `drain`, `reboot`, `shutdown`, `reset`. Cordon
+  and drain work on controllers only: a node acts on itself, and evicting a pod
+  needs credentials only a controller holds. `cctl reset` requires the node's
+  own name, leaves the cluster, erases the bootstrap, *then* forgets its owner,
+  then reboots — in that order, because the other way round could leave a
+  cluster member nobody owns.
+
+- **`cctl kubeconfig <node>`** hands over the administrator credentials k0s
+  minted, pointed at the cluster's virtual IP where there is one — a kubeconfig
+  aimed at one particular controller stops working the first time that
+  controller does. `--server` overrides it. Standard output by default, and
+  deliberately not `~/.kube/config`.
+
+- **`cctl ca rotate`, and a way back when the key is gone.** Rotation hands a
+  set of nodes to a different operator CA; the node refuses a CA the caller
+  cannot show a signed certificate for, because rotating to one you cannot
+  issue under leaves a machine that will only ever accept somebody else.
+  `corium-agent api set-ca --file`, run as root on the node, is the console
+  path when the key is lost — the node keeps its cluster membership, which is
+  what makes it a recovery rather than a reset.
+
 - **A guide for installing Cilium**, [docs/cilium.md](docs/cilium.md). Corium
   already supported it — `network.cni: custom` plus an `addons:` entry — but
   nothing said how the two fit together, or that the chart installs from the
@@ -23,296 +99,10 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   example it is built on, `examples/custom-cni.yaml`, moves to Cilium 1.20.2
   and drops a `cni.binPath` override that only restated the chart's defaults.
 
-- **An `api:` block, ahead of the daemon it configures.** The schema and its
-  validation land first so the rest can be built against something settled.
-  `api.enabled` turns the management API on; `api.operatorCA` and
-  `api.operatorCAFrom` name the CA whose client certificates a node will
-  accept; `enabled: true` with neither asks for maintenance mode, where a node
-  waits to be claimed from the console rather than joining a cluster unclaimed.
-  The value is a CA *certificate* and never a key, which is what makes writing
-  it in clear in cloud-init safe. See [ADR 4](docs/adr/0004-management-api.md).
-
-  `corium-apid` itself is not written yet, and the block is honest about it
-  rather than silently inert: a node that names an operator CA bootstraps as
-  before and says in the journal that nothing is serving the API, and a node
-  asking for maintenance mode **refuses to bootstrap**, because there is
-  nothing to enrol against and joining a cluster unclaimed is the one outcome
-  the design rules out. Nodes with no `api:` block are unaffected.
-
-- **The enrolment core behind maintenance mode**, still with no daemon in front
-  of it: the pairing code, the attempt limit, and the state a node keeps about
-  who owns it under `/var/lib/corium/api/`. A node is claimed once and stays
-  claimed across reboots, five wrong codes close enrolment until the next boot,
-  and the certificate a node serves with is minted on the node, so that no
-  private key is ever carried in a configuration. It adds no dependency: the
-  API will speak JSON over HTTP and mutual TLS rather than gRPC, so that an OS
-  image does not grow five modules behind a listener running as root.
-
-- **`corium-apid`, the management API daemon, and its systemd unit.** On a node
-  nobody has claimed it serves one unauthenticated route — enrolment — and
-  prints a pairing code and its certificate fingerprint on the console; the
-  node joins no cluster until somebody uses them. Once claimed it restarts and
-  requires a client certificate signed by the operator CA, with the role taken
-  from the certificate's organisation. A node with no `api:` block runs nothing
-  and binds no port.
-
-  Maintenance mode is now real rather than a refusal: `corium-bootstrap.service`
-  waits for enrolment instead of failing, with no timeout, because what it is
-  waiting for is a person walking to a console.
-
-  There is no `cctl` yet, so enrolment is done with `curl` — the API speaks
-  JSON over HTTP, which is half the reason it was chosen. A claimed node serves
-  `GET /v1/health` and nothing else; the four management surfaces come next.
-
-- **`cctl`, the operator's client.** `cctl pki init` creates the operator CA —
-  and prints its certificate ready to paste into cloud-init — while
-  `cctl pki issue --role admin` signs a client certificate for you. The CA's
-  private key never leaves your machine, which is the property the whole scheme
-  rests on. `cctl enroll <node> --code <code>` claims a node in maintenance
-  mode and remembers its fingerprint, so later calls need no flags; omitting
-  `--fingerprint` shows what answered and asks you to confirm it against the
-  console, and refuses when there is nobody there to ask.
-
-  It is a workstation tool and is not shipped in the OS image. Build it with
-  `mise run build`.
-
-- **`cctl status`, and roles that actually gate something.** The first of the
-  four management surfaces: what a node is, read-only — role, cluster, the
-  booted and staged image with their digests, kernel, k0s version and service
-  state, greenboot's verdict, uptime. The digest is the field an incident turns
-  on, since a tag says what was asked for and a digest says what booted.
-
-  A field the node could not determine is left out rather than shown as a dash
-  or a zero: this is read just before doing something irreversible, and a blank
-  is honest where a placeholder invites a guess. A machine provisioned without
-  a Corium block says so plainly instead of looking broken, and a report
-  survives every tool on the node being missing — which is when it is most
-  worth having.
-
-  Every route now names the lowest role that may call it, so a route cannot be
-  added without answering the question. A certificate signed by the operator CA
-  but carrying no recognised role is authenticated and not authorised: it gets
-  a 403 saying how to reissue it, because signing a certificate without naming
-  a role is not a way to grant every role.
-
-  `corium-agent` now records what a node was bootstrapped as in
-  `/var/lib/corium/node.json`. The API reports from that rather than re-reading
-  the configuration, which after an edit describes an intention rather than a
-  machine.
-
-- **Services and journals**, the second management surface. `cctl services`
-  lists what the API knows about and what each unit is for; `cctl logs` reads a
-  journal per unit or across all of them, with `--since`, `--follow` and
-  `--unit kernel` for the kernel's own messages; `cctl restart --unit k0sworker`
-  cycles k0s.
-
-  Units come from a fixed list rather than being passed through. An API that
-  takes a unit name and hands it to `systemctl` can start anything on the
-  machine, which is a remote shell with extra steps. Restarting is a shorter
-  list still: `corium-bootstrap.service` is readable and deliberately not
-  restartable, because re-running it on a node that has already joined a
-  cluster destroys data — no certificate can ask for that.
-
-  Reads need `corium:readonly` and restarts `corium:operator`. Worth knowing
-  before handing out the former: journals are not sanitised, so whatever any
-  software on the node has logged is readable with it.
-
-  Logs stream as newline-delimited JSON, flushed per record, so `--follow`
-  shows a line before the request ends. A followed stream is bounded at an
-  hour, and a request is capped at 10000 records.
-
-- **Upgrades**, the third surface and the one [#2](https://github.com/Corium-OS/Corium/issues/2)
-  spends most of its length on. `cctl upgrade <nodes...> --image ghcr.io/...`
-  moves a fleet one node at a time, and **stops at the first node that does not
-  come back** — a rollout that carries on past a broken machine turns one
-  outage into a cluster-wide one. It checks each node is fit to lose before
-  taking it down, and afterwards that it came back *on the digest it was sent
-  to*, not merely that it answers.
-
-  A node refuses an image its own signing policy would accept unsigned, which
-  is what stops a typo rebasing a Kubernetes node onto a desktop image. This
-  replaces the label check [ADR 4](docs/adr/0004-management-api.md) originally
-  promised: a node ships no skopeo, podman or jq and bootc reports no labels,
-  so nothing on the machine can read them — and a label saying "Corium" can be
-  written by anybody, so it would have caught a typo and nothing else. The
-  policy catches the typo and the attacker. Running derived images means adding
-  your repository and key to `/etc/containers/policy.json`, which is also how
-  you say you trust them.
-
-  Applying goes through `corium-upgrade-apply.service` rather than
-  reimplementing it, so the drain that cancels rather than forces, and the
-  staged deployment that has to be unlocked first, keep working the way they
-  already did. `cctl rollback` marks the previous image as next to boot and
-  deliberately does not reboot.
-
-- **A fingerprint passed on the command line is remembered.** A node claimed
-  from cloud-init has never been spoken to by `cctl`, so it had no remembered
-  fingerprint and every call needed `--fingerprint` — including `cctl upgrade`,
-  which takes a list of nodes and where one such flag means nothing.
-
-- **`api.insecure`, an opt-in that gives the pairing code up.** The first
-  client to reach an unclaimed node claims it, with nothing to prove — Talos's
-  model, which [ADR 4](docs/adr/0004-management-api.md) argues against and now
-  offers anyway, with the argument left standing as the reason it is not the
-  default. It is for a bench, a lab, a provisioning network you control end to
-  end, or a PXE fleet where one console visit per machine is not going to
-  happen.
-
-  What bounds it is the rule the design already enforces: an unclaimed node is
-  in no cluster, so winning the race gets a bare machine, and enrolment is
-  still one-way, so the window shuts the moment anybody uses it.
-
-  The node is loud about it, on the console and in the journal. It also
-  **records that its claim was unauthenticated** and reports it through
-  `cctl status` from then on — a node holds the same pinned CA whichever way it
-  was claimed, so without that record there is no way to tell afterwards which
-  of a fleet's machines were taken by whoever got there first. Setting the key
-  anywhere it would do nothing is a validation error rather than being ignored.
-
-  `cctl enroll` no longer insists on `--code`, which is what the console banner
-  of such a node tells you to run.
-
-- **Node lifecycle**, the last of the four surfaces. `cctl cordon`, `cctl drain`
-  and `cctl cordon --undo` at `corium:operator`; `cctl reboot`,
-  `cctl shutdown` and `cctl reset` at `corium:admin`, because nothing in this
-  API can power a machine back on.
-
-  A drain that cannot finish is not forced — a pod disruption budget refusing
-  an eviction is the system working — and the node is left cordoned rather than
-  quietly returned to service. The flags match `corium-upgrade-apply` so the
-  two paths behave identically, and the cordon marker is shared so a node
-  cordoned through the API still uncordons itself after an upgrade reboot. Only
-  a controller can cordon or drain itself; a worker says so rather than failing
-  in a way that reads like a broken cluster.
-
-  **`cctl reset` requires the node's own name**, checked by `cctl` against what
-  the node calls itself and again by the node: an address in a shell's history
-  is a poor guard against this landing on the wrong machine. The order is
-  fixed — drain, leave the cluster, erase the bootstrap, *then* forget the
-  owner, then reboot — because doing it the other way round could leave a
-  cluster member nobody owns, which is the one state the design exists to make
-  unreachable. The serving identity is erased too, so a machine handed on is
-  not one its previous owner's tooling still accepts.
-
-- **`cctl ca rotate`, and a way back when the key is gone.** Rotation hands a
-  set of nodes to a different operator CA over the authenticated API. `cctl`
-  mints a certificate under the new CA and sends it as proof; the node verifies
-  it chains to the CA it is being asked to obey and refuses otherwise, because
-  rotating to a CA you cannot issue certificates under produces a node that
-  will only ever accept somebody else — and the way back is its console.
-  Rotation leaves cluster membership and node identity alone: only who may
-  manage it changes.
-
-  `corium-agent api set-ca --file` is that way back. It runs as root on the
-  node, opens no port and accepts no request, and the node keeps its cluster
-  membership — which is what makes it a recovery rather than a reset. It
-  refuses a node nobody has claimed, since installing a CA there would be
-  enrolment by another name.
-
-  Neither path launders a node taken through `api.insecure`: the record that
-  its ownership was established without anybody proving anything survives
-  rotation, and `cctl status` goes on saying so.
-
-- **The daemon's SELinux position is documented rather than changed.** It runs
-  as `unconfined_service_t`, which is where `corium-agent` has always been.
-
-  A types-only policy module was written and then withdrawn: `semodule` writes
-  the whole policy store into `/var/lib/selinux`, and `/var` on a bootc image
-  is seeded at install and never updated, so the module would never reach an
-  upgraded node — and `bootc container lint` refused the image outright. The
-  build failed on a real Debian host while CI passed, which is its own finding.
-
-  The reference now lists everything the daemon touches, and the procedure for
-  building a confined domain from real denials on a machine rather than from
-  guesses. That is the input the work needs; the rest wants a node, not a desk.
-
-### Fixed
-
-- **`tls: certificate required` now says what it means.** Go sends no client
-  certificate at all when the one it holds was signed by a CA the server did
-  not name as acceptable, so a node whose CA has been rotated answers as though
-  the client sent nothing — and the raw alert sends people looking for a
-  missing certificate rather than a rotated CA. `cctl` knows it offered one,
-  and says so.
-
-- **`cctl drain` said which nodes it works on, and not what to do about it.**
-  Cordon and drain work on controllers only — a node acts on itself, and
-  evicting a pod needs cluster admin credentials that only a controller holds
-  locally. Since most of a cluster is workers, that is the common answer rather
-  than the rare one, and the docs stated it as a detail rather than a
-  limitation.
-
-  The refusal now names the way round: draining a worker is a cluster
-  operation, done with `kubectl` against the kubeconfig `cctl kubeconfig`
-  fetches. The CLI page leads with the limitation and shows the two commands.
-  `cctl upgrade` is unaffected and still works on a worker: the upgrade path
-  drains where it can and reboots undrained where it cannot.
-
-- **Staging an upgrade never worked on a real node.** `bootc switch` takes
-  `--apply` as a bare boolean, and the explicit `--apply=false` this passed was
-  rejected outright — every upgrade failed with "unexpected value 'false' for
-  '--apply'", while every test that stubbed bootc out passed. Staging is now
-  the absence of the flag, and the test asserts it never appears.
-
-- **The daemon's own hardening broke two surfaces.** `ProtectSystem=strict`
-  mounts the whole hierarchy read-only including `/run`, and bootc writes
-  `/run/bootc/storage` while staging; it is gone, because a daemon that rebases
-  the operating system cannot have the operating system read-only.
-  `RestrictAddressFamilies` did not list `AF_NETLINK`, which `k0s reset` needs
-  to clean up a node's network links — without it a reset failed after k0s had
-  already stopped. Everything else in the unit was verified on a real node to
-  survive a `bootc switch` and a `k0s reset`.
-
-- **`cctl rollback` on a node with nowhere to go back to reported a server
-  error.** A node that has only ever booted one image is in that state on
-  purpose; it is a 409 now.
-
-- **The console printed a command nobody could run.** A wildcard listener
-  reports itself as `[::]:7443`, so the banner told an operator to run
-  `cctl enroll [::]:7443`. It now prints an address of the node's own.
-
-### Documentation
-
-- **A page for `cctl`** — [docs/cli.md](docs/cli.md): the three things it needs
-  to work, every command grouped by what an operator is trying to do, the roles,
-  the files it keeps in `~/.corium`, what it deliberately will not do, and a
-  table for reading a refusal by status code.
-
-  The configuration reference gives its `api:` section back to the schema in
-  exchange: it had grown to 438 lines, most of them CLI walkthroughs on a page
-  whose job is to document the `corium:` block.
-
-### Added
-
-- **`cctl kubeconfig <node>`** hands over the administrator credentials k0s
-  minted, pointed at an address that will keep working. That is the cluster's
-  virtual IP on an HA control plane — a kubeconfig aimed at one particular
-  controller stops working the first time that controller does — and otherwise
-  the address the node was reached on. `--server` overrides it, for a load
-  balancer, a name rather than an address, or a port that is not `6443`.
-
-  It is `corium:admin`, and it outranks every other call: the rest act on one
-  machine, and this hands over a cluster to somebody nothing in the API can
-  take it back from. The node records it in its journal. Only a controller can
-  answer; a worker holds kubelet credentials, which are not an administrator's.
-
-  Standard output by default, and deliberately not `~/.kube/config`: merging
-  into existing contexts is a decision with no undo. `--output` writes `0600`
-  and refuses to replace a file without `--force`.
-
-  [ADR 4](docs/adr/0004-management-api.md) said the API would have nothing to
-  do with Kubernetes. That was too broad and is amended: this is the one
-  Kubernetes-adjacent thing with no other answer, since the alternative is
-  SSHing into a controller to `cat` a file — the exact shape of problem the API
-  exists to remove.
-
-  `corium-agent` now records the cluster's endpoint alongside the role when it
-  bootstraps, so the node can answer this without re-reading a configuration
-  that may have been edited since.
-
-- **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
-  secret source was reported as `join.tokenFrom` whichever key it was reached
-  through, which sent you to a line that was not the one at fault.
+- **A page for `cctl`**, [docs/cli.md](docs/cli.md): the three things it needs
+  to work, every command grouped by what an operator is trying to do, the
+  roles, the files it keeps in `~/.corium`, what it deliberately will not do,
+  and a table for reading a refusal by status code.
 
 ### Changed
 
@@ -324,9 +114,11 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   goimports. `mise tasks` lists what you can run. Nothing about the published
   images or artefacts changes, and you still need a Linux host with podman to
   build a disk.
+
 - **`mise run k0s-lock vX.Y.Z+k0s.N` repins the Kubernetes version.**
   `build/k0s.lock` has always documented a command to refresh it; that command
   now exists.
+
 - **The VM console is quieter at boot.** `quiet loglevel=3`, shipped as a bootc
   kernel argument under `/usr/lib/bootc/kargs.d` and so reapplied on every
   upgrade, drops routine kernel chatter — device probes, netfilter, the bridge
@@ -334,6 +126,12 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   is written straight to `/dev/console` by `corium-apid`, not through the kernel
   log, so lowering the printk level cannot hide it. cloud-init's output is left
   on the console on purpose, so a first boot that goes wrong still says so.
+
+### Fixed
+
+- **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
+  secret source was reported as `join.tokenFrom` whichever key it was reached
+  through, which sent you to a line that was not the one at fault.
 
 ## [0.1.0] - 2026-09-17
 
