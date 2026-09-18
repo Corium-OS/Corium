@@ -101,7 +101,7 @@ func (a *authority) issue(t *testing.T, role Role) tls.Certificate {
 func start(t *testing.T, store *Store) (*Server, string) {
 	t.Helper()
 
-	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode)
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -490,7 +490,7 @@ func TestNodeReportsWhatTheInspectorFound(t *testing.T) {
 		t.Fatalf("Adopt() error = %v", err)
 	}
 
-	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode)
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

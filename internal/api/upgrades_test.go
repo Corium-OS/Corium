@@ -22,7 +22,7 @@ func upgradeNode(t *testing.T, policy string, run upgrade.Runner) (*authority, s
 		t.Fatalf("Adopt() error = %v", err)
 	}
 
-	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode)
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

@@ -42,6 +42,19 @@ RestartPreventExitStatus=78
 StandardOutput=journal
 StandardError=journal
 
+# /run/corium holds the pairing code and the count of wrong ones, which must
+# last exactly one boot: the code an operator is reading off the screen has to
+# survive this daemon restarting, and nothing about it may survive the reboot.
+#
+# `preserve=restart` is the whole point of naming it here. The default clears
+# the directory every time the unit stops, which includes the restart the
+# daemon performs on itself after an enrolment, and the restart systemd
+# performs after a crash -- either would mint a second pairing code while the
+# first is still on the screen, and hand a guesser their five attempts back.
+RuntimeDirectory=corium
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
+
 # The API reboots the machine, drives bootc and reads the journal, so it runs
 # privileged and there is no version of it that does not. That is the argument
 # for the surface being as small as it is, and the reason there is no exec

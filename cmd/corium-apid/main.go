@@ -138,7 +138,7 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 		}
 	}
 
-	server, err := api.NewServer(store, listen, how)
+	server, err := api.NewServer(store, listen, how, api.DefaultSessionDir)
 	if err != nil {
 		return err
 	}

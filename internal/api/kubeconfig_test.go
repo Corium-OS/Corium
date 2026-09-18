@@ -32,7 +32,7 @@ func kubeconfigNode(t *testing.T, state string) (*authority, string, *Store) {
 		t.Fatalf("Adopt() error = %v", err)
 	}
 
-	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode)
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}

@@ -36,10 +36,11 @@ const codeLength = 8
 
 // newCode mints a pairing code.
 //
-// It is generated per boot and never written to disk. Persisting it would make
-// it recoverable from a disk image of an unclaimed node, and there is nothing
-// to gain: a node that reboots before anybody claims it simply offers a new
-// one.
+// One is minted per boot, kept in /run for as long as that boot lasts, and
+// never written to a disk -- see DefaultSessionDir. Persisting it properly
+// would make it recoverable from a disk image of an unclaimed node, and there
+// is nothing to gain: a node that reboots before anybody claims it simply
+// offers a new one.
 func newCode() (string, error) {
 	raw := make([]byte, codeLength)
 	if _, err := rand.Read(raw); err != nil {

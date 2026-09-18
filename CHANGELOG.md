@@ -148,6 +148,16 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **The pairing code and the attempt limit are now per boot, as documented.**
+  Both lived in the daemon's memory, so restarting `corium-apid` — which
+  systemd does after a crash — minted a second code while the first was still
+  printed on the screen above it, leaving an operator with two codes and no way
+  to tell which one worked. Typing the wrong one costs an attempt, and there
+  are five. The count reset too, so the limit that makes a forty-bit code
+  sufficient promised five guesses per boot and delivered five per process.
+  Both now live in `/run`, which survives a restart, is emptied by the reboot,
+  and never reaches a disk.
+
 - **A node bootstrapped before 0.2.0 reported itself as never bootstrapped.**
   The role and cluster are read from `/var/lib/corium/node.json`, which only
   0.2.0 writes — so a node upgraded from 0.1.0 said it ran no Kubernetes,

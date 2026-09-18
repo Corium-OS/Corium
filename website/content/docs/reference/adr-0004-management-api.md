@@ -286,6 +286,15 @@ single-use, and five failed attempts end maintenance mode until the node is
 rebooted — an operator who has fat-fingered a code five times will not mind
 rebooting, and a script working through the keyspace gets one shot per boot.
 
+Both the code and the count of wrong ones are kept in `/run`, which is what
+makes "per boot" mean what it says. Holding them in the daemon's memory would
+make them per *process*: systemd brings this daemon back after a crash, and a
+restart would mint a second code while the first is still printed on the screen
+above it, and hand a guesser their five attempts back. `/run` is a tmpfs, so
+the state survives the restart, the reboot empties it, and none of it is ever
+written to a disk — which matters, because the disk image of an unclaimed node
+is exactly the one that gets passed around.
+
 #### Why a pairing code rather than an open port
 
 Talos is the obvious prior art and does not do this: its maintenance API on

@@ -189,7 +189,7 @@ func TestIdentityIsMintedOnceAndReused(t *testing.T) {
 func TestEnrollHappyPath(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -223,7 +223,7 @@ func TestEnrollAcceptsWhatSomebodyActuallyTypes(t *testing.T) {
 	} {
 		store := newTestStore(t)
 
-		enroller, err := NewEnroller(store, RequirePairingCode)
+		enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 		if err != nil {
 			t.Fatalf("NewEnroller() error = %v", err)
 		}
@@ -237,7 +237,7 @@ func TestEnrollAcceptsWhatSomebodyActuallyTypes(t *testing.T) {
 func TestEnrollLocksOutAfterFiveWrongCodes(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -274,7 +274,7 @@ func TestABadCertificateDoesNotCostAnAttempt(t *testing.T) {
 	// not spend the attempts they will need to correct it.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestEnrolmentIsStickyAcrossRestarts(t *testing.T) {
 	// power-cycling a machine would be enough to take it.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -305,7 +305,7 @@ func TestEnrolmentIsStickyAcrossRestarts(t *testing.T) {
 	}
 
 	// The next boot, against the same /var.
-	if _, err := NewEnroller(NewStore(store.dir), RequirePairingCode); !errors.Is(err, ErrAlreadyEnrolled) {
+	if _, err := NewEnroller(NewStore(store.dir), RequirePairingCode, SessionDir(t.TempDir())); !errors.Is(err, ErrAlreadyEnrolled) {
 		t.Fatalf("NewEnroller() on a claimed node = %v, want %v", err, ErrAlreadyEnrolled)
 	}
 }
@@ -315,7 +315,7 @@ func TestConcurrentGuessesShareTheAttemptLimit(t *testing.T) {
 	// codes in parallel rather than one at a time.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -386,7 +386,7 @@ func TestPairingCodeShape(t *testing.T) {
 func TestBannerCarriesBothHalvesOfTheTrust(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, RequirePairingCode)
+	enroller, err := NewEnroller(store, RequirePairingCode, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -412,7 +412,7 @@ func TestBannerCarriesBothHalvesOfTheTrust(t *testing.T) {
 func TestOpenEnrolmentAsksForNothing(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, OpenToAnyone)
+	enroller, err := NewEnroller(store, OpenToAnyone, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -437,7 +437,7 @@ func TestOpenEnrolmentIsStillOnlyOnce(t *testing.T) {
 	// still wins for good, which is the whole risk being accepted.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, OpenToAnyone)
+	enroller, err := NewEnroller(store, OpenToAnyone, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -451,7 +451,7 @@ func TestOpenEnrolmentIsStillOnlyOnce(t *testing.T) {
 	}
 
 	// And a reboot does not reopen it.
-	if _, err := NewEnroller(NewStore(store.dir), OpenToAnyone); !errors.Is(err, ErrAlreadyEnrolled) {
+	if _, err := NewEnroller(NewStore(store.dir), OpenToAnyone, SessionDir(t.TempDir())); !errors.Is(err, ErrAlreadyEnrolled) {
 		t.Errorf("NewEnroller() after a claim = %v, want %v", err, ErrAlreadyEnrolled)
 	}
 }
@@ -469,7 +469,7 @@ func TestTheNodeRecordsHowItWasClaimed(t *testing.T) {
 	} {
 		store := newTestStore(t)
 
-		enroller, err := NewEnroller(store, tc.how)
+		enroller, err := NewEnroller(store, tc.how, SessionDir(t.TempDir()))
 		if err != nil {
 			t.Fatalf("NewEnroller() error = %v", err)
 		}
@@ -496,7 +496,7 @@ func TestTheNodeRecordsHowItWasClaimed(t *testing.T) {
 func TestBannerSaysWhenTheNodeIsOpen(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store, OpenToAnyone)
+	enroller, err := NewEnroller(store, OpenToAnyone, SessionDir(t.TempDir()))
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}

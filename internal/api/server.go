@@ -119,7 +119,7 @@ func (s *Server) Kubeconfig(manager *kubeconfig.Manager) { s.kubeconfig = manage
 // parameter rather than a setter because the answer decides what the listener
 // is, and a server that could be opened after it started would be a server
 // nobody could reason about.
-func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
+func NewServer(store *Store, address string, how Enrolment, session SessionDir) (*Server, error) {
 	server := &Server{
 		store:      store,
 		address:    address,
@@ -138,7 +138,7 @@ func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
 	}
 
 	if !enrolled {
-		if server.enroller, err = NewEnroller(store, how); err != nil {
+		if server.enroller, err = NewEnroller(store, how, session); err != nil {
 			return nil, err
 		}
 	}

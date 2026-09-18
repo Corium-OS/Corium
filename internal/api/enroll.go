@@ -51,8 +51,9 @@ const (
 // the attempt limit is that it holds when somebody is trying codes in
 // parallel.
 type Enroller struct {
-	store *Store
-	how   Enrolment
+	store   *Store
+	how     Enrolment
+	session session
 
 	mu           sync.Mutex
 	code         string
@@ -60,14 +61,18 @@ type Enroller struct {
 	claimed      bool
 }
 
-// NewEnroller mints a pairing code and prepares to accept exactly one
-// successful enrolment.
+// NewEnroller resumes this boot's pairing code, or mints one, and prepares to
+// accept exactly one successful enrolment.
 //
 // It refuses to exist on a node that is already enrolled. That refusal is the
 // stickiness the design depends on: a claimed node must not offer itself again
 // after a reboot, or the pairing code would be guarding a door that reopens on
 // its own.
-func NewEnroller(store *Store, how Enrolment) (*Enroller, error) {
+//
+// Resuming rather than minting is what makes the code and the attempt limit
+// per boot rather than per process; see DefaultSessionDir for why that
+// distinction is not academic.
+func NewEnroller(store *Store, how Enrolment, dir SessionDir) (*Enroller, error) {
 	enrolled, err := store.Enrolled()
 	if err != nil {
 		return nil, err
@@ -77,12 +82,36 @@ func NewEnroller(store *Store, how Enrolment) (*Enroller, error) {
 		return nil, ErrAlreadyEnrolled
 	}
 
-	code, err := newCode()
-	if err != nil {
+	enroller := &Enroller{
+		store:        store,
+		how:          how,
+		session:      session{dir: dir},
+		attemptsLeft: maxAttempts,
+	}
+
+	// A node that asks nothing of a claimant has no code to remember and no
+	// attempt that can be wrong, so there is nothing to keep across a restart.
+	if how == OpenToAnyone {
+		return enroller, nil
+	}
+
+	if state, resumed := enroller.session.load(); resumed {
+		enroller.code = state.Code
+		enroller.attemptsLeft = state.AttemptsLeft
+
+		return enroller, nil
+	}
+
+	if enroller.code, err = newCode(); err != nil {
 		return nil, fmt.Errorf("minting pairing code: %w", err)
 	}
 
-	return &Enroller{store: store, how: how, code: code, attemptsLeft: maxAttempts}, nil
+	enroller.session.save(sessionState{
+		Code:         enroller.code,
+		AttemptsLeft: enroller.attemptsLeft,
+	})
+
+	return enroller, nil
 }
 
 // OpenToAnyone reports whether this node asks nothing of a claimant.
@@ -139,6 +168,11 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 	} else if !codeMatches(e.code, typedCode) {
 		e.attemptsLeft--
 
+		// Recorded before the refusal is returned, so that a daemon which dies
+		// between the two comes back having counted the attempt. The other
+		// order would hand a guesser a way to get their attempts back.
+		e.session.save(sessionState{Code: e.code, AttemptsLeft: e.attemptsLeft})
+
 		// Logged without the code that was tried. A journal is read by more
 		// people than the operator, and a failed attempt is often a correct
 		// code sent to the wrong node.
@@ -163,6 +197,11 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 	}
 
 	e.claimed = true
+
+	// The code has done its one job. Removing it here rather than waiting for
+	// the reboot keeps the window in which a claimed node still has a usable
+	// pairing code on its filesystem down to nothing.
+	e.session.clear()
 
 	if err := e.store.RecordClaim(e.method()); err != nil {
 		return err
