@@ -67,6 +67,7 @@ the maintainers — do not quietly work around them.
 | 9 | **Every abstraction has an escape hatch** | `corium:` covers the common path; raw `write_files`, `runcmd`, and a verbatim k0s config patch must always remain available |
 | 10 | **Software RAID covers spare disks, not the root filesystem** | A root array is an install-time decision the `corium:` block is read too late to make, and the bootc path for one is broken upstream. See [ADR 3](docs/adr/0003-software-raid-scope.md) |
 | 11 | **The management API is node-local, off by default, and a node it has not claimed is in no cluster** | One daemon per node answering for that node keeps the fleet-management non-goal intact. Off by default so no node in service grows a listening port by being upgraded. Holding the bootstrap until enrolment removes the state where a machine is both valuable and unclaimed, rather than defending it. See [ADR 4](docs/adr/0004-management-api.md) |
+| 12 | **SSH keys are managed over the API for a user that already exists; the API never owns the account** | A node that needs day-two shell access should not need a reset to get one, but cloud-init stays the only authority over accounts (decision 7). The API writes key material into its own file and leaves the user's own `~/.ssh`, and everything about the account — password, shell, sudo — to cloud-init. See [ADR 5](docs/adr/0005-ssh-access-over-the-api.md) |
 
 ---
 
@@ -85,7 +86,9 @@ the maintainers — do not quietly work around them.
 │   │   │   ├── lib/systemd/system/    # units (NEVER /etc/systemd/system)
 │   │   │   ├── lib/sysctl.d/          # kernel settings for Kubernetes
 │   │   │   └── lib/modules-load.d/
-│   │   └── etc/cloud/cloud.cfg.d/     # cloud-init defaults (only /etc exception)
+│   │   └── etc/                       # the two things that can only live here:
+│   │       ├── cloud/cloud.cfg.d/     # cloud-init defaults
+│   │       └── ssh/sshd_config.d/     # sshd reads drop-ins from nowhere else
 │   ├── k0s.lock               # pinned k0s version + checksums (trust anchor)
 │   └── scripts/               # build-time RUN scripts, one concern each
 ├── cmd/
