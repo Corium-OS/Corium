@@ -119,8 +119,8 @@ spelling forever; that promise is expensive, so it is made sparingly.
 
 ### Management API
 
-Off unless asked for, and covered by
-[ADR 4](adr/0004-management-api.md).
+Off unless asked for. The decision is [ADR 4](adr/0004-management-api.md); the
+commands are [cctl](cli.md).
 
 | Feature | Field | Notes |
 |---|---|---|

@@ -242,6 +242,17 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   reports itself as `[::]:7443`, so the banner told an operator to run
   `cctl enroll [::]:7443`. It now prints an address of the node's own.
 
+### Documentation
+
+- **A page for `cctl`** — [docs/cli.md](docs/cli.md): the three things it needs
+  to work, every command grouped by what an operator is trying to do, the roles,
+  the files it keeps in `~/.corium`, what it deliberately will not do, and a
+  table for reading a refusal by status code.
+
+  The configuration reference gives its `api:` section back to the schema in
+  exchange: it had grown to 438 lines, most of them CLI walkthroughs on a page
+  whose job is to document the `corium:` block.
+
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
   secret source was reported as `join.tokenFrom` whichever key it was reached
   through, which sent you to a line that was not the one at fault.

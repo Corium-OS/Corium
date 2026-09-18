@@ -52,6 +52,9 @@ PAGES = [
     ("reference.md", "reference", "configuration", "Configuration", 210,
      "Every field of the corium: schema, where the configuration comes from, "
      "and what Corium does with it."),
+    ("cli.md", "reference", "cli", "cctl", 215,
+     "Every cctl command, the three things it needs to work, what each role "
+     "reaches, and how to read a refusal."),
     ("install/proxmox.md", "install", "proxmox", "Proxmox", 301,
      "A single node on a Proxmox host, from the published qcow2 to a cluster "
      "that schedules work, with the commands and the output from a real run."),

@@ -453,8 +453,11 @@ The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
 > **Implemented, unreleased.** All four management surfaces are in place, along
-> with CA rotation and the local recovery path. The daemon runs unconfined
-> under SELinux — see below — and `cctl` has no release artefact yet.
+> with CA rotation and the local recovery path. The daemon runs unconfined under
+> SELinux — see below — and `cctl` has no release artefact yet.
+>
+> This section is the `api:` schema. Using it — claiming a node, reading its
+> journals, upgrading it, handing it on — is [cctl](cli.md).
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -489,287 +492,84 @@ Writing `enabled: false` alongside either key is an error rather than a
 precedence rule. The configuration is saying two contradictory things, and
 guessing which one you meant would leave the other silently doing nothing.
 
-#### Maintenance mode
+#### The three ways a node is claimed
 
-`enabled: true` with no CA. The node reads its configuration, validates it, and
-then **stops before bootstrapping k0s**, printing a single-use pairing code and
-its certificate fingerprint to the console, the serial port and the journal:
+| `api:` | Mode | What happens |
+|---|---|---|
+| absent, or `enabled: false` | off | No daemon, no port. The node bootstraps as it always did |
+| `operatorCA` | A | The CA is named inline, in clear. Unattended, and nothing secret is in the metadata: a certificate is public |
+| `operatorCAFrom` | B | The same, resolved at first boot from a `SecretSource` (§3.14) |
+| `enabled: true`, neither key | C | Maintenance mode: the node holds its bootstrap and waits to be claimed |
+
+Modes A and B claim the node at boot, so it joins its cluster unattended. Mode C
+does not: **a node waiting to be claimed is in no cluster.** It validates its
+configuration, stops before bootstrapping k0s, and prints a single-use pairing
+code and its certificate fingerprint on the console, the serial port and the
+journal.
+
+That ordering is the load-bearing part rather than a detail. Bootstrapping first
+would produce a machine that is running workloads and holding cluster
+credentials while still obeying whoever first reaches an unauthenticated port —
+valuable and unclaimed at once. The rule runs the other way too, which is what
+gives `cctl reset` its meaning: a node cannot return to maintenance mode while
+it is a cluster member, so a reset takes it out of the cluster on the way.
+
+Enrolment carries no configuration. It sends a CA certificate and nothing else;
+the node's role and join token still come from cloud-init. This is not
+`apply-config` under another name, and decisions 6 and 7 are untouched.
+
+The cost of mode C is that it is **not zero touch**: three nodes means three
+consoles. If you want unattended provisioning with nothing secret in the
+metadata, use `operatorCA` — the certificate is not a secret.
+
+Claiming a node, and everything afterwards, is [`cctl`](cli.md).
+
+#### `insecure`
+
+`api.insecure: true` drops the pairing code: the first client to reach an
+unclaimed node claims it, with nothing to prove. It applies to maintenance mode
+only, and setting it anywhere it would do nothing — alongside an operator CA,
+or with the API off — is a validation error rather than being ignored.
+
+What bounds the risk is that an unclaimed node is in no cluster, so whoever
+wins the race gets a bare machine, and enrolment is still one-way, so the
+window shuts the moment anybody uses it. What they do get is that machine's
+future: the CA they pin is the CA it will obey.
+
+This is for a bench, a lab, a provisioning network you control end to end, or a
+PXE fleet where one console visit per machine is not going to happen. The node
+is loud about it:
 
 ```
-Corium node is unenrolled and is not in a cluster.
-
-  address       192.168.1.51:7443
-  pairing code  K7QM-93XF
-  fingerprint   SHA256:tQ2f...9c1a
-
-  cctl enroll 192.168.1.51 --code K7QM-93XF
+  !! api.insecure is set: no pairing code is required, so the
+  !! first client to reach this port claims this node for good.
 ```
 
-Enrolment pins the CA and releases the bootstrap, which proceeds from the
-cloud-init configuration the node has been holding all along. It sends a CA
-certificate and nothing else — it is not a way to configure a node.
+And it **records that its claim was unauthenticated**, which `cctl status`
+reports from then on. A node holds the same pinned CA whichever way it was
+claimed, so without that record there would be no way to tell afterwards which
+of a fleet's machines were taken by whoever got there first — and rotating the
+CA later does not clear it.
 
-Getting an operator CA, and a certificate to use it with:
+#### Precedence and validation
 
-```console
-$ cctl pki init
-Created an operator CA in /home/you/.corium
-...
-$ cctl pki issue --role admin
-Signed a client certificate for "you" as corium:admin, valid for 2160h0m0s.
-```
+| Written | Result |
+|---|---|
+| `enabled: false` with either CA key | Validation error: the configuration says two contradictory things |
+| both CA keys | Validation error, matching `token` and `tokenFrom` |
+| `insecure` outside maintenance mode | Validation error: it would silently do nothing |
 
-`pki init` prints the certificate ready to paste into cloud-init, which is all
-mode A needs. The private key beside it never leaves your machine.
+An inline `operatorCA` is checked at validation time: it must be one PEM
+certificate, it must be a CA, and it must not have expired. **A private key
+pasted there is rejected by name**, because it means the key that owns your
+fleet has been written into a document that ends up in instance metadata —
+treat it as compromised.
 
-Then claim the node, using both values from its console:
-
-```console
-$ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
-Claimed 192.168.1.51:7443.
-
-  node fingerprint  SHA256:tQ2f...9c1a
-  operator CA       SHA256:HklllX2CnKCQpdebtG2MO8K+Ft0Hwnfbv4Ly5KdFVDk
-
-The node is restarting to require your client certificate, and its
-bootstrap is released: it will now join the cluster its cloud-init
-configuration describes.
-```
-
-Leaving out `--fingerprint` shows what answered and asks you to confirm it
-against the console. It is refused when there is nobody there to ask: a script
-that confirms whatever answers has checked nothing while appearing to.
-
-Afterwards the fingerprint is remembered, so later calls need no flags:
-
-```console
-$ cctl health 192.168.1.51
-192.168.1.51:7443  ok  (authenticated as corium:admin)
-
-$ cctl status 192.168.1.51
-192.168.1.51:7443
-
-  hostname     worker-01
-  role         controller+worker
-  cluster      prod
-
-  os           Fedora Linux 44 (Cloud Edition)
-  booted       ghcr.io/corium-os/corium:0.1
-  digest       sha256:aaaa1111
-
-  staged       ghcr.io/corium-os/corium:0.2
-  digest       sha256:bbbb2222
-  (the next reboot moves this node to the staged image)
-
-  k0s          v1.31.2+k0s.0
-  service      k0scontroller.service (running)
-  greenboot    passed
-  uptime       35h40m50s
-```
-
-A field it could not determine is left out rather than shown as a dash or a
-zero. This is usually read just before doing something irreversible, and a
-blank is honest where a placeholder invites a guess. `--json` prints the node's
-reply verbatim.
-
-#### Services and journals
-
-```console
-$ cctl services 192.168.1.51
-  corium-apid.service              active/running     this API
-  corium-bootstrap.service         inactive/dead      first-boot configuration; runs once
-  k0sworker.service                active/running     the kubelet and container runtime
-  ...
-
-$ cctl logs 192.168.1.51 --unit k0sworker --since 15m
-21:04:47 info    k0sworker              starting kubelet
-21:04:48 warn    k0sworker              node not ready: waiting for CNI
-
-$ cctl logs 192.168.1.51 --follow
-```
-
-`--unit kernel` reads the kernel's own messages, which are in the journal too.
-Leaving `--unit` out reads every unit the API knows about — what you want when
-you do not yet know where the problem is. `--follow` streams until you stop it,
-for at most an hour.
-
-Units are named from a fixed list, not passed through. An API that takes a unit
-name and hands it to `systemctl` can start anything on the machine, which is a
-remote shell with extra steps.
-
-Restarting is a shorter list still, and needs `corium:operator`:
-
-```console
-$ cctl restart 192.168.1.51 --unit k0sworker
-k0sworker.service is now active/running
-
-$ cctl restart 192.168.1.51 --unit corium-bootstrap
-cctl: 403 Forbidden: corium-bootstrap.service: this unit is not one the API
-will restart (first-boot configuration; runs once)
-```
-
-That second refusal is the point of having two lists. Re-running the bootstrap
-on a node that has already joined a cluster destroys data, and no certificate
-should be able to ask for it.
-
-#### Upgrades
-
-```console
-$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.2
-[1/3] node-1:7443
-        staged sha256:bbbb2222
-        draining and rebooting.......
-        up on sha256:bbbb2222
-[2/3] node-2:7443
-...
-```
-
-One node at a time, and it stops at the first that does not come back — a
-rollout that carries on past a broken machine turns one outage into a
-cluster-wide one. The error says how many were upgraded, because a
-half-upgraded cluster is a decision somebody has to make.
-
-Before each node it checks that the node is fit to lose: bootstrapped, k0s
-running, and the last boot not judged bad by greenboot. After each one it
-checks the node came back **on the digest it was sent to**, not merely that it
-answers.
-
-A node refuses an image its own signing policy would accept unsigned:
-
-```console
-$ cctl upgrade node-1 --image quay.io/fedora-ostree-desktops/silverblue:44
-cctl: 403 Forbidden: the node's signing policy does not require a signature
-for this image: quay.io/fedora-ostree-desktops/silverblue:44
-```
-
-This is the check that stops a typo rebasing a Kubernetes node onto a desktop.
-It is not a label check — anybody can label an image "Corium" — it is the
-policy in `/etc/containers/policy.json`, which the image ships requiring a
-cosign signature for Corium's own repository. Running your own derived images
-means adding your repository and key there, which is also how you say you
-trust them.
-
-`cctl rollback <node>` marks the previous image as the next to boot and
-deliberately does **not** reboot. Rollback exists because somebody is already
-having a bad day; the reboot stays theirs to schedule.
-
-#### Node lifecycle
-
-```console
-$ cctl cordon 192.168.1.51           # no new pods; the existing ones stay
-$ cctl drain 192.168.1.51            # cordons, then evicts
-$ cctl cordon 192.168.1.51 --undo    # back into service
-$ cctl reboot 192.168.1.51
-$ cctl shutdown 192.168.1.51
-```
-
-Cordon and drain need `corium:operator`; reboot, shutdown and reset need
-`corium:admin` — nothing in this API can power a machine back on.
-
-A drain that cannot finish is **not** forced. It usually means a pod disruption
-budget is saying this workload cannot lose a replica right now, which is
-exactly when overriding it is wrong, and the node is left cordoned so you can
-decide. The flags are the same ones `corium-upgrade-apply` uses, so a drain
-through the API and a drain during an upgrade behave identically.
-
-Only a controller can cordon or drain itself. A plain worker holds kubelet
-credentials, which cannot evict pods, and it says so rather than failing in a
-way that reads like a broken cluster.
-
-##### Reset
-
-The one call no other call can undo:
-
-```console
-$ cctl reset 192.168.1.51
-cctl: this erases worker-01 (192.168.1.51:7443): it leaves its cluster, forgets
-its owner and reboots unclaimed. Re-run with --confirm worker-01 to mean it
-
-$ cctl reset 192.168.1.51 --confirm worker-01
-Erasing worker-01...
-worker-01 has left its cluster and forgotten its owner. It is rebooting,
-and will come back unclaimed -- with a new fingerprint, so the one
-remembered here no longer matches.
-```
-
-The node's own name has to be sent back to it, because an address in a shell's
-history is a poor guard against this landing on the wrong machine. It is
-checked twice: by `cctl` against what the node calls itself, and by the node.
-
-The order is fixed and is the point. Drain, best effort — a node whose cluster
-has already gone is exactly the node somebody wants to reset. Then `k0s reset`,
-which takes it out of the cluster and wipes `/var/lib/k0s`. Then the bootstrap
-marker. **Only then** does the node forget its owner, and last of all it
-reboots. Doing it the other way round could leave a cluster member nobody owns,
-which is the one state this design exists to make unreachable.
-
-The serving identity goes too, not just the pinned CA: a machine handed on with
-the certificate its previous owner pinned is one that owner's tooling would
-still accept without a word.
-
-What the node comes back as depends on its configuration. One with
-`api.operatorCA` re-claims itself and re-bootstraps — a genuine reprovision.
-One in maintenance mode comes back unclaimed, with a new pairing code.
-
-It also comes back on whatever image was **staged**, if one was. Reset reboots,
-and a reboot takes the staged deployment — so a node reset with an upgrade
-waiting comes up on the new image rather than the one it was running. Check
-`cctl status` before resetting if that matters.
-
-#### Changing who owns a node
-
-Make the new CA in a directory of its own, then hand the nodes over:
-
-```console
-$ cctl pki init --dir ~/.corium-2027 --name "corium operators 2027"
-$ cctl ca rotate node-1 node-2 node-3 --dir ~/.corium --to ~/.corium-2027
-node-1:7443 now obeys the CA in /home/you/.corium-2027
-...
-
-Each node is restarting to pick the new CA up. From now on use
-  cctl <command> --dir /home/you/.corium-2027
-and check one before you put the old directory away:
-  cctl health node-1:7443 --dir /home/you/.corium-2027
-```
-
-`cctl` mints a certificate under the new CA and sends it to each node as proof.
-The node verifies it chains to the CA it is being asked to obey, and refuses
-otherwise. The failure being guarded against is not recoverable over the
-network: rotate to a CA you cannot issue certificates under, and the node will
-only ever accept somebody else. What the proof establishes is bounded — that
-the caller has a certificate the new CA signed — so it catches the wrong file
-and the wrong directory rather than every possible mistake.
-
-Rotation does not touch a node's cluster membership or its identity. The
-fingerprint you have pinned stays valid; only who may manage it changes.
-
-##### When the key is gone
-
-If the CA's private key is lost there is nothing to rotate *with*, and the way
-back is the console:
-
-```console
-# corium-agent api set-ca --file operator-ca.pem
-This node now obeys "rescue operators" (SHA256:O09anWZnGcMtgNy...).
-
-The running daemon still has the old one loaded; restart it to
-pick this up:
-
-  systemctl restart corium-apid.service
-```
-
-It opens no port and accepts no request. Root on the machine already owns it,
-so this grants nothing that was not already granted — and the node keeps its
-cluster membership, which is what makes this a recovery rather than a reset.
-
-It refuses a node nobody has claimed: installing a CA there would be enrolment
-by another name, walking around the pairing code that guards it.
-
-One thing neither path clears. A node claimed through `api.insecure` is
-recorded as having been taken without authentication, and rotating it does not
-remove that: an owner who acquired a node by reaching it first has not made
-that legitimate by handing it to a second CA, and `cctl status` goes on saying
-so.
+Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
+because a certificate is not a secret, the node's own serving key at `0600`
+because that one is — and it survives reboots and upgrades. A node that has
+been claimed never falls back to maintenance mode on its own, or power-cycling
+a machine would be enough to take it.
 
 #### Where the daemon stands with SELinux
 
@@ -848,42 +648,6 @@ Two consequences worth knowing before choosing this mode:
 Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
 because a certificate is not a secret, and the node's own serving key at `0600`
 because that one is — and it survives reboots and upgrades.
-
-##### Giving the pairing code up
-
-`api.insecure: true` drops it: the first client to reach an unclaimed node
-claims it, with nothing to prove. This is for a bench, a lab, a provisioning
-network you control end to end, or a PXE fleet where visiting consoles is not
-going to happen — mode C otherwise costs one console visit per machine.
-
-What bounds the risk is that an unclaimed node is in no cluster, so whoever
-wins the race gets a bare machine, and enrolment is still one-way, so the
-window shuts the moment anybody uses it. What they do get is that machine's
-future: the CA they pin is the CA it will obey.
-
-The node is loud about it. On the console:
-
-```
-  !! api.insecure is set: no pairing code is required, so the
-  !! first client to reach this port claims this node for good.
-```
-
-And afterwards, because a node holds the same pinned CA whichever way it was
-claimed and there would otherwise be no way to tell:
-
-```console
-$ cctl status 192.168.1.51
-192.168.1.51:7443
-
-  hostname     worker-01
-
-  !! This node was claimed without authentication (api.insecure).
-  !! Whoever reached it first chose the CA it now obeys.
-```
-
-Setting it anywhere it would do nothing — alongside an operator CA, or with the
-API off — is a validation error rather than being ignored. A node that has been claimed never falls back to maintenance mode on
-its own, or power-cycling a machine would be enough to take it.
 
 ### 3.12 Defaults
 
