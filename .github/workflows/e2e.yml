@@ -156,7 +156,7 @@ jobs:
             -drive "if=pflash,format=raw,file=vars.fd" \
             -drive "file=output/qcow2/disk.qcow2,if=virtio,format=qcow2" \
             -drive "file=seed.iso,if=virtio,format=raw,readonly=on" \
-            -netdev "user,id=net0,hostfwd=tcp::7443-:7443,hostfwd=tcp::2222-:22" \
+            -netdev "user,id=net0,hostfwd=tcp::7443-:7443,hostfwd=tcp::2222-:22,hostfwd=tcp::6443-:6443" \
             -device virtio-net-pci,netdev=net0 \
             -display none -serial file:console.log -daemonize
 
@@ -178,9 +178,20 @@ jobs:
           tail -60 console.log || true
           exit 1
 
+      - name: Check kubectl is here to ask Kubernetes with
+        run: |
+          # The runner image ships it. If that ever stops being true this says
+          # so, rather than the Ready check quietly never running.
+          command -v kubectl >/dev/null || {
+            echo "::error::kubectl is not on this runner; the Ready check needs it" >&2
+            exit 1
+          }
+          kubectl version --client
+
       - name: Drive it with cctl
         env:
           ADDRESS: 127.0.0.1:7443
+          K8S_SERVER: 127.0.0.1:6443
           CCTL: ${{ github.workspace }}/bin/cctl
           CONSOLE: ${{ github.workspace }}/console.log
           SSH_PORT: "2222"

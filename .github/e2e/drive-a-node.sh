@@ -114,6 +114,31 @@ grep -q "client-certificate-data" "${WORK}/kubeconfig" ||
 	fail "the kubeconfig carries no client certificate"
 echo "kubeconfig fetched, $(wc -c < "${WORK}/kubeconfig") bytes"
 
+step "kubernetes reports the node Ready"
+# The cheapest end-to-end signal there is, and the one the release checklist
+# names first. Everything above proves the API answers; this proves the thing
+# the machine exists to be actually came up. A service in `running` says systemd
+# started a process, not that a cluster works.
+#
+# Refetched pointed at wherever the operator can reach the control plane, which
+# is a forwarded port when this runs in CI and the node's own address when it
+# runs against a VM on a desk.
+"${CCTL}" kubeconfig "${ADDRESS}" --server "${K8S_SERVER:-127.0.0.1:6443}" \
+	> "${WORK}/kubeconfig"
+export KUBECONFIG="${WORK}/kubeconfig"
+
+for attempt in $(seq 1 60); do
+	if kubectl get nodes --no-headers 2>/dev/null | grep -qE '\sReady\s'; then
+		break
+	fi
+	[ "${attempt}" -lt 60 ] ||
+		fail "no node reached Ready in five minutes. $(kubectl get nodes 2>&1 | tail -3)"
+	sleep 5
+done
+
+kubectl get nodes
+kubectl get --raw /readyz
+
 step "ssh access, granted and taken away over the API"
 ssh-keygen -t ed25519 -f "${WORK}/key" -N '' -C 'e2e' -q
 
