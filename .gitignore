@@ -19,10 +19,19 @@ mise.local.toml
 
 # Secrets — never commit these
 *.token
-kubeconfig
 *.pem
 *.key
 !testdata/**/*.key
+
+# A kubeconfig dropped anywhere, by any name somebody would give it. The
+# pattern is unanchored on purpose -- `cctl kubeconfig node > kubeconfig` in a
+# subdirectory is exactly the accident worth catching -- which is why the Go
+# package of that name has to be let back in explicitly. It swallowed
+# internal/kubeconfig/ silently once: the build passed locally, where the files
+# exist, and failed in CI, where the checkout is what git tracked.
+kubeconfig
+*.kubeconfig
+!internal/kubeconfig/
 
 # Editors / OS
 .DS_Store
