@@ -42,6 +42,20 @@ const DefaultSessionDir SessionDir = "/run/corium"
 
 const sessionFile = "enrolment.json"
 
+// AppliedMarker records that an operator has sent this node a configuration on
+// this boot.
+//
+// The bootstrap waits for this file rather than watching the document itself.
+// Comparing the document against what the node booted with looks equivalent
+// and is not: the two units are ordered only against cloud-init, so an apply
+// can land before the bootstrap has read anything, and then the "change" it is
+// waiting for has already happened and will never happen again. A marker says
+// what is actually being asked -- somebody has answered -- and says it once.
+//
+// It lives beside the enrolment session, in /run, for the same reason: this is
+// true of one boot and must not be true of the next.
+const AppliedMarker = "configured"
+
 // session is the per-boot enrolment state, as a file.
 type session struct {
 	dir SessionDir

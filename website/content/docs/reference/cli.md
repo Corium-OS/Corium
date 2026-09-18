@@ -122,6 +122,68 @@ the instance console log, and it is remembered:
 $ cctl status 192.168.1.51 --fingerprint SHA256:tQ2f...9c1a
 ```
 
+### Tell a node what it is
+
+Claiming a node says who owns it. It does not say what it should become — that
+comes from the document it booted with, which for a machine with no cloud-init
+datasource is nothing at all.
+
+`--config` closes that gap, and a node told to wait for one holds its bootstrap
+until it arrives:
+
+```yaml
+# The whole cloud-config, identical on every machine in the fleet.
+corium:
+  api:
+    enabled: true
+    awaitConfig: true
+```
+
+```console
+$ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a \
+    --config controller-01.yaml
+Claimed 192.168.1.51:7443.
+
+The node is restarting to require your client certificate, and its
+bootstrap is released: it will now join the cluster the configuration
+you just sent describes.
+```
+
+The document travels **with** the claim rather than after it, and that ordering
+is the feature: claiming a node is what releases its bootstrap, so a document
+sent a moment later would be racing a machine that has already started becoming
+something.
+
+`cctl apply` sends one on its own, for a node that is already claimed and still
+waiting:
+
+```console
+$ cctl apply 192.168.1.51 --file controller-01.yaml
+Applied to 192.168.1.51:7443.
+
+  written to  /etc/corium/config.yaml
+  role        controller+worker
+
+The node bootstraps with this the next time its bootstrap runs --
+now, if it was holding for one.
+```
+
+The file may be a whole cloud-config with a `corium:` key or the block on its
+own, and `--file -` reads standard input. It is validated on your machine
+before it is sent and again by the node before it is written, so a document
+that would fail at boot is refused while somebody is still watching.
+
+**It only works before the node has bootstrapped.** A machine already running
+Kubernetes answers `409` and tells you to use `cctl reset`: rewriting the role
+or cluster of a node in service would leave its configuration and its behaviour
+saying two different things, which is the thing Corium's provisioning model
+exists to prevent. This is enforced by the node, not by `cctl`, and not by your
+role — an `admin` certificate does not get past it either.
+
+One thing to watch: the document is the node's entire configuration, not a
+patch. Leaving `api:` out of it turns the management API off at the next boot,
+and `cctl apply` says so when it spots it.
+
 ---
 
 ## 3. The commands
@@ -454,7 +516,8 @@ the same answer on your workstation as on the machine.
 | Not there | Why |
 |---|---|
 | `cctl exec` | The moment an API can run any command it is SSH with a worse client, and every argument for keeping its surface small stops applying |
-| `cctl apply-config` | Provisioning is cloud-init's job. A node that needs different configuration is reprovisioned |
+| `cctl apply` on a node in service | A node already running Kubernetes cannot have its role or cluster rewritten underneath it. Applying a configuration works only before a node has bootstrapped; afterwards it is `cctl reset` |
+| Anything that reconciles | An applied document is written once and read once, by the bootstrap. Nothing watches it and nothing re-applies it |
 | Anything Kubernetes beyond `kubeconfig` | The API hands over the admin kubeconfig once and does nothing else with Kubernetes. It does not proxy the apiserver, list pods, or keep credentials for you |
 | A fleet inventory | `cctl` acts on addresses you supply. There is no registry, no desired state, and nothing that reconciles |
 

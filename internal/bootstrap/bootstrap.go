@@ -82,7 +82,11 @@ func Run(ctx context.Context, opts Options) error {
 	// A node nobody has claimed is a node in no cluster. This is checked before
 	// the hostname is settled and before any disk is touched, because for an
 	// unclaimed node the correct amount of the machine to change is none of it.
-	if err := gateOnEnrolment(ctx, cfg, opts); err != nil {
+	// The gate may hand back a different configuration from the one that went
+	// in: an operator can send a node its document while it is held, and that
+	// document is the one this boot is supposed to build.
+	cfg, err = gateOnEnrolment(ctx, cfg, opts)
+	if err != nil {
 		return err
 	}
 

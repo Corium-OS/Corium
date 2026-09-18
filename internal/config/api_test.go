@@ -278,3 +278,34 @@ func TestInsecureMaintenanceIsAccepted(t *testing.T) {
 		t.Error("an open node still joins no cluster until it is claimed")
 	}
 }
+
+func TestAwaitConfigNeedsAnAPIToWaitOn(t *testing.T) {
+	// A node told to wait for a configuration it has no way of receiving waits
+	// for ever, and nothing on the console would explain why.
+	cfg := Config{Role: RoleSingle, API: API{AwaitConfig: true}}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "api.awaitConfig") {
+		t.Errorf("Validate() = %v, want a complaint about api.awaitConfig", err)
+	}
+}
+
+func TestAwaitConfigIsAcceptedWhereverTheAPIRuns(t *testing.T) {
+	// Both modes are legitimate: maintenance mode waits for an owner and then
+	// for a document, and a node whose owner is already named in its
+	// configuration can still be waiting to be told what it is.
+	for name, api := range map[string]API{
+		"in maintenance mode": {Enabled: enabled(true), AwaitConfig: true},
+		"with an inline CA":   {OperatorCA: operatorCA(t), AwaitConfig: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := Config{Role: RoleSingle, API: api}
+			cfg.ApplyDefaults()
+
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}

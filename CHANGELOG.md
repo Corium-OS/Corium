@@ -123,6 +123,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   roles, the files it keeps in `~/.corium`, what it deliberately will not do,
   and a table for reading a refusal by status code.
 
+- **`cctl apply` gives a node the configuration it will bootstrap with**, and
+  `api.awaitConfig` makes it wait for one. A whole fleet can now be provisioned
+  from a single identical cloud-config that carries no secrets and says nothing
+  machine-specific — three lines turning the API on and asking the node to wait
+  — with the role, cluster and join token arriving afterwards over the API.
+  `cctl enroll --config` does both in one step, and that ordering matters:
+  claiming a node is what releases its bootstrap, so a document sent a moment
+  later would be racing a machine that has already started becoming something.
+
+  It works **only before a node has bootstrapped**. A machine already running
+  Kubernetes answers `409` and points at `cctl reset`, whoever asks and
+  whatever role they hold: rewriting the role or cluster of a node in service
+  would leave its configuration and its behaviour saying two different things.
+  [ADR 4](docs/adr/0004-management-api.md) is amended with the reasoning, since
+  it previously ruled this out altogether.
+
 ### Changed
 
 - **Building from source uses [mise](https://mise.jdx.dev) instead of make.**

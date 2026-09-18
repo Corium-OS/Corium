@@ -84,6 +84,15 @@ type Server struct {
 	// kubeconfig fetches the cluster's administrator credentials.
 	kubeconfig *kubeconfig.Manager
 
+	// configPath is where an applied corium: document is written. A field so
+	// that a test does not have to write to the real /etc to prove that
+	// applying one works.
+	configPath string
+
+	// sessionDir is where the per-boot state lives: the enrolment session, and
+	// the marker that tells a held bootstrap its operator has answered.
+	sessionDir SessionDir
+
 	// restart is closed when something has changed that the listener can only
 	// pick up by being rebuilt -- an enrolment, or a rotated CA. Rebuilding
 	// TLS underneath a live listener works until the one request that matters
@@ -130,6 +139,8 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		upgrades:   &upgrade.Manager{},
 		lifecycle:  &lifecycle.Manager{},
 		kubeconfig: &kubeconfig.Manager{},
+		configPath: ConfigPath,
+		sessionDir: session,
 	}
 
 	enrolled, err := store.Enrolled()
@@ -320,6 +331,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/lifecycle/reset", require(RoleAdmin, s.handleReset))
 
 	// Handing the node to a different CA decides who may do everything above.
+	// admin, because this decides what the node becomes -- including which
+	// cluster it joins and with what token. It is refused outright once the
+	// node has bootstrapped, so the role is the second gate rather than the
+	// only one.
+	mux.HandleFunc("POST /v1/config", require(RoleAdmin, s.handleApplyConfig))
+
 	mux.HandleFunc("POST /v1/ca/rotate", require(RoleAdmin, s.handleRotateCA))
 
 	// Admin, and not because it changes anything -- it changes nothing. It
@@ -341,6 +358,12 @@ func (s *Server) routes() http.Handler {
 type enrolRequest struct {
 	Code       string `json:"code"`
 	OperatorCA string `json:"operatorCA"`
+
+	// Document is an optional corium: configuration, applied as part of the
+	// claim. A node held in maintenance mode is released the instant it is
+	// claimed, so a configuration meant to be bootstrapped on this boot has to
+	// arrive with the claim rather than after it.
+	Document string `json:"document,omitempty"`
 }
 
 type enrolResponse struct {
@@ -364,7 +387,8 @@ func (s *Server) handleEnrol(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.enroller.Enroll(request.Code, []byte(request.OperatorCA))
+	err = s.enroller.EnrollWith(request.Code, []byte(request.OperatorCA),
+		s.applyDocumentDuringEnrolment(r, request.Document))
 
 	switch {
 	case err == nil:

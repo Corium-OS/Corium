@@ -135,7 +135,15 @@ func validateCommand(_ context.Context, args []string) error {
 		return fmt.Errorf("%s is not valid:\n%w", path, err)
 	}
 
-	fmt.Printf("%s: valid (role %s, cluster %s)\n", path, cfg.Role, cfg.Cluster.Name)
+	// A document that defers its role is valid and says so in those terms.
+	// Printing an empty role would read as a bug in the validator rather than
+	// as the configuration doing what it was written to do.
+	role := string(cfg.Role)
+	if role == "" {
+		role = "not yet decided; this node waits to be told"
+	}
+
+	fmt.Printf("%s: valid (role %s, cluster %s)\n", path, role, cfg.Cluster.Name)
 
 	return nil
 }

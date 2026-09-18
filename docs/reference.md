@@ -467,8 +467,28 @@ full by [ADR 4](adr/0004-management-api.md).
 | `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
 | `insecure` | bool | `false` | Drop the pairing code. Maintenance mode only |
+| `awaitConfig` | bool | `false` | Hold the bootstrap until an operator sends a configuration |
 
 Set at most one of `operatorCA` and `operatorCAFrom`.
+
+`awaitConfig` is what lets a whole fleet be provisioned from one identical
+cloud-config that carries no secrets and says nothing machine-specific:
+
+```yaml
+corium:
+  api:
+    enabled: true
+    awaitConfig: true
+```
+
+A node booted with that waits for an operator to claim it *and* to say what it
+is, then bootstraps with the document they sent — `cctl enroll --config` in one
+step, or `cctl apply` afterwards. Without it, a claimed node bootstraps
+immediately with whatever it booted with, which for a machine that was never
+described is a single-node cluster nobody asked for.
+
+It is refused when the API is off, because the configuration it would be
+waiting for could never arrive.
 
 The value is a **certificate**, not a key. The node is never given the private
 key that signs with it, which is why — unlike a join token — it is safe in
@@ -516,9 +536,11 @@ valuable and unclaimed at once. The rule runs the other way too, which is what
 gives `cctl reset` its meaning: a node cannot return to maintenance mode while
 it is a cluster member, so a reset takes it out of the cluster on the way.
 
-Enrolment carries no configuration. It sends a CA certificate and nothing else;
-the node's role and join token still come from cloud-init. This is not
-`apply-config` under another name, and decisions 6 and 7 are untouched.
+Enrolment carries a CA certificate, and optionally the node's configuration:
+`cctl enroll --config`, or `cctl apply` afterwards. That is bounded by the
+bootstrap rather than by a permission — a node that has bootstrapped refuses it
+outright, whoever asks — so a machine in service still cannot have its role or
+cluster rewritten underneath it. Decisions 6 and 7 hold where they were aimed.
 
 The cost of mode C is that it is **not zero touch**: three nodes means three
 consoles. If you want unattended provisioning with nothing secret in the

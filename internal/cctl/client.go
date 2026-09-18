@@ -110,11 +110,20 @@ type EnrolResult struct {
 	OperatorCA string `json:"operatorCA"`
 }
 
-// Enrol claims a node.
-func (c *Client) Enrol(ctx context.Context, code string, operatorCA []byte) (*EnrolResult, error) {
+// Enrol claims a node, optionally handing it the configuration it should
+// bootstrap with.
+//
+// The document travels with the claim rather than after it because claiming a
+// node in maintenance mode is what releases its bootstrap. Sending it
+// separately a moment later is a race against a machine that has already
+// started becoming something.
+func (c *Client) Enrol(
+	ctx context.Context, code string, operatorCA, document []byte,
+) (*EnrolResult, error) {
 	body, err := json.Marshal(map[string]string{
 		"code":       code,
 		"operatorCA": string(operatorCA),
+		"document":   string(document),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encoding the request: %w", err)
@@ -131,6 +140,42 @@ func (c *Client) Enrol(ctx context.Context, code string, operatorCA []byte) (*En
 				"printed on its console; pass --code", err)
 		}
 
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// ConfigResult reports what a node did with a document it was sent.
+type ConfigResult struct {
+	Status string `json:"status"`
+
+	// Path is where the node wrote it, echoed back so an operator can see
+	// which source in the chain now holds their document.
+	Path string `json:"path"`
+
+	// Role is what the node read out of it. This is the field worth checking:
+	// it is the node's own reading of the document, not the client's.
+	Role string `json:"role"`
+
+	// API reports whether the node will still run this API once it has
+	// bootstrapped with that document. A false here means the next boot takes
+	// the management API away.
+	API bool `json:"api"`
+}
+
+// ApplyConfig sends a node the corium: document it should bootstrap with.
+//
+// It is refused by a node that has already bootstrapped, which is the whole
+// rule: see ADR 4.
+func (c *Client) ApplyConfig(ctx context.Context, document []byte) (*ConfigResult, error) {
+	body, err := json.Marshal(map[string]string{"document": string(document)})
+	if err != nil {
+		return nil, fmt.Errorf("encoding the request: %w", err)
+	}
+
+	var result ConfigResult
+	if err := c.call(ctx, http.MethodPost, "/v1/config", body, &result); err != nil {
 		return nil, err
 	}
 

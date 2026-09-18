@@ -1,0 +1,29 @@
+# A node that waits to be told what it is.
+#
+# This is the whole cloud-config, and it is identical on every machine in the
+# fleet: it carries no secrets, names no cluster, and says nothing that would
+# have to be templated per machine. Burn it into an image, hand it to a PXE
+# server, or paste it into a hypervisor once and forget it.
+#
+# The machine boots, holds its bootstrap, and prints a pairing code on its
+# console. An operator then claims it and tells it what it is in one step:
+#
+#   cctl enroll <address> --code <code> --config controller-01.yaml
+#
+# Until that happens the node is in no cluster and has changed nothing about
+# itself -- not its hostname, not a disk. See docs/adr/0004-management-api.md.
+#
+# The cost is that this is not unattended: somebody has to read a console.
+# Where you want unattended provisioning with nothing secret in the metadata,
+# put the operator CA in the configuration instead (see managed-node.yaml) --
+# a CA certificate is not a secret.
+#cloud-config
+corium:
+  api:
+    # Run the management API, and wait to be claimed.
+    enabled: true
+
+    # And wait to be told what to be. Without this the node would bootstrap as
+    # a single-node cluster the moment it was claimed, because that is what an
+    # undescribed node defaults to.
+    awaitConfig: true

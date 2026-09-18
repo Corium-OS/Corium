@@ -450,6 +450,22 @@ type API struct {
 	// same run that builds the cluster. Exactly one of the two may be set.
 	OperatorCAFrom *SecretSource `yaml:"operatorCAFrom,omitempty" json:"operatorCAFrom,omitempty"`
 
+	// AwaitConfig holds the bootstrap until an operator sends a configuration,
+	// as well as until they claim the node.
+	//
+	// It is what makes a fleet describable by one identical cloud-config: three
+	// lines that carry no secrets, turn the API on and say "wait to be told
+	// what to be". Everything machine-specific then arrives over the API, from
+	// `cctl enroll --config` or `cctl apply`.
+	//
+	// Without it a node claimed in maintenance mode bootstraps immediately
+	// with whatever document it booted with, which for a machine that was
+	// never described is a single-node cluster nobody asked for. It is opt-in
+	// rather than inferred from an empty document, because a node that waits
+	// forever must do so because somebody said so, not because a heuristic read
+	// their YAML a certain way.
+	AwaitConfig bool `yaml:"awaitConfig,omitempty" json:"awaitConfig,omitempty"`
+
 	// Insecure drops the pairing code from maintenance mode: the first client
 	// to reach the node claims it, with nothing to prove.
 	//

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/cctl"
+	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
@@ -44,6 +45,7 @@ Commands:
   pki init      Create the operator CA this fleet will trust
   pki issue     Sign a client certificate for yourself
   enroll        Claim an unenrolled node, using the code on its console
+  apply         Give a node the corium: configuration it will bootstrap with
   status        Report what a node is: image, digest, role, k0s, health
   services      List the services this API knows about, and their state
   restart       Restart k0s on a node
@@ -87,6 +89,8 @@ func run() error {
 		return pkiCommand(args)
 	case "enroll", "enrol":
 		return enrolCommand(ctx, args)
+	case "apply":
+		return applyCommand(ctx, args)
 	case "status":
 		return statusCommand(ctx, args)
 	case "services":
@@ -305,6 +309,9 @@ func enrolCommand(ctx context.Context, args []string) error {
 				"api.insecure set asks for none")
 		fingerprint = flags.String("fingerprint", "",
 			"the fingerprint printed beside it; without this you are asked to confirm")
+		configFile = flags.String("config", "",
+			"a corium: document to give the node as part of claiming it; it "+
+				"bootstraps with this instead of what it booted with")
 	)
 
 	rest, err := parseFlags(flags, args)
@@ -337,9 +344,16 @@ func enrolCommand(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Read and checked before the node is touched. A document that cctl itself
+	// would refuse should never become the reason an enrolment half-happened.
+	document, err := readConfigDocument(*configFile)
+	if err != nil {
+		return err
+	}
+
 	client := cctl.Dial(address, *fingerprint)
 
-	result, err := client.Enrol(ctx, *code, operatorCA)
+	result, err := client.Enrol(ctx, *code, operatorCA, document)
 	if err != nil {
 		return err
 	}
@@ -351,9 +365,13 @@ func enrolCommand(ctx context.Context, args []string) error {
 	fmt.Printf("Claimed %s.\n\n", address)
 	fmt.Printf("  node fingerprint  %s\n", *fingerprint)
 	fmt.Printf("  operator CA       %s\n\n", result.OperatorCA)
+	describes := "the cluster its cloud-init configuration describes"
+	if len(document) > 0 {
+		describes = "the cluster the configuration you just sent describes"
+	}
+
 	fmt.Print("The node is restarting to require your client certificate, and its\n" +
-		"bootstrap is released: it will now join the cluster its cloud-init\n" +
-		"configuration describes.\n\n" +
+		"bootstrap is released: it will now join " + describes + ".\n\n" +
 		"Check with: cctl health " + address + "\n")
 
 	return nil
@@ -846,6 +864,98 @@ func rotate(
 		next.Dir(), withDefaultPort(addresses[0]), next.Dir())
 
 	return nil
+}
+
+// applyCommand gives a node the document it will bootstrap with.
+//
+// It works only before the node has bootstrapped, and the node enforces that
+// rather than this: a rule that decides whether a machine's configuration and
+// its behaviour can diverge belongs on the machine. See ADR 4.
+func applyCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl apply", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		configFile  = flags.String("file", "", "the corium: document to send; - for standard input")
+	)
+
+	client, address, err := target(flags, args,
+		"cctl apply <address> --file <document.yaml>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if *configFile == "" {
+		return errors.New("pass --file with the corium: document to send")
+	}
+
+	document, err := readConfigDocument(*configFile)
+	if err != nil {
+		return err
+	}
+
+	result, err := client.ApplyConfig(ctx, document)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Applied to %s.\n\n", address)
+	fmt.Printf("  written to  %s\n", result.Path)
+	fmt.Printf("  role        %s\n\n", result.Role)
+
+	if !result.API {
+		// Worth saying loudly. The document is the node's whole configuration,
+		// not a patch, so leaving api: out of it is how an operator takes away
+		// the only way they have of reaching the machine.
+		fmt.Print("Warning: that document does not ask for the management API, so this\n" +
+			"node will stop serving it once it has bootstrapped. You would then\n" +
+			"need console or SSH access to reach it.\n\n")
+	}
+
+	fmt.Print("The node bootstraps with this the next time its bootstrap runs --\n" +
+		"now, if it was holding for one.\n")
+
+	return nil
+}
+
+// readConfigDocument reads a corium: document and checks it before it is sent.
+//
+// Checking here as well as on the node is not duplication for its own sake: a
+// document rejected on the operator's machine costs a message, and one
+// rejected on the node costs a round trip to a machine that may be waiting on
+// a console somebody has to walk to.
+func readConfigDocument(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
+
+	var (
+		document []byte
+		err      error
+	)
+
+	if path == "-" {
+		document, err = io.ReadAll(os.Stdin)
+	} else {
+		// The path is one the operator typed on their own machine.
+		document, err = os.ReadFile(path) // #nosec G304
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("reading the configuration: %w", err)
+	}
+
+	cfg, err := config.Parse(document)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+
+	return document, nil
 }
 
 func kubeconfigCommand(ctx context.Context, args []string) error {

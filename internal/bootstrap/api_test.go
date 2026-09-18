@@ -75,7 +75,7 @@ func TestGateLetsClaimedNodesThrough(t *testing.T) {
 			opts := Options{StateDir: t.TempDir()}
 			cfg := &config.Config{Role: config.RoleWorker, API: tc.api}
 
-			if err := gateOnEnrolment(t.Context(), cfg, opts); err != nil {
+			if _, err := gateOnEnrolment(t.Context(), cfg, opts); err != nil {
 				t.Errorf("gateOnEnrolment() = %v, want nil", err)
 			}
 		})
@@ -93,7 +93,8 @@ func TestGateWaitsForAnUnclaimedNode(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- gateOnEnrolment(ctx, cfg, Options{StateDir: dir})
+		_, gateErr := gateOnEnrolment(ctx, cfg, Options{StateDir: dir})
+		done <- gateErr
 	}()
 
 	// It must still be waiting: an unclaimed node joins nothing, however long
@@ -127,7 +128,7 @@ func TestGateGivesUpWhenTheNodeIsShuttingDown(t *testing.T) {
 
 	cfg := &config.Config{Role: config.RoleWorker, API: config.API{Enabled: enabled(true)}}
 
-	err := gateOnEnrolment(ctx, cfg, Options{StateDir: t.TempDir()})
+	_, err := gateOnEnrolment(ctx, cfg, Options{StateDir: t.TempDir()})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("gateOnEnrolment() = %v, want %v", err, context.Canceled)
 	}
@@ -155,5 +156,54 @@ corium:
 	err := Run(ctx, Options{ConfigPath: doc, StateDir: t.TempDir()})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Run() = %v, want it to still be waiting at the deadline", err)
+	}
+}
+
+func TestWaitForConfigurationEndsWhenAnOperatorAnswers(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "configured")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- waitForConfiguration(ctx, marker) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("waitForConfiguration() returned %v before anybody answered, want it to wait", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatalf("recording the applied configuration: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("waitForConfiguration() = %v, want nil", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waitForConfiguration() did not notice that a configuration had been applied")
+	}
+}
+
+func TestWaitForConfigurationDoesNotWaitForAnAnswerAlreadyGiven(t *testing.T) {
+	// corium-apid and corium-bootstrap are ordered against cloud-init and not
+	// against each other, so an apply can land before this wait begins. An
+	// earlier version compared the document against the one the node booted
+	// with, which in that order sees no change and waits for ever -- a node
+	// that had been configured, holding, saying it wanted configuring.
+	marker := filepath.Join(t.TempDir(), "configured")
+
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatalf("recording the applied configuration: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := waitForConfiguration(ctx, marker); err != nil {
+		t.Fatalf("waitForConfiguration() = %v, want it to return at once", err)
 	}
 }

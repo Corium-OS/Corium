@@ -31,11 +31,15 @@ addresses the operator supplied, running on the operator's laptop. If that
 sequencing should one day be driven by a controller, the controller will be
 somebody else's, and it will talk to this same API.
 
-**"A bespoke configuration API" is out of scope.** It stays out of scope. This
-API cannot write a `corium:` block, and `cctl` has no `apply-config`.
-Provisioning remains cloud-init's job (decisions 6 and 7), and a node that
-needs different configuration is reprovisioned. The API covers day two, after
-the machine exists.
+**"A bespoke configuration API" is out of scope.** It stays out of scope for a
+node in service: this API will not rewrite the `corium:` block of a machine
+that has bootstrapped, and a node that needs different configuration is
+reprovisioned. Provisioning remains cloud-init's job (decisions 6 and 7), and
+the API covers day two, after the machine exists.
+
+*Amended.* A node that has **not** bootstrapped is not yet a machine in
+service, and refusing it a configuration left maintenance mode unable to serve
+the case it was built for. See "Configuration, before a node is a node" below.
 
 ## Decision
 
@@ -128,7 +132,64 @@ rewrites the server address to one that will keep working — the virtual IP on
 an HA control plane, since a kubeconfig aimed at one particular controller
 stops working the first time that controller does — and returns it.
 
-No package installation, no file writing, no configuration.
+No package installation and no file writing.
+
+#### Configuration, before a node is a node
+
+The second exception, and it reverses something this record stated flatly:
+**`cctl apply` writes a node's `corium:` document, and only before that node has
+bootstrapped.**
+
+What was written above — "this API cannot write a `corium:` block, and `cctl`
+has no `apply-config`" — was aimed at the right target and drawn too wide. The
+thing worth refusing is a configuration API for machines in service: a node
+whose role, cluster or join token can be rewritten underneath a running
+Kubernetes is a node whose configuration and behaviour are two different facts,
+and decisions 6 and 7 exist to stop exactly that. That refusal stands. A
+bootstrapped node returns `409` and is told to use `cctl reset`.
+
+What the original wording also forbade, without meaning to, was the one case
+maintenance mode was built for. A node held before bootstrap has no role, no
+cluster and no workloads; there is nothing underneath it to be inconsistent
+with. Yet it still had to be told what to be by cloud-init, which means the
+bare-metal machine with no datasource — the case mode C names as its
+justification — could be claimed and then had nothing to become. Enrolment
+handed over ownership and left the node useless.
+
+Three things make this narrower than it sounds:
+
+- **It writes a source that already exists.** `/etc/corium/config.yaml` is
+  first in decision 6's chain, ahead of cloud-init, and is there precisely for
+  "bare metal, PXE and appliances [that] have no datasource". `cctl apply`
+  fills a slot the design already reserved; it does not invent an authority.
+- **It is bounded by the bootstrap, not by a permission.** The node refuses
+  after it has bootstrapped, whoever asks and whatever role they hold. The
+  marker in `/var` that stops a node re-bootstrapping is the same one that
+  closes this door.
+- **It does not reconcile.** The document is written once, by an operator, and
+  read once, by the bootstrap. Nothing watches it, and nothing re-applies it.
+
+`api.awaitConfig` completes it. Without it a claimed node bootstraps at once
+with whatever it booted with, which for a machine nobody described is a
+single-node cluster nobody asked for; with it the node holds for an operator to
+say what it is, and only then builds anything. It is opt-in rather than
+inferred from an empty document, because a node that waits for ever must do so
+because somebody said so.
+
+What the bootstrap waits on is a marker `corium-apid` writes in `/run`, not the
+document. The two units are ordered against cloud-init and not against each
+other, so an apply can land before the bootstrap has read anything — and a node
+watching for a change that has already happened waits for ever. The marker
+answers the question actually being asked, which is whether somebody answered.
+
+The cost, stated plainly: a fleet can now be provisioned with an identical
+four-line cloud-init that carries no secrets and says only `api.enabled: true`
+and `api.awaitConfig: true`, with everything machine-specific arriving over the
+API afterwards. That is a
+genuinely different provisioning story from the one the rest of this document
+describes, and it is closer to Talos's than anything else here. It is offered,
+not preferred — modes A and B remain the unattended path, and a node that can
+be described in cloud-init should be.
 
 ### Whether it runs at all
 
@@ -258,10 +319,17 @@ and it comes back up unenrolled and unbootstrapped, ready to be handed to
 somebody else. There is no operation that leaves a machine both in a cluster
 and unclaimed.
 
-Enrolment does not carry configuration. `cctl enroll` sends a CA certificate
-and nothing else; the node's role, its join token and everything else still
-come from cloud-init. This is not Talos's `apply-config` with a different name,
-and decisions 6 and 7 are untouched.
+Enrolment carries a CA certificate. It may also carry a configuration —
+`cctl enroll --config` — and when it does, the document is written before the
+claim is recorded, so the node is never released to bootstrap with a
+configuration its operator has already replaced. Sending one separately with
+`cctl apply` does the same thing in two steps, and is what a node whose
+bootstrap is still held or has already failed needs.
+
+The node re-reads its configuration after the hold is lifted, which is what
+makes either order work: the document the operator applied is the one that
+bootstraps, on the same boot, rather than the one the machine happened to boot
+with.
 
 The cost is real and belongs in this record: **mode C is not zero touch.** A
 three-node cluster in mode C is three consoles to visit before any node joins

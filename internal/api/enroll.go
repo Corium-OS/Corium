@@ -149,6 +149,22 @@ func (e *Enroller) Open() bool {
 // their remaining attempts over a typo in a path would turn a small mistake
 // into a trip to the console.
 func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
+	return e.EnrollWith(typedCode, operatorCA, nil)
+}
+
+// EnrollWith claims the node, running beforeClaim once the pairing code has
+// been accepted and before the node is recorded as claimed.
+//
+// The ordering is the whole reason this exists. Recording the claim is what
+// releases a held bootstrap, so anything that has to be true of the node
+// before it bootstraps -- a configuration sent with the enrolment, in
+// practice -- has to happen on this side of it. Doing it afterwards would be a
+// race against a machine that has already started becoming something.
+//
+// A beforeClaim that fails abandons the enrolment without claiming the node and
+// without costing an attempt: the caller proved they were at the console, and
+// the thing that went wrong was not the code.
+func (e *Enroller) EnrollWith(typedCode string, operatorCA []byte, beforeClaim func() error) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -188,6 +204,14 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 		}
 
 		return ErrWrongCode
+	}
+
+	// Before Adopt, because Adopt is what makes this node enrolled by every
+	// measure that matters, including the one the held bootstrap is polling.
+	if beforeClaim != nil {
+		if err := beforeClaim(); err != nil {
+			return err
+		}
 	}
 
 	if err := e.store.Adopt(operatorCA); err != nil {

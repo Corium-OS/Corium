@@ -41,6 +41,16 @@ func (c *Config) validateRole() []error {
 	case RoleSingle, RoleController, RoleControllerWorker, RoleWorker:
 		return nil
 	case "":
+		// A node told to wait for its configuration is allowed not to have one
+		// yet: "I will be told what I am" is the whole statement such a
+		// document makes, and demanding a placeholder role would mean writing
+		// down something untrue that takes effect the day somebody removes
+		// awaitConfig. The document that arrives later must name a role, and
+		// the bootstrap checks that before it builds anything.
+		if c.API.AwaitConfig {
+			return nil
+		}
+
 		return []error{errors.New("role: required (single, controller, controller+worker or worker)")}
 	default:
 		return []error{fmt.Errorf("role: unknown value %q", c.Role)}
@@ -556,6 +566,16 @@ func (c *Config) validateAPI() []error {
 		problems = append(problems, errors.New(
 			"api.insecure: only applies to maintenance mode, and this node is not "+
 				"waiting to be claimed; remove it, or remove the operator CA"))
+	}
+
+	// Waiting for a configuration that can only arrive over an API the node
+	// will not run is a node that waits for ever, with nothing to tell an
+	// operator why.
+	if c.API.AwaitConfig && c.API.Mode() == APIModeDisabled {
+		problems = append(problems, errors.New(
+			"api.awaitConfig: the API is off, so the configuration this node "+
+				"would be waiting for could never reach it; set api.enabled "+
+				"or an operator CA"))
 	}
 
 	if hasSource {
