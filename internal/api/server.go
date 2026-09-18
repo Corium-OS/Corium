@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/kubeconfig"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
@@ -84,6 +85,11 @@ type Server struct {
 	// kubeconfig fetches the cluster's administrator credentials.
 	kubeconfig *kubeconfig.Manager
 
+	// access manages the SSH keys this node trusts for an existing user. A
+	// field for the same reason as the rest: a test writes to its own directory
+	// rather than the real one.
+	access *access.Manager
+
 	// configPath is where an applied corium: document is written. A field so
 	// that a test does not have to write to the real /etc to prove that
 	// applying one works.
@@ -122,6 +128,9 @@ func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
 // Kubeconfig replaces how the server asks k0s for credentials, likewise.
 func (s *Server) Kubeconfig(manager *kubeconfig.Manager) { s.kubeconfig = manager }
 
+// Access replaces where the server keeps the SSH keys it trusts, likewise.
+func (s *Server) Access(manager *access.Manager) { s.access = manager }
+
 // NewServer prepares a listener for whichever state the node is in.
 //
 // how says what an unclaimed node asks of somebody claiming it. It is a
@@ -139,6 +148,7 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		upgrades:   &upgrade.Manager{},
 		lifecycle:  &lifecycle.Manager{},
 		kubeconfig: &kubeconfig.Manager{},
+		access:     &access.Manager{},
 		configPath: ConfigPath,
 		sessionDir: session,
 	}
@@ -343,6 +353,14 @@ func (s *Server) routes() http.Handler {
 	// hands over credentials to the whole cluster, which outranks every other
 	// call here: the rest act on one node.
 	mux.HandleFunc("GET /v1/kubeconfig", require(RoleAdmin, s.handleKubeconfig))
+
+	// Trusting an SSH key for a user grants a shell, which steps outside every
+	// guard rail the rest of this API keeps -- so admin, and logged by
+	// fingerprint. Reading which keys are trusted is not itself a grant, so the
+	// list sits at readonly with the other reads. See ADR 5.
+	mux.HandleFunc("GET /v1/access/ssh", require(RoleReadOnly, s.handleListSSHKeys))
+	mux.HandleFunc("POST /v1/access/ssh", require(RoleAdmin, s.handleAddSSHKey))
+	mux.HandleFunc("DELETE /v1/access/ssh", require(RoleAdmin, s.handleRevokeSSHKey))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing

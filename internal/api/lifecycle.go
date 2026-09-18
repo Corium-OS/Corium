@@ -181,6 +181,14 @@ func (s *Server) reset(ctx context.Context) error {
 		return err
 	}
 
+	// The keys the API was trusting leave with the enrolment that authorised
+	// them. Best effort and loud: the keys live under Corium's own state, which
+	// a reset is erasing anyway, and refusing a reset that otherwise succeeded
+	// over a leftover key file would be the worse answer. See ADR 5.
+	if err := s.access.Purge(); err != nil {
+		slog.Warn("could not remove trusted SSH keys while resetting; continuing", "error", err)
+	}
+
 	// Last, and only now: the node stops being owned. Everything above has
 	// already happened, so there is no way to end up unclaimed and still in a
 	// cluster.

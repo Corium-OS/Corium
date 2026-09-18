@@ -57,6 +57,7 @@ Commands:
   reboot        Restart a node
   shutdown      Power a node off
   reset         Erase a node: leave its cluster, forget its owner, reboot
+  access ssh    Add, list or revoke the SSH keys the API trusts for a user
   ca rotate     Hand nodes to a different operator CA
   kubeconfig    Fetch the cluster's administrator kubeconfig from a node
   health        Check a node answers, and what it authenticated you as
@@ -111,6 +112,8 @@ func run() error {
 		return powerCommand(ctx, command, args)
 	case "reset":
 		return resetCommand(ctx, args)
+	case "access":
+		return accessCommand(ctx, args)
 	case "ca":
 		return caCommand(ctx, args)
 	case "kubeconfig":
@@ -1081,6 +1084,165 @@ func connectWith(store *cctl.Store, address, fingerprint string) (*cctl.Client, 
 	}
 
 	return cctl.Dial(address, fingerprint, certificates...), nil
+}
+
+func accessCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("access needs a subcommand: ssh")
+	}
+
+	switch args[0] {
+	case "ssh":
+		return accessSSHCommand(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown access subcommand %q; use ssh", args[0])
+	}
+}
+
+func accessSSHCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("access ssh needs a subcommand: add, list or revoke")
+	}
+
+	switch args[0] {
+	case "add":
+		return accessSSHAdd(ctx, args[1:])
+	case "list":
+		return accessSSHList(ctx, args[1:])
+	case "revoke":
+		return accessSSHRevoke(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown access ssh subcommand %q; use add, list or revoke", args[0])
+	}
+}
+
+func accessSSHAdd(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl access ssh add", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		user        = flags.String("user", "", "the existing user to trust the key for; required")
+		keyFile     = flags.String("key-file", "", "read the public key from this file (default: stdin)")
+		inline      = flags.String("key", "", "the public key itself, instead of a file")
+	)
+
+	client, _, err := target(flags, args,
+		"cctl access ssh add <address> --user <user> [--key-file <path>]", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if *user == "" {
+		return errors.New("--user is required, and it must already exist on the node; " +
+			"create it with cloud-init")
+	}
+
+	material, err := readPublicKey(*inline, *keyFile)
+	if err != nil {
+		return err
+	}
+
+	added, err := client.AddSSHKey(ctx, *user, material)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("trusted %s (%s) for %s\n", added.Fingerprint, added.Type, added.User)
+
+	return nil
+}
+
+func accessSSHList(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl access ssh list", flag.ExitOnError)
+	dir := flags.String("dir", "", "operator directory (default ~/.corium)")
+	fingerprint := flags.String("fingerprint", "", "override the remembered fingerprint")
+
+	client, _, err := target(flags, args, "cctl access ssh list <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	keys, err := client.ListSSHKeys(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(keys) == 0 {
+		fmt.Println("this node trusts no SSH keys from the API")
+
+		return nil
+	}
+
+	for _, key := range keys {
+		fmt.Printf("  %-16s %-15s %s  %s\n", key.User, key.Type, key.Fingerprint, key.Comment)
+	}
+
+	return nil
+}
+
+func accessSSHRevoke(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl access ssh revoke", flag.ExitOnError)
+
+	var (
+		dir            = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint    = flags.String("fingerprint", "", "override the remembered fingerprint")
+		keyFingerprint = flags.String("key-fingerprint", "",
+			"the SHA256 fingerprint of the key to revoke; required")
+	)
+
+	client, _, err := target(flags, args,
+		"cctl access ssh revoke <address> --key-fingerprint <SHA256:...>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	if *keyFingerprint == "" {
+		return errors.New("--key-fingerprint is required; " +
+			"`cctl access ssh list <address>` shows the fingerprints")
+	}
+
+	removed, err := client.RevokeSSHKey(ctx, *keyFingerprint)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range removed {
+		fmt.Printf("revoked %s for %s\n", key.Fingerprint, key.User)
+	}
+
+	return nil
+}
+
+// readPublicKey takes the key from --key, then a file, then standard input.
+//
+// Standard input is the default so `cctl access ssh add node --user core <
+// key.pub` works, and so does piping `ssh-add -L`.
+func readPublicKey(inline, path string) (string, error) {
+	switch {
+	case inline != "":
+		return inline, nil
+
+	case path != "":
+		data, err := os.ReadFile(path) //nolint:gosec // G304: an operator naming a public-key file to read is the point
+		if err != nil {
+			return "", fmt.Errorf("reading %s: %w", path, err)
+		}
+
+		return string(data), nil
+
+	default:
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading the public key from standard input: %w", err)
+		}
+
+		if strings.TrimSpace(string(data)) == "" {
+			return "", errors.New("no key given: pass --key, --key-file, or pipe one on standard input")
+		}
+
+		return string(data), nil
+	}
 }
 
 func healthCommand(ctx context.Context, args []string) error {

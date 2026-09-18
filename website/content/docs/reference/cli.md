@@ -315,6 +315,50 @@ will restart (first-boot configuration; runs once)
 tell "the node refused" from "the node obeyed" — both look like a connection
 that died.
 
+### SSH access
+
+The API grants no shell of its own (§7), but it can trust an SSH key for a user
+that **already exists** on the node, so you can get a shell the ordinary way
+when the surfaces above are not enough. It never creates the account: the user,
+its password and its shell are cloud-init's, and Corium manages only a key file
+of its own, beside the user's own `~/.ssh`.
+
+| Command | Role | What it does |
+|---|---|---|
+| `cctl access ssh add <node> --user <user>` | admin | Trusts a public key for an existing user |
+| `cctl access ssh list <node>` | readonly | Lists trusted keys, by fingerprint |
+| `cctl access ssh revoke <node> --key-fingerprint <fp>` | admin | Stops trusting a key |
+
+```console
+$ cctl access ssh add 192.168.1.51 --user core --key-file ~/.ssh/id_ed25519.pub
+trusted SHA256:PZ8s… (ssh-ed25519) for core
+
+$ cctl access ssh list 192.168.1.51
+  core             ssh-ed25519     SHA256:PZ8s…  you@laptop
+
+$ cctl access ssh revoke 192.168.1.51 --key-fingerprint SHA256:PZ8s…
+revoked SHA256:PZ8s… for core
+```
+
+The key comes from `--key-file`, or `--key` inline, or standard input — so
+`cctl access ssh add <node> --user core < key.pub` works, and so does piping
+`ssh-add -L`. `add` is **admin** because trusting a key grants a shell, the one
+thing that steps outside the guard rails the rest of the API keeps; the node
+logs it by fingerprint. Listing is **readonly**: a public key is not a secret.
+
+The user must exist first. A key for an account cloud-init never created is a
+`409`, with the way round it:
+
+```console
+$ cctl access ssh add 192.168.1.51 --user ghost --key-file key.pub
+cctl: 409 Conflict: "ghost": no such user on this node; create it with
+cloud-init before adding a key for it
+```
+
+Corium keeps these keys in a file of its own, so `list` and `revoke` never touch
+a key you put in the user's `~/.ssh/authorized_keys` by hand, and `cctl reset`
+removes every key the API was trusting. See ADR 5.
+
 ### Upgrades
 
 ```console
@@ -460,9 +504,9 @@ every call. Every route names the lowest role that may use it.
 
 | Role | Reaches |
 |---|---|
-| `corium:readonly` | `health`, `status`, `services`, `logs` |
+| `corium:readonly` | `health`, `status`, `services`, `logs`, `access ssh list` |
 | `corium:operator` | …and `restart`, `cordon`, `drain`, and an upgrade's *staging* |
-| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig` |
+| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `access ssh add`/`revoke` |
 
 `cctl upgrade` spans both: pulling an image changes nothing else and is
 operator work, while applying it takes the node out of service. So an operator
@@ -527,6 +571,11 @@ the same answer on your workstation as on the machine.
 The last one is the design, not an omission: a node knows only about itself, and
 the sequencing that needs to know about the others lives here rather than on any
 node. See [ADR 4](/docs/reference/adr-0004-management-api/).
+
+Granting SSH access is not a counter-example. `cctl access ssh` (§3) trusts a
+key for a user that already exists, but the API still runs no command itself:
+the shell that follows is the operating system's `sshd`, and all the API decides
+is whose key it will read. See ADR 5.
 
 ---
 
