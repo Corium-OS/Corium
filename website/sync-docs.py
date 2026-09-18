@@ -85,6 +85,11 @@ PAGES = [
      "What a node-local management API is allowed to do, why there is no exec, "
      "and the three ways an operator CA reaches a node — including a "
      "maintenance mode that puts nothing in cloud-init."),
+    ("adr/0005-ssh-access-over-the-api.md", "reference", "adr-0005-ssh-access-over-the-api",
+     "ADR 5 — SSH access over the API", 950,
+     "Why the management API can add, list and revoke SSH keys for a user that "
+     "already exists, how it stays out of cloud-init's authority over accounts, "
+     "and why it is admin-only."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
