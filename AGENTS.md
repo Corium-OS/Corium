@@ -86,7 +86,9 @@ the maintainers — do not quietly work around them.
 │   │   │   ├── lib/systemd/system/    # units (NEVER /etc/systemd/system)
 │   │   │   ├── lib/sysctl.d/          # kernel settings for Kubernetes
 │   │   │   └── lib/modules-load.d/
-│   │   └── etc/cloud/cloud.cfg.d/     # cloud-init defaults (only /etc exception)
+│   │   └── etc/                       # the two things that can only live here:
+│   │       ├── cloud/cloud.cfg.d/     # cloud-init defaults
+│   │       └── ssh/sshd_config.d/     # sshd reads drop-ins from nowhere else
 │   ├── k0s.lock               # pinned k0s version + checksums (trust anchor)
 │   └── scripts/               # build-time RUN scripts, one concern each
 ├── cmd/

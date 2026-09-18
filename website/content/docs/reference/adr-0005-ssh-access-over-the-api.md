@@ -54,10 +54,28 @@ cloud-init's, so the authority over *who* may log in, and with what privilege,
 is unchanged. What the API owns is key material, and only that.
 
 It owns that material in its own file. Corium's keys for a user live in
-`/var/lib/corium/ssh/<user>`, root-owned, and `sshd` reads them through a shipped
-drop-in that names both that file and the user's own `~/.ssh/authorized_keys`:
+`/var/lib/corium/ssh/<user>`, root-owned, and `sshd` reads them through a
+drop-in shipped at `/etc/ssh/sshd_config.d/10-corium.conf` — `/etc` because that
+is the only place `sshd` reads drop-ins from, which makes this the second
+deliberate exception to Corium's rule about shipping configuration there:
 
     AuthorizedKeysFile .ssh/authorized_keys /var/lib/corium/ssh/%u
+
+The file is `0644` in a `0711` directory, under a `/var/lib/corium` that is
+itself `0711`, and that is load-bearing rather than careless. **`sshd` opens an
+authorized-keys file as the user who is logging in, not as root**, so a
+root-only file is a file it silently skips. The first working version of this
+feature was written `0600` in a `0700` directory: the key was accepted, `list`
+returned it, the journal recorded it as trusted, and every login was refused
+with nothing said anywhere about why. `StrictModes` — the rule that actually
+governs these modes — refuses a path others can *write*, which none of this is,
+and nothing is given away by the read bit, since a public key is not a secret.
+That is the same reason `list` is a readonly call.
+
+`0711` rather than `0755` because traversal is not listing: nobody needs to
+enumerate which users have keys, and `/var/lib/corium` holds other things,
+including the API's own state directory with this node's serving key. That one
+stays `0700`, and walking past a door is not opening it.
 
 The two never collide. A key an operator placed by hand, or one cloud-init
 wrote, sits in the user's file, and the API does not touch it; a key the API
@@ -99,11 +117,35 @@ this ADR does not settle: whether Corium should *own* the decision to run `sshd`
 at all, rather than inheriting an enabled one. That is left to a follow-up; this
 decision only makes the inherited daemon usable on purpose.
 
-SELinux will not read an authorized-keys file outside a home directory unless it
-is labelled for it. `/var/lib/corium/ssh` is given an `ssh_home_t` file-context
-rule, shipped with the image and applied when a key file is written. That
-labelling is the cost of keeping Corium's keys in their own file; it is paid
-once, and never by weakening enforcement.
+SELinux will not let `sshd` read an authorized-keys file outside a home
+directory unless it is labelled for it, and Corium labels these `ssh_home_t` —
+the type `~/.ssh` already carries. That labelling is the cost of keeping
+Corium's keys in their own file, and it is never paid by weakening enforcement.
+
+How it is applied is worth stating precisely, because the obvious answer is not
+available. A file-context rule in the policy — `semanage fcontext` — would be
+the durable way to do it, and it cannot be shipped: `semanage` writes into
+`/var/lib/selinux`, and `/var` is seeded at install and never updated by an
+image, so a rule added that way would reach machines installed with it and no
+machine upgraded into it. That is the same wall that stopped Corium shipping an
+SELinux module of its own.
+
+So the label is applied with `chcon`, twice: when a key file is written, and
+again every time `corium-apid` starts. The second is not belt and braces. A
+`restorecon -R /var`, a policy update or a filesystem relabel resets these files
+to the default type for `/var`, and the consequence was measured on a node
+rather than reasoned about — a working login became `Permission denied`, with no
+message in any log, on a machine whose API still reported the key as trusted.
+Reapplying at start means a machine that has been relabelled repairs itself on
+the next boot. The same pass widens modes an earlier release wrote, which is
+what carries a node upgraded into this feature rather than installed with it.
+
+**One window stays open, and this record will not pretend otherwise:** a relabel
+while the daemon is running breaks access until `corium-apid` is next started.
+Closing it properly needs the policy rule that cannot be shipped. Watching the
+file, or re-checking the label on every call, would narrow the gap and not close
+it, and neither seemed worth the machinery for a failure whose fix is a service
+restart.
 
 ## Alternatives considered
 
