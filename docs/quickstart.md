@@ -1,6 +1,7 @@
 # Quick start
 
-From nothing to a working Kubernetes node in four steps.
+From nothing to a working Kubernetes node in four steps, and a fifth for
+managing it without SSH.
 
 The short version, if you are in a hurry:
 
@@ -188,10 +189,69 @@ ssh core@192.168.0.190 sudo k0s kubeconfig admin > kubeconfig
 KUBECONFIG=./kubeconfig kubectl get nodes
 ```
 
-If you set `cluster.endpoint`, the generated kubeconfig already points at it —
-including the virtual IP on an HA cluster, which is what you want. Without an
-endpoint it points at `localhost`, so replace the `server:` field with the
-node's address.
+The address in that file is whatever k0s decided, which is the node's own — right
+for a single node, wrong for a cluster with a virtual IP, where a kubeconfig
+aimed at one controller stops working the first time that controller does.
+Check the `server:` field before you rely on it. Step 5 removes that worry.
+
+---
+
+## 5. Manage it without SSH (optional)
+
+Everything above works over SSH, and on an immutable OS that is a poor fit: the
+shell you land in is a shell over a system where almost nothing you type
+persists. Corium ships a management API for the things you actually want —
+reading a node, restarting k0s, upgrading it, getting a kubeconfig — and a
+client called `cctl`.
+
+It is **off unless you ask for it**. A node with no `api:` block runs no daemon
+and binds no port, which is what the four steps above produced.
+
+`cctl` has no release artefact yet, so build it from a checkout:
+
+```bash
+mise run build          # produces bin/cctl
+```
+
+Make the operator CA. Its certificate is what nodes are told to trust; the key
+beside it stays on your machine and is never sent anywhere:
+
+```bash
+cctl pki init
+cctl pki issue --role admin
+```
+
+`pki init` prints the certificate ready to paste. Add it to the node
+configuration from step 2 — it is a certificate, not a secret, so it is safe in
+cloud-init in the open:
+
+```yaml
+corium:
+  role: single
+  api:
+    operatorCA: |
+      -----BEGIN CERTIFICATE-----
+      ...
+      -----END CERTIFICATE-----
+```
+
+Reprovision the node with that configuration, and it claims itself at boot.
+Then, from your workstation:
+
+```bash
+cctl status 192.168.0.190          # role, image digest, k0s, greenboot, uptime
+cctl logs 192.168.0.190 --unit k0scontroller --since 15m
+cctl kubeconfig 192.168.0.190 > kubeconfig
+```
+
+The first call asks you to confirm the node's fingerprint against its journal,
+and remembers it; a node signs its own certificate, so the fingerprint is what
+identifies it rather than its name. `cctl kubeconfig` points the file at the
+cluster's virtual IP where there is one, which is the worry step 4 leaves you
+with.
+
+[The `cctl` page](cli.md) covers every command, the three roles, and what the
+API deliberately will not do.
 
 ---
 
@@ -230,8 +290,15 @@ Drain the node first if it carries workloads you care about.
 ## Troubleshooting
 
 **The node boots and does nothing.** Read the journal:
-`journalctl -u corium-bootstrap`. A node with no Corium configuration says so
-and stops, which is a valid outcome — you get a host, not a Kubernetes node.
+`journalctl -u corium-bootstrap`, or `cctl logs <node> --unit corium-bootstrap`
+if you did step 5. A node with no Corium configuration says so and stops, which
+is a valid outcome — you get a host, not a Kubernetes node.
+
+**`cctl` says the node is not enrolled.** It is waiting to be claimed:
+`api.enabled: true` with no CA is maintenance mode, and such a node holds its
+bootstrap until somebody runs `cctl enroll` with the pairing code from its
+console. If you meant it to come up on its own, give it `api.operatorCA`
+instead.
 
 **The node is `NotReady` and stays there.** If you set `cni: custom`, this is
 expected: nothing has installed a network yet and the cluster is waiting for

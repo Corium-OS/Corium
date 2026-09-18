@@ -208,8 +208,40 @@ done
 host keys — rebuilding onto the same addresses otherwise greets you with
 `REMOTE HOST IDENTIFICATION HAS CHANGED`.
 
+## Managing it afterwards
+
+Two things about an HA cluster are easier with the [management API](../cli.md)
+than by hand, and both are about the virtual IP.
+
+A kubeconfig aimed at one particular controller stops working the first time
+that controller does — which on a cluster built for exactly that eventuality is
+an odd way to end up. `cctl kubeconfig <any controller>` points the file at the
+virtual IP, because that is what the node recorded when it bootstrapped:
+
+```bash
+cctl kubeconfig 192.168.0.201 > kubeconfig
+grep server: kubeconfig          # https://192.168.0.200:6443
+```
+
+And rolling three controllers is the case where going one at a time matters
+most, since two of them are the quorum:
+
+```bash
+cctl upgrade 192.168.0.201 192.168.0.202 192.168.0.203 --image ghcr.io/corium-os/corium:<tag>
+```
+
+It stops at the first controller that does not come back, rather than taking
+the second one down after it.
+
+Both need `api.operatorCA` in each controller's configuration; the API is off
+unless asked for.
+
+---
+
 ## What to read next
 
+- [cctl](../cli.md) — every command, the three roles, and what the API will not
+  do
 - [Configuration](../reference.md) — every field of `ha:` and `join:`
 - [Upgrades](../upgrades.md) — moving a cluster to a new image without losing
   quorum

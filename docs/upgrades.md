@@ -47,6 +47,9 @@ sudo bootc upgrade
 sudo bootc switch ghcr.io/corium-os/corium:0.1
 ```
 
+From your workstation, `cctl upgrade <node> --image ...` does the same thing
+plus the drain and the reboot — see [cctl](cli.md).
+
 Neither reboots by default. They stage a deployment for the next boot, which is
 what makes the maintenance window yours to choose:
 
@@ -80,6 +83,22 @@ Nodes are cattle, but the control plane still has a quorum to respect.
 
 ### One node at a time
 
+With the [management API](cli.md) enabled, one command does the whole sequence
+for a list of nodes:
+
+```bash
+cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:<tag>
+```
+
+It takes them in order and **stops at the first that does not come back on the
+digest it was sent to** — a rollout that carries on past a broken machine turns
+one outage into a cluster-wide one — and says how many were done, because a
+half-upgraded cluster is a decision somebody has to make. Each node is checked
+fit to lose before it goes down: bootstrapped, k0s running, and the last boot
+not judged bad by greenboot.
+
+Without the API, the same sequence by hand:
+
 ```bash
 # 1. Stop scheduling and move the workloads off.
 kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
@@ -96,6 +115,10 @@ kubectl uncordon <node>
 A node that has been drained and rebooted comes back in about 45 seconds and
 rejoins on its own. It does not re-bootstrap: the marker in `/var/lib/corium`
 is what stops it.
+
+One difference worth knowing: `cctl upgrade` refuses an image the node's own
+signing policy would accept unsigned, which is what stops a typo rebasing a
+Kubernetes node onto a desktop image. `bootc switch` by hand does not ask.
 
 ### Controllers
 
@@ -171,6 +194,16 @@ Add your own checks by dropping executables in
 sudo bootc rollback
 sudo systemctl reboot
 ```
+
+Or remotely, if the node still answers:
+
+```bash
+cctl rollback <node>     # marks the previous image; does not reboot
+```
+
+`cctl rollback` deliberately stops there. It exists because somebody is already
+having a bad day, and taking the node down at a moment they did not choose
+would not help — the reboot stays yours to schedule.
 
 Rollback is instant and downloads nothing — `Next boot: rollback deployment`.
 It reorders boot entries between the deployment you are running and the

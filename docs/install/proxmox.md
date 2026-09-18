@@ -150,6 +150,8 @@ rm /var/lib/vz/snippets/corium-900.yaml
 
 - [Downloads](downloads.md) — the other ways to fetch an artefact, and how to
   verify one
+- [cctl](../cli.md) — managing this node without SSH: its state, its journals,
+  its upgrades, and a kubeconfig
 - [Upgrades](../upgrades.md) — moving this node to a later image, and which tag to
   follow
 - [Configuration](../reference.md) — every field of the `corium:` block

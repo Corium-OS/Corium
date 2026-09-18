@@ -14,6 +14,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **The documentation uses the CLI where it earns its place.** The quick start
+  gains a fifth step for managing a node without SSH; the upgrade guide leads
+  with `cctl upgrade` and keeps the manual sequence as what it does; the HA
+  guide gains the two things that are genuinely easier with it, both about the
+  virtual IP. The install walkthroughs keep their SSH narrative and gain a
+  pointer — a guide whose job is to boot a node should not acquire a PKI step.
+  Downloads says plainly that `cctl` has no published binary yet, which is a
+  gap rather than a decision.
+
 - **A management API, and `cctl` to drive it.** A node can now be read,
   restarted, upgraded, drained and reset without an SSH session — which on an
   immutable OS was always a poor fit, since the shell you land in is a shell

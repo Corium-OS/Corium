@@ -14,6 +14,21 @@ version's release page:
 coordinates change every release, so they are published with the release
 rather than written down here.
 
+## `cctl` is not among them yet
+
+The management client is built from a checkout, not downloaded:
+
+```bash
+git clone https://github.com/Corium-OS/Corium.git && cd Corium
+mise run build          # produces bin/cctl and bin/corium-agent
+```
+
+There is no published binary and no signature to check, which is a gap rather
+than a decision — the release path publishes an OS image and two disk
+artefacts, and a client binary is a different shape of thing to sign and
+distribute. Until it is closed, `cctl` is as trustworthy as the checkout you
+built it from. See [cctl](../cli.md) for what it does.
+
 ---
 
 ## Three ways to the same bytes

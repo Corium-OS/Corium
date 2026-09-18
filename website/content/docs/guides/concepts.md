@@ -118,6 +118,16 @@ applied verbatim. The rule the project holds itself to: **no k0s feature is
 unreachable, some simply have no shorter name.** See
 [feature support](/docs/reference/feature-support/).
 
+There *is* a management API, and it does not contradict that heading, because
+the two answer different questions. Cloud-init describes what a machine should
+become, once, before it exists. The API answers what a running machine is and
+does the handful of things an operator needs afterwards — read it, restart k0s,
+upgrade it, take it out of service. It cannot write a `corium:` block, and a
+node that needs different configuration is reprovisioned rather than edited.
+
+It is off unless a node's configuration asks for it. See [cctl](/docs/reference/cli/), and
+[ADR 4](/docs/reference/adr-0004-management-api/) for why it is shaped that way.
+
 ## Kubernetes ships with the OS
 
 [k0s](https://k0sproject.io/) is a single static binary with no host
@@ -132,5 +142,11 @@ nothing can move it independently, and upgrading a cluster is
 
 It does not manage fleets, fork k0s, or invent a configuration language. Those
 omissions are deliberate: the project is an opinionated integration, and much
-of its value is in what it declines to do. The reasoning for each is in
+of its value is in what it declines to do.
+
+The management API is not an exception to the first of those. It is one daemon
+per node, answering for that node, with no registry, no inventory and nothing
+that reconciles. Upgrading a cluster is a `cctl` loop over addresses you
+supplied, running on your machine — the sequencing lives with the operator
+rather than on any node. The reasoning for each is in
 [feature support](/docs/reference/feature-support/#out-of-scope).

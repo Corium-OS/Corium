@@ -32,6 +32,15 @@ pretending to certainty.
 | **[SUSE SL Micro](https://microos.opensuse.org/)** | Btrfs snapshots, transactional-update | Elemental / Edge Image Builder | RKE2 in the SUSE stack | yes | Various open |
 | **[k0s](https://k0sproject.io/) on a normal distro** | none | whatever you already use | k0s | yes | Apache-2.0 |
 
+"Configured with" is about how a machine is *provisioned*, which for Corium is
+cloud-init and nothing else. Corium also ships a day-two management API and a
+client, `cctl`, for reading a node, driving its upgrades and taking it out of
+service — but it is additive and off unless asked for, where Talos's API is the
+only way in. The two are answers to different questions: Talos removed the
+shell and had to put an API in its place; Corium kept the shell and added an
+API because SSH is a poor fit for the handful of things an operator actually
+does to an immutable node.
+
 ---
 
 ## Why you might pick each one instead
@@ -45,7 +54,9 @@ available and are willing to give up shell-based operations.
 
 Two honest caveats. The no-shell model is the most common source of friction
 for newcomers, and it is a commitment rather than a setting you can relax
-later. And Omni, the fleet manager that makes Talos pleasant at scale, is
+later. Corium's own API is the shallower version of the same idea — the
+operations, without giving up the shell — which is a weaker security position
+and an easier one to adopt. And Omni, the fleet manager that makes Talos pleasant at scale, is
 BUSL-licensed: free self-hosting is non-production only.
 
 **Kairos** is the closest neighbour and a CNCF Sandbox project, which means

@@ -131,4 +131,6 @@ openstack keypair delete corium
 ## What to read next
 
 - [Downloads](/docs/install/downloads/) — fetching an artefact and checking it
+- [cctl](/docs/reference/cli/) — managing this node without SSH: its state, its journals,
+  its upgrades, and a kubeconfig
 - [Configuration](/docs/reference/configuration/) — every field of the `corium:` block
