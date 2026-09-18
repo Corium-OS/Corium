@@ -96,7 +96,15 @@ becomes acceptable because they said so rather than because it claimed to be
 Corium.
 
 **Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
-destructive and are marked as such in the schema. Reset is the strongest of
+destructive and are marked as such in the schema.
+
+Cordon and drain land differently from the rest, and the record should say so
+rather than let somebody discover it: they work on controllers only. A node
+acts on itself, and evicting a pod needs cluster admin credentials that only a
+controller holds locally. Draining a worker stays a cluster operation, done
+with `kubectl` against the kubeconfig this API will hand over — which is a
+consequence of the node-local rule rather than a gap in it, and is the second
+place that rule costs something visible. Reset is the strongest of
 them: it takes the node out of the cluster, wipes `/var/lib/k0s`, and drops the
 machine back to unenrolled — it is the one operation that returns a node to
 maintenance mode, and it cannot leave it half-way.

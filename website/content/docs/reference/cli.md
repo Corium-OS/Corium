@@ -194,14 +194,36 @@ journals, and journals are not sanitised.
 | Command | Role | What it does |
 |---|---|---|
 | `cctl restart <node> --unit <unit>` | operator | Restarts k0s |
-| `cctl cordon <node>` / `--undo` | operator | Stops new pods being scheduled, or reverses it |
-| `cctl drain <node>` | operator | Cordons, then evicts |
+| `cctl cordon <node>` / `--undo` | operator | Stops new pods being scheduled, or reverses it. **Controllers only** |
+| `cctl drain <node>` | operator | Cordons, then evicts. **Controllers only** — see below |
 | `cctl reboot <node>` | admin | Restarts the machine |
 | `cctl shutdown <node>` | admin | Powers it off |
 
-Only a controller can cordon or drain itself. A plain worker holds kubelet
-credentials, which cannot evict pods, and it says so rather than failing in a
-way that reads like a broken cluster.
+**`cordon` and `drain` work on controllers only**, and since most of a cluster
+is workers, that is the common case rather than the rare one. A node acts on
+itself and nothing else, and only a controller holds cluster admin credentials
+locally — a worker has the kubelet's, which cannot evict a pod.
+
+Draining a worker is a cluster operation rather than a node one, so the tool
+for it is `kubectl`, pointed at credentials this CLI will fetch for you:
+
+```console
+$ cctl kubeconfig <a controller> > kube.yaml
+$ kubectl --kubeconfig kube.yaml drain corium-w1 --ignore-daemonsets --delete-emptydir-data
+$ kubectl --kubeconfig kube.yaml uncordon corium-w1
+```
+
+The node says as much when you ask it directly:
+
+```console
+$ cctl drain 192.168.1.52
+cctl: 409 Conflict: only a controller holds cluster admin credentials, and
+this node is not one. Draining a worker is a cluster operation: ...
+```
+
+Note what this does *not* stop: `cctl upgrade` still works on a worker. The
+upgrade path drains where it can and reboots undrained where it cannot, which
+is the same behaviour `corium-upgrade-apply.service` has always had.
 
 A drain that cannot finish is **not** forced. It usually means a pod disruption
 budget is saying this workload cannot lose a replica right now, which is

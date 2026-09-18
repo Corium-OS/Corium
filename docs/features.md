@@ -138,7 +138,7 @@ commands are [cctl](cli.md).
 | Upgrades | — | `cctl upgrade <nodes...> --image`, one node at a time, stopping at the first that does not come back on the digest it was sent |
 | Image validation | — | A node refuses an image its own signing policy would accept unsigned. Not a label check: labels are forgeable |
 | Rollback | — | `cctl rollback <node>` marks the previous image as next to boot, and does not reboot |
-| Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`. A drain that a pod disruption budget refuses is not forced, and the node stays cordoned |
+| Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`, **on controllers only**: a worker holds kubelet credentials, which cannot evict pods. Draining a worker is `kubectl drain` with the kubeconfig `cctl kubeconfig` fetches. A drain a pod disruption budget refuses is not forced, and the node stays cordoned |
 | Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
 | Kubeconfig | — | `cctl kubeconfig <node>`, at `corium:admin`. Points at the cluster's virtual IP where there is one; `--server` overrides |
 | Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |

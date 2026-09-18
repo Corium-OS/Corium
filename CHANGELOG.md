@@ -228,6 +228,19 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **`cctl drain` said which nodes it works on, and not what to do about it.**
+  Cordon and drain work on controllers only — a node acts on itself, and
+  evicting a pod needs cluster admin credentials that only a controller holds
+  locally. Since most of a cluster is workers, that is the common answer rather
+  than the rare one, and the docs stated it as a detail rather than a
+  limitation.
+
+  The refusal now names the way round: draining a worker is a cluster
+  operation, done with `kubectl` against the kubeconfig `cctl kubeconfig`
+  fetches. The CLI page leads with the limitation and shows the two commands.
+  `cctl upgrade` is unaffected and still works on a worker: the upgrade path
+  drains where it can and reboots undrained where it cannot.
+
 - **Staging an upgrade never worked on a real node.** `bootc switch` takes
   `--apply` as a bare boolean, and the explicit `--apply=false` this passed was
   rejected outright — every upgrade failed with "unexpected value 'false' for

@@ -150,8 +150,15 @@ func TestAWorkerSaysItCannotDrainRatherThanFailing(t *testing.T) {
 		t.Fatalf("status = %d, want 409 (%v)", status, body)
 	}
 
-	if message, _ := body["error"].(string); !strings.Contains(message, "controller") {
-		t.Errorf("error = %q, want it to say which nodes can", message)
+	message, _ := body["error"].(string)
+
+	// Naming the nodes that can is half a refusal. Most of a cluster is
+	// workers, so this is the common answer rather than the rare one, and an
+	// operator reading it needs the way round rather than a diagnosis.
+	for _, want := range []string{"controller", "cctl kubeconfig", "kubectl"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("error = %q, want it to mention %q", message, want)
+		}
 	}
 }
 

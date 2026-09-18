@@ -36,14 +36,22 @@ const DefaultDrainTimeout = 5 * time.Minute
 // commandTimeout bounds everything except a drain, which carries its own.
 const commandTimeout = 2 * time.Minute
 
-// ErrNoClusterAccess reports a node that cannot talk to its own cluster.
+// ErrNoClusterAccess reports a node that cannot act on its own Node object.
 //
-// Only a node running a control plane has admin credentials locally. A plain
-// worker holds kubelet credentials, which cannot evict pods -- so cordon and
-// drain are not available there, and saying so is better than a failure that
-// reads like a broken cluster.
+// Only a node running a control plane holds admin credentials locally. A plain
+// worker holds kubelet credentials, which cannot evict pods, so cordon and
+// drain are not available there at all -- and since most of a cluster is
+// workers, this is the common answer rather than the rare one.
+//
+// The message names the way round it, because a refusal that leaves somebody
+// guessing is only half of one. Draining a worker is a cluster operation
+// rather than a node operation, and the tool for it is kubectl, pointed at the
+// credentials `cctl kubeconfig` fetches.
 var ErrNoClusterAccess = errors.New(
-	"this node has no cluster admin credentials; only a controller has them locally")
+	"only a controller holds cluster admin credentials, and this node is not one. " +
+		"Draining a worker is a cluster operation: " +
+		"`cctl kubeconfig <controller> > kube.yaml` " +
+		"then `kubectl --kubeconfig kube.yaml drain <node> --ignore-daemonsets`")
 
 // Runner executes a command. It exists so this package can be tested without a
 // machine to wreck.
