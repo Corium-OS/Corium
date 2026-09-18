@@ -453,3 +453,44 @@ func (c *Client) RotateCA(ctx context.Context, operatorCA, proof []byte) error {
 
 	return c.call(ctx, http.MethodPost, "/v1/ca/rotate", body, nil)
 }
+
+// Kubeconfig fetches the cluster's administrator credentials from a node.
+//
+// An empty server takes the node's own answer: the virtual IP on an HA control
+// plane, and otherwise the address it was reached on.
+func (c *Client) Kubeconfig(ctx context.Context, server string) ([]byte, error) {
+	path := "/v1/kubeconfig"
+	if server != "" {
+		path += "?" + url.Values{"server": {server}}.Encode()
+	}
+
+	// Not JSON: a kubeconfig is YAML, and re-encoding it here would mean this
+	// client deciding what a Kubernetes client may read.
+	return c.raw(ctx, path)
+}
+
+// raw performs a GET and returns the body untouched.
+func (c *Client) raw(ctx context.Context, path string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+c.address+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building the request: %w", err)
+	}
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("contacting %s: %w", c.address, err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponse))
+	if err != nil {
+		return nil, fmt.Errorf("reading the response: %w", err)
+	}
+
+	if response.StatusCode != http.StatusOK {
+		return nil, c.explain(response.Status, body)
+	}
+
+	return body, nil
+}

@@ -122,6 +122,7 @@ other than `~/.corium`. The port defaults to `7443`.
 | `cctl status <node>` | readonly | What the node is: role, cluster, images, k0s, health. `--json` for the reply verbatim |
 | `cctl services <node>` | readonly | The units this API knows about, and their state |
 | `cctl logs <node>` | readonly | A journal, per unit or across all of them |
+| `cctl kubeconfig <node>` | **admin** | The cluster's administrator credentials |
 
 `cctl health` is the one to reach for when something is wrong with your
 credentials rather than with the node: it is the smallest call that proves a
@@ -259,6 +260,40 @@ $ cctl rollback 192.168.1.51
 reboot stays yours to schedule. A node that has only ever booted one image has
 nowhere to go back to, and says so.
 
+### Getting a kubeconfig
+
+```console
+$ cctl kubeconfig 192.168.1.51 > ~/.kube/corium.yaml
+$ cctl kubeconfig 192.168.1.51 --output ~/.kube/corium.yaml
+```
+
+Standard output by default, and deliberately not `~/.kube/config`: merging into
+somebody's existing contexts is a decision with no undo. `--output` writes a
+file at `0600` and refuses to replace one without `--force`.
+
+**This is `admin`, and it outranks every other command here.** The rest act on
+one machine; this hands over a cluster, to somebody nothing in this API can
+take it back from. The node records that it happened in its journal.
+
+The server address it points at is the cluster's virtual IP on an HA control
+plane, and otherwise the address you reached the node on. A kubeconfig aimed at
+one particular controller stops working the first time that controller does,
+which is why the virtual IP wins where there is one.
+
+`--server` overrides it — for a load balancer in front of the control plane, a
+name rather than an address, or a port that is not `6443`:
+
+```console
+$ cctl kubeconfig 192.168.1.51 --server k8s.example.com
+$ cctl kubeconfig 192.168.1.51 --server 192.168.0.200:8443
+```
+
+A bare address gets `https://` and `:6443`; a whole URL is left alone.
+
+Only a controller can answer: a worker holds kubelet credentials, which are not
+an administrator's, and it says so rather than handing over something that
+looks right and is not.
+
 ### Handing a node to somebody else
 
 ```console
@@ -325,7 +360,7 @@ every call. Every route names the lowest role that may use it.
 |---|---|
 | `corium:readonly` | `health`, `status`, `services`, `logs` |
 | `corium:operator` | …and `restart`, `cordon`, `drain`, and an upgrade's *staging* |
-| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate` |
+| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig` |
 
 `cctl upgrade` spans both: pulling an image changes nothing else and is
 operator work, while applying it takes the node out of service. So an operator
@@ -383,7 +418,7 @@ the same answer on your workstation as on the machine.
 |---|---|
 | `cctl exec` | The moment an API can run any command it is SSH with a worse client, and every argument for keeping its surface small stops applying |
 | `cctl apply-config` | Provisioning is cloud-init's job. A node that needs different configuration is reprovisioned |
-| Anything Kubernetes | `kubectl` is not a gap. The API does not proxy the apiserver or hold a kubeconfig for you |
+| Anything Kubernetes beyond `kubeconfig` | The API hands over the admin kubeconfig once and does nothing else with Kubernetes. It does not proxy the apiserver, list pods, or keep credentials for you |
 | A fleet inventory | `cctl` acts on addresses you supply. There is no registry, no desired state, and nothing that reconciles |
 
 The last one is the design, not an omission: a node knows only about itself, and

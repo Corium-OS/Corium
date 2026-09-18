@@ -29,8 +29,19 @@ const StateFile = "/var/lib/corium/node.json"
 
 // State is what corium-agent writes when a bootstrap completes.
 type State struct {
-	Role           string    `json:"role"`
-	Cluster        string    `json:"cluster,omitempty"`
+	Role    string `json:"role"`
+	Cluster string `json:"cluster,omitempty"`
+
+	// Endpoint is the address clients should use to reach this cluster's
+	// control plane: the virtual IP on an HA node, cluster.endpoint where one
+	// was set, and empty when neither applies -- which means the node's own
+	// address is the answer.
+	//
+	// It is recorded here rather than worked out later for the same reason the
+	// role is: it was true when the node was made, and a configuration edited
+	// since describes an intention rather than a machine.
+	Endpoint string `json:"endpoint,omitempty"`
+
 	BootstrappedAt time.Time `json:"bootstrappedAt"`
 }
 
@@ -64,6 +75,10 @@ type Node struct {
 	Bootstrapped bool   `json:"bootstrapped"`
 	Role         string `json:"role,omitempty"`
 	Cluster      string `json:"cluster,omitempty"`
+
+	// Endpoint is where clients reach this cluster's control plane. Empty
+	// means the node's own address.
+	Endpoint string `json:"endpoint,omitempty"`
 
 	OS         OS         `json:"os"`
 	Kubernetes Kubernetes `json:"kubernetes"`
@@ -147,6 +162,7 @@ func (i *Inspector) Collect(ctx context.Context) *Node {
 		node.Bootstrapped = true
 		node.Role = state.Role
 		node.Cluster = state.Cluster
+		node.Endpoint = state.Endpoint
 	}
 
 	node.OS = i.operatingSystem(ctx)

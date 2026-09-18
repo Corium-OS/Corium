@@ -27,20 +27,19 @@ const consoleDevice = "/dev/console"
 func (s *Server) announce(identity tls.Certificate, address string) {
 	fingerprint := Fingerprint(identity.Certificate[0])
 
+	// The reachable address in both shapes. An operator grepping the journal
+	// for a node's fingerprint is usually about to point a client at it, and
+	// [::]:7443 is not an address to point anything at.
+	reachable := reachableAddress(address)
+
 	if !s.Unenrolled() {
 		slog.Info("serving the management API",
-			"address", address,
+			"address", reachable,
 			"fingerprint", fingerprint,
 			"clientAuth", "operator CA")
 
 		return
 	}
-
-	// The bound address, not the reachable one: a wildcard listener reports
-	// itself as [::]:7443, and printing `cctl enroll [::]:7443` on a console
-	// gives somebody a command that cannot be run. Swap in an address of this
-	// machine's own.
-	reachable := reachableAddress(address)
 
 	slog.Warn("node is unenrolled and is not in a cluster",
 		"address", reachable, "fingerprint", fingerprint)

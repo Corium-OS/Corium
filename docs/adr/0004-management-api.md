@@ -99,8 +99,26 @@ that takes a command line. The moment one exists this is SSH with a worse client
 and a second authentication system to keep correct, and every argument for
 keeping the surface small stops applying.
 
-No Kubernetes. The API does not proxy the apiserver, list pods, or hold a
-kubeconfig on the operator's behalf. `kubectl` is not a gap.
+Almost no Kubernetes. The API does not proxy the apiserver, list pods, or keep
+a kubeconfig on the operator's behalf. `kubectl` is not a gap.
+
+The exception, added after the rest was built and working: it will hand over
+the administrator kubeconfig k0s minted, once, on request. That was left out of
+the first version of this record on the grounds above, and leaving it out was
+wrong — it is the one Kubernetes-adjacent thing with no other answer. Without
+it, getting a usable `kubectl` out of a freshly bootstrapped node means SSHing
+into a controller and running `cat` on a file, which is the exact shape of
+problem this API exists to remove.
+
+It is `admin`, and it outranks everything else here: every other call acts on
+one machine, and this one hands over a cluster. `reset` destroys a node; this
+gives away every workload in the cluster, to somebody nothing here can take it
+back from. The node says so in its journal for that reason.
+
+What it does not become is a Kubernetes client. It reads the file k0s wrote,
+rewrites the server address to one that will keep working — the virtual IP on
+an HA control plane, since a kubeconfig aimed at one particular controller
+stops working the first time that controller does — and returns it.
 
 No package installation, no file writing, no configuration.
 

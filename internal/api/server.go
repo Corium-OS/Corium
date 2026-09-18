@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/kubeconfig"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
@@ -80,6 +81,9 @@ type Server struct {
 	// lifecycle does the things that cannot be undone by doing them again.
 	lifecycle *lifecycle.Manager
 
+	// kubeconfig fetches the cluster's administrator credentials.
+	kubeconfig *kubeconfig.Manager
+
 	// restart is closed when something has changed that the listener can only
 	// pick up by being rebuilt -- an enrolment, or a rotated CA. Rebuilding
 	// TLS underneath a live listener works until the one request that matters
@@ -106,6 +110,9 @@ func (s *Server) Upgrades(manager *upgrade.Manager) { s.upgrades = manager }
 // Lifecycle replaces how the server acts on the machine, likewise.
 func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
 
+// Kubeconfig replaces how the server asks k0s for credentials, likewise.
+func (s *Server) Kubeconfig(manager *kubeconfig.Manager) { s.kubeconfig = manager }
+
 // NewServer prepares a listener for whichever state the node is in.
 //
 // how says what an unclaimed node asks of somebody claiming it. It is a
@@ -114,14 +121,15 @@ func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
 // nobody could reason about.
 func NewServer(store *Store, address string, how Enrolment) (*Server, error) {
 	server := &Server{
-		store:     store,
-		address:   address,
-		restart:   make(chan struct{}),
-		ready:     make(chan struct{}),
-		inspector: &nodeinfo.Inspector{},
-		systemd:   &systemd.Manager{},
-		upgrades:  &upgrade.Manager{},
-		lifecycle: &lifecycle.Manager{},
+		store:      store,
+		address:    address,
+		restart:    make(chan struct{}),
+		ready:      make(chan struct{}),
+		inspector:  &nodeinfo.Inspector{},
+		systemd:    &systemd.Manager{},
+		upgrades:   &upgrade.Manager{},
+		lifecycle:  &lifecycle.Manager{},
+		kubeconfig: &kubeconfig.Manager{},
 	}
 
 	enrolled, err := store.Enrolled()
@@ -313,6 +321,11 @@ func (s *Server) routes() http.Handler {
 
 	// Handing the node to a different CA decides who may do everything above.
 	mux.HandleFunc("POST /v1/ca/rotate", require(RoleAdmin, s.handleRotateCA))
+
+	// Admin, and not because it changes anything -- it changes nothing. It
+	// hands over credentials to the whole cluster, which outranks every other
+	// call here: the rest act on one node.
+	mux.HandleFunc("GET /v1/kubeconfig", require(RoleAdmin, s.handleKubeconfig))
 
 	// Enrolment is not merely unnecessary on a claimed node, it is refused,
 	// and the refusal is explicit so that a second claimant learns nothing

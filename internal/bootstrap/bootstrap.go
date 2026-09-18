@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/config"
@@ -262,6 +263,7 @@ func recordState(cfg *config.Config) error {
 	state := nodeinfo.State{
 		Role:           string(cfg.Role),
 		Cluster:        cfg.Cluster.Name,
+		Endpoint:       clusterEndpoint(cfg),
 		BootstrappedAt: time.Now().UTC(),
 	}
 
@@ -275,6 +277,29 @@ func recordState(cfg *config.Config) error {
 	}
 
 	return writeFile(nodeinfo.StateFile, encoded, 0o644)
+}
+
+// clusterEndpoint is the address clients should use to reach this cluster.
+//
+// The virtual IP wins where there is one: on an HA control plane it is the
+// whole point, since it is the address that survives losing any one
+// controller, and a kubeconfig pointing at a particular controller is a
+// kubeconfig that stops working the first time that controller does.
+//
+// Empty means the node's own address is the answer, which is true for a single
+// node and for a cluster nobody gave an endpoint.
+func clusterEndpoint(cfg *config.Config) string {
+	if cfg.HA.Enabled && cfg.HA.VirtualIP != "" {
+		// Stored in CIDR form because keepalived needs the prefix length to
+		// add the address to an interface. A client wants the address.
+		if address, _, found := strings.Cut(cfg.HA.VirtualIP, "/"); found {
+			return address
+		}
+
+		return cfg.HA.VirtualIP
+	}
+
+	return cfg.Cluster.Endpoint
 }
 
 func markBootstrapped() error {

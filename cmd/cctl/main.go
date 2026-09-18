@@ -56,6 +56,7 @@ Commands:
   shutdown      Power a node off
   reset         Erase a node: leave its cluster, forget its owner, reboot
   ca rotate     Hand nodes to a different operator CA
+  kubeconfig    Fetch the cluster's administrator kubeconfig from a node
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -108,6 +109,8 @@ func run() error {
 		return resetCommand(ctx, args)
 	case "ca":
 		return caCommand(ctx, args)
+	case "kubeconfig":
+		return kubeconfigCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -841,6 +844,60 @@ func rotate(
 		"and check one before you put the old directory away:\n"+
 		"  cctl health %s --dir %s\n",
 		next.Dir(), withDefaultPort(addresses[0]), next.Dir())
+
+	return nil
+}
+
+func kubeconfigCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl kubeconfig", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		server      = flags.String("server", "",
+			"address clients should reach the control plane on; "+
+				"default is the cluster's virtual IP, or this node")
+		output = flags.String("output", "",
+			"write to this file instead of standard output")
+		force = flags.Bool("force", false, "overwrite the output file if it exists")
+	)
+
+	client, address, err := target(flags, args,
+		"cctl kubeconfig <address> [--server <addr>] [--output <file>]", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	raw, err := client.Kubeconfig(ctx, *server)
+	if err != nil {
+		return err
+	}
+
+	if *output == "" {
+		// To standard output by default, and deliberately not to
+		// ~/.kube/config: merging into somebody's existing contexts is a
+		// decision with no undo, and `> file` or `--output` says it plainly.
+		_, err := os.Stdout.Write(raw)
+
+		return err
+	}
+
+	if _, err := os.Stat(*output); err == nil && !*force {
+		return fmt.Errorf("%s exists; pass --force to replace it", *output)
+	}
+
+	// 0600: this is cluster-admin. Anything wider hands the cluster to every
+	// account on the machine.
+	//
+	// The path comes from a flag the operator typed on their own machine,
+	// which is the whole point of --output; there is no privilege boundary
+	// here for a traversal to cross.
+	if err := os.WriteFile(*output, raw, 0o600); err != nil { //nolint:gosec // G703: the operator's own path
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "Wrote %s -- these are cluster administrator credentials for %s.\n",
+		*output, address)
 
 	return nil
 }

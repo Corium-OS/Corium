@@ -253,6 +253,34 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   exchange: it had grown to 438 lines, most of them CLI walkthroughs on a page
   whose job is to document the `corium:` block.
 
+### Added
+
+- **`cctl kubeconfig <node>`** hands over the administrator credentials k0s
+  minted, pointed at an address that will keep working. That is the cluster's
+  virtual IP on an HA control plane — a kubeconfig aimed at one particular
+  controller stops working the first time that controller does — and otherwise
+  the address the node was reached on. `--server` overrides it, for a load
+  balancer, a name rather than an address, or a port that is not `6443`.
+
+  It is `corium:admin`, and it outranks every other call: the rest act on one
+  machine, and this hands over a cluster to somebody nothing in the API can
+  take it back from. The node records it in its journal. Only a controller can
+  answer; a worker holds kubelet credentials, which are not an administrator's.
+
+  Standard output by default, and deliberately not `~/.kube/config`: merging
+  into existing contexts is a decision with no undo. `--output` writes `0600`
+  and refuses to replace a file without `--force`.
+
+  [ADR 4](docs/adr/0004-management-api.md) said the API would have nothing to
+  do with Kubernetes. That was too broad and is amended: this is the one
+  Kubernetes-adjacent thing with no other answer, since the alternative is
+  SSHing into a controller to `cat` a file — the exact shape of problem the API
+  exists to remove.
+
+  `corium-agent` now records the cluster's endpoint alongside the role when it
+  bootstraps, so the node can answer this without re-reading a configuration
+  that may have been edited since.
+
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
   secret source was reported as `join.tokenFrom` whichever key it was reached
   through, which sent you to a line that was not the one at fault.
