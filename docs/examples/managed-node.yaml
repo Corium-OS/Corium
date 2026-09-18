@@ -1,0 +1,60 @@
+#cloud-config
+#
+# A worker that can be managed with cctl, showing the ways an operator CA
+# reaches a node -- and the one that puts nothing in this document at all.
+#
+# The API is off unless one of these is present. A node with no `api:` block
+# runs no daemon and binds no port.
+
+corium:
+  role: worker
+
+  join:
+    tokenFrom:
+      url: https://secrets.example.com/corium/worker-token
+
+  api:
+    # Mode B: the CA certificate, resolved at first boot. This is what the
+    # example uses because a working inline certificate cannot be shipped in a
+    # repository -- it would be copied into production, where whoever holds the
+    # matching private key would own the node.
+    operatorCAFrom:
+      url: https://pki.example.com/corium/operator-ca.pem
+      waitFor: 15m
+
+    # Mode A, and the one to prefer if you already have a PKI: the same
+    # certificate, inline and in clear. Set one or the other, not both.
+    #
+    # It is a *certificate*, never a key. The node is never given the key that
+    # signs with it, which is why -- unlike the join token above -- this is
+    # safe in cloud-init in the open: anything that can read this document
+    # learns nothing it can act on. Every node in the fleet carries the same
+    # block.
+    #
+    # operatorCA: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...the output of: openssl x509 -in operator-ca.pem
+    #   -----END CERTIFICATE-----
+
+    # Mode C, maintenance mode: `enabled: true` and neither key above. The node
+    # validates its configuration and then stops before bootstrapping k0s,
+    # printing a pairing code and its certificate fingerprint on the console:
+    #
+    #   cctl enroll 192.168.1.51 --code K7QM-93XF
+    #
+    # Enrolment pins the CA and releases the bootstrap. Nothing about who owns
+    # the node is in this document, at the cost of one console visit per
+    # machine -- a node waiting to be claimed is in no cluster.
+    #
+    # enabled: true
+
+    # And the default, which is no API at all. Written explicitly it also masks
+    # the unit, so nothing re-enables it later.
+    #
+    # enabled: false
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

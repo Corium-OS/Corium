@@ -73,6 +73,11 @@ PAGES = [
      "ADR 3 — Software RAID scope", 930,
      "Why software RAID covers a node's spare disks and not its root "
      "filesystem, and what upstream would have to change."),
+    ("adr/0004-management-api.md", "reference", "adr-0004-management-api",
+     "ADR 4 — Management API", 940,
+     "What a node-local management API is allowed to do, why there is no exec, "
+     "and the three ways an operator CA reaches a node — including a "
+     "maintenance mode that puts nothing in cloud-init."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes

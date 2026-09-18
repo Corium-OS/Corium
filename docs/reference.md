@@ -98,10 +98,11 @@ silently ignored key means a setting you carefully wrote never took effect.
 | Step | What happens |
 |---|---|
 | **Parse** | Locate the schema in the document and decode it strictly |
-| **Defaults** | Fill unset fields (§3.11). Idempotent |
+| **Defaults** | Fill unset fields (§3.12). Idempotent |
 | **Validate** | Report **every** problem at once, offline |
 | **Hostname** | Settle the node's name before anything reads it (§4) |
-| **Secrets** | Resolve `tokenFrom` / `authPassFrom` |
+| **Secrets** | Resolve `tokenFrom` / `authPassFrom` / `operatorCAFrom` |
+| **Claim** | In maintenance mode, wait here until an operator enrols the node (§3.11) |
 | **Render** | Produce `/etc/k0s/k0s.yaml`, then apply `k0s.patch` |
 | **Install** | `k0s install …`, then start the service |
 | **Mark** | Write `/var/lib/corium/bootstrapped` |
@@ -158,7 +159,8 @@ referred to indirectly in the journal.
 | `ha` | object | no | Control plane load balancing (§3.8) |
 | `upgrades` | object | no | Unattended upgrades (§3.9) |
 | `raid` | list | no | Software RAID on spare disks (§3.10) |
-| `k0s` | object | no | Escape hatch (§3.12) |
+| `api` | object | no | The management API, off by default (§3.11) |
+| `k0s` | object | no | Escape hatch (§3.13) |
 
 ### `role`
 
@@ -253,7 +255,7 @@ an external cluster, is reachable through `k0s.patch`. See
 | Key | Type | Notes |
 |---|---|---|
 | `token` | string | Inline. Convenient for labs, a liability in production |
-| `tokenFrom` | object | Resolved at first boot (§3.13) |
+| `tokenFrom` | object | Resolved at first boot (§3.14) |
 
 Set exactly one. Required for `worker`; rejected for `single`, which bootstraps
 its own cluster.
@@ -343,7 +345,7 @@ one holds a virtual IP.
 | `interface` | string | no | Defaults to the interface holding the default route |
 | `virtualRouterID` | int | no | 1–255. Omit it and k0s assigns one starting at 51. Must be unique within the broadcast domain |
 | `authPass` | string | yes | **Eight characters or fewer** |
-| `authPassFrom` | object | — | Alternative to `authPass` (§3.13) |
+| `authPassFrom` | object | — | Alternative to `authPass` (§3.14) |
 | `unicastPeers` | list | no | The other controllers' addresses |
 
 `authPass` is capped because **keepalived silently truncates it to eight
@@ -445,7 +447,83 @@ Prefer `/dev/disk/by-id/...` over `/dev/sdb`. Kernel names are handed out in
 discovery order, so on a first boot they can name a different disk than the one
 you meant.
 
-### 3.11 Defaults
+### 3.11 `api`
+
+The node's management API, `corium-apid`. Off unless asked for, and covered in
+full by [ADR 4](adr/0004-management-api.md).
+
+> **Not implemented yet.** The schema below is settled and validated; the
+> daemon is not written. A node naming an operator CA bootstraps normally and
+> logs that nothing is serving the API. A node asking for maintenance mode
+> refuses to bootstrap, since there is nothing to enrol against and joining a
+> cluster unclaimed is the outcome the design exists to prevent.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `false` | Setting either key below implies `true` |
+| `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
+| `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
+
+Set at most one of `operatorCA` and `operatorCAFrom`.
+
+The value is a **certificate**, not a key. The node is never given the private
+key that signs with it, which is why — unlike a join token — it is safe in
+cloud-init in clear:
+
+```yaml
+corium:
+  role: worker
+  api:
+    operatorCA: |
+      -----BEGIN CERTIFICATE-----
+      MIIBkTCB+6ADAgECAhRk...
+      -----END CERTIFICATE-----
+```
+
+An inline CA is checked at validation time: it must be one PEM certificate, it
+must be a CA, and it must not have expired. A private key pasted here is
+rejected by name, because it means the key that owns your fleet has just been
+written into a document that ends up in instance metadata — treat it as
+compromised.
+
+Writing `enabled: false` alongside either key is an error rather than a
+precedence rule. The configuration is saying two contradictory things, and
+guessing which one you meant would leave the other silently doing nothing.
+
+#### Maintenance mode
+
+`enabled: true` with no CA. The node reads its configuration, validates it, and
+then **stops before bootstrapping k0s**, printing a single-use pairing code and
+its certificate fingerprint to the console, the serial port and the journal:
+
+```
+Corium node is unenrolled and is not in a cluster.
+
+  address       192.168.1.51:7443
+  pairing code  K7QM-93XF
+  fingerprint   SHA256:tQ2f...9c1a
+
+  cctl enroll 192.168.1.51 --code K7QM-93XF
+```
+
+`cctl enroll` pins the CA and releases the bootstrap, which proceeds from the
+cloud-init configuration the node has been holding all along. Enrolment sends a
+CA certificate and nothing else — it is not a way to configure a node.
+
+Two consequences worth knowing before choosing this mode:
+
+- **It is not zero touch.** Three nodes means three consoles. If you want
+  unattended provisioning with nothing secret in the metadata, use
+  `operatorCA` — the certificate is not a secret.
+- **A node waiting to be claimed is in no cluster**, and the rule holds in both
+  directions: a node cannot return to maintenance mode while it is a cluster
+  member, so `cctl reset` takes it out of the cluster on the way.
+
+Enrolment is recorded under `/var/lib/corium/api/` and survives reboots and
+upgrades. A node that has been claimed never falls back to maintenance mode on
+its own, or power-cycling a machine would be enough to take it.
+
+### 3.12 Defaults
 
 | Field | Default |
 |---|---|
@@ -459,7 +537,7 @@ you meant.
 
 Applying defaults is idempotent and never overwrites an explicit value.
 
-### 3.12 `k0s.patch` — the escape hatch
+### 3.13 `k0s.patch` — the escape hatch
 
 A strategic merge patch applied to the rendered `k0s.yaml` **after** Corium has
 finished, passed through without interpretation. Every k0s setting stays
@@ -488,10 +566,11 @@ The second escape hatch is that the document remains an ordinary cloud-config:
 `write_files`, `runcmd` and every other module keep working. Corium is a guest
 in that document, not its owner.
 
-### 3.13 Secret sources
+### 3.14 Secret sources
 
-Used by `join.tokenFrom` and `ha.authPassFrom`, so credentials need not sit in
-instance metadata where anything reaching the metadata service can read them.
+Used by `join.tokenFrom`, `ha.authPassFrom` and `api.operatorCAFrom`, so a value
+need not sit in instance metadata where anything reaching the metadata service
+can read it.
 
 | Key | Type | Notes |
 |---|---|---|

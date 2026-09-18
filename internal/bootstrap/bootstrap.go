@@ -71,6 +71,13 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// A node nobody has claimed is a node in no cluster. This is checked before
+	// the hostname is settled and before any disk is touched, because for an
+	// unclaimed node the correct amount of the machine to change is none of it.
+	if err := gateOnEnrolment(cfg); err != nil {
+		return err
+	}
+
 	// The hostname must be final before k0s starts: k0s registers the node
 	// under whatever it reads at startup, and renaming afterwards leaves the
 	// old Node object behind. A dry run must not rename the machine, so it is

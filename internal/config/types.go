@@ -66,6 +66,9 @@ type Config struct {
 	// Upgrades controls whether the node updates itself.
 	Upgrades Upgrades `yaml:"upgrades,omitempty" json:"upgrades,omitempty"`
 
+	// API configures the node's management API. It is off unless asked for.
+	API API `yaml:"api,omitempty" json:"api,omitempty"`
+
 	// K0s is the escape hatch to the underlying k0s configuration.
 	K0s K0s `yaml:"k0s,omitempty" json:"k0s,omitempty"`
 }
@@ -393,6 +396,89 @@ type Upgrades struct {
 	// Schedule is a systemd OnCalendar expression saying when to check.
 	// Defaults to daily. See systemd.time(7) for the syntax.
 	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+}
+
+// APIMode is what corium-apid does on a node, derived from the API block
+// rather than written by the operator.
+type APIMode string
+
+const (
+	// APIModeDisabled runs no daemon and binds no port. It is what a node with
+	// no api: block does, which is every node provisioned before the API
+	// existed.
+	APIModeDisabled APIMode = "disabled"
+
+	// APIModeConfigured takes the operator CA from the configuration, inline
+	// or resolved at first boot. Bootstrap is unaffected: the node joins its
+	// cluster without waiting for anyone.
+	APIModeConfigured APIMode = "configured"
+
+	// APIModeMaintenance is a node nobody has claimed yet. It validates its
+	// configuration, holds the bootstrap, and serves one RPC until an operator
+	// enrols it from the console.
+	APIModeMaintenance APIMode = "maintenance"
+)
+
+// API configures corium-apid, the node's management API.
+//
+// It is off by default, and that is a decision rather than caution: a
+// privileged daemon listening on every machine in a fleet is a reasonable
+// thing to refuse, and a node that has been running for a year should not
+// acquire a listening port by being upgraded.
+//
+// Trust is anchored in an operator CA, of which the node is given the
+// certificate and never the key. A certificate is public material, so unlike a
+// join token it can sit in instance metadata in clear without leaking
+// anything. See docs/adr/0004-management-api.md.
+type API struct {
+	// Enabled turns the daemon on. Setting OperatorCA or OperatorCAFrom
+	// implies it, so it only needs writing to ask for maintenance mode, or to
+	// state a refusal that nothing later overrides.
+	//
+	// It is a pointer because an absent Enabled and an explicit false are
+	// different statements. Absent alongside an operator CA is the common
+	// case; false alongside one is a configuration that contradicts itself,
+	// and is rejected rather than resolved by a precedence rule.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// OperatorCA is the PEM-encoded certificate of the CA that signs the
+	// client certificates this node will accept. The matching private key
+	// stays with the operator and never reaches a node.
+	OperatorCA string `yaml:"operatorCA,omitempty" json:"operatorCA,omitempty"`
+
+	// OperatorCAFrom resolves OperatorCA at first boot, for a CA minted by the
+	// same run that builds the cluster. Exactly one of the two may be set.
+	OperatorCAFrom *SecretSource `yaml:"operatorCAFrom,omitempty" json:"operatorCAFrom,omitempty"`
+}
+
+// Mode reports what this configuration asks corium-apid to do.
+func (a API) Mode() APIMode {
+	trusted := a.OperatorCA != "" || a.OperatorCAFrom != nil
+
+	switch {
+	case a.Enabled != nil && !*a.Enabled:
+		// Validation rejects an explicit false alongside an operator CA, so
+		// reaching here with one set is impossible. Refusing to serve is still
+		// the right answer if it somehow happens.
+		return APIModeDisabled
+	case trusted:
+		return APIModeConfigured
+	case a.Enabled != nil && *a.Enabled:
+		return APIModeMaintenance
+	default:
+		return APIModeDisabled
+	}
+}
+
+// HoldsBootstrap reports whether the node must wait to be claimed before it
+// joins a cluster.
+//
+// A node waiting for an operator is not a cluster member, and the ordering is
+// the point rather than an implementation detail: bootstrapping first would
+// leave a machine that runs workloads and holds cluster credentials while
+// still obeying whoever first reaches an unauthenticated port.
+func (a API) HoldsBootstrap() bool {
+	return a.Mode() == APIModeMaintenance
 }
 
 // K0s is the escape hatch to the underlying k0s configuration.

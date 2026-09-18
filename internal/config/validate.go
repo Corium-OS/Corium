@@ -31,6 +31,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
 	problems = append(problems, c.validateRAID()...)
+	problems = append(problems, c.validateAPI()...)
 
 	return errors.Join(problems...)
 }
@@ -132,13 +133,17 @@ func (c *Config) validateJoin() []error {
 	}
 
 	if hasSource {
-		problems = append(problems, c.Join.TokenFrom.validate()...)
+		problems = append(problems, c.Join.TokenFrom.validate("join.tokenFrom")...)
 	}
 
 	return problems
 }
 
-func (t *SecretSource) validate() []error {
+// validate checks a secret source, reporting problems against the field it was
+// reached through. The field is passed in rather than assumed: the same type
+// now backs join.tokenFrom, ha.authPassFrom and api.operatorCAFrom, and an
+// error that names the wrong key sends an operator to the wrong line.
+func (t *SecretSource) validate(field string) []error {
 	var problems []error
 
 	hasURL := t.URL != ""
@@ -146,11 +151,11 @@ func (t *SecretSource) validate() []error {
 
 	switch {
 	case hasURL && hasFile:
-		problems = append(problems, errors.New(
-			"join.tokenFrom: set either url or file, not both"))
+		problems = append(problems, fmt.Errorf(
+			"%s: set either url or file, not both", field))
 	case !hasURL && !hasFile:
-		problems = append(problems, errors.New(
-			"join.tokenFrom: set either url or file"))
+		problems = append(problems, fmt.Errorf(
+			"%s: set either url or file", field))
 	}
 
 	if hasURL {
@@ -158,33 +163,34 @@ func (t *SecretSource) validate() []error {
 		switch {
 		case err != nil:
 			problems = append(problems,
-				fmt.Errorf("join.tokenFrom.url: %q is not a valid URL", t.URL))
+				fmt.Errorf("%s.url: %q is not a valid URL", field, t.URL))
 		case parsed.Scheme != "https":
-			// A join token fetched over plain HTTP is a join token handed to
-			// anyone on the path. There is no opt-out for this.
+			// A secret fetched over plain HTTP is a secret handed to anyone on
+			// the path. There is no opt-out for this.
 			problems = append(problems, fmt.Errorf(
-				"join.tokenFrom.url: scheme must be https, got %q", parsed.Scheme))
+				"%s.url: scheme must be https, got %q", field, parsed.Scheme))
 		}
 	}
 
 	if hasFile && !strings.HasPrefix(t.File, "/") {
 		problems = append(problems, fmt.Errorf(
-			"join.tokenFrom.file: must be an absolute path, got %q", t.File))
+			"%s.file: must be an absolute path, got %q", field, t.File))
 	}
 
 	if t.WaitFor != "" {
 		switch d, err := time.ParseDuration(t.WaitFor); {
 		case err != nil:
 			problems = append(problems, fmt.Errorf(
-				"waitFor: %q is not a duration; use a form like 15m or 1h", t.WaitFor))
+				"%s.waitFor: %q is not a duration; use a form like 15m or 1h",
+				field, t.WaitFor))
 		case d < 0:
 			problems = append(problems, fmt.Errorf(
-				"waitFor: %q is negative", t.WaitFor))
+				"%s.waitFor: %q is negative", field, t.WaitFor))
 		case d > maxWaitFor:
 			// A node stuck waiting is a node nobody is looking at. An hour is
 			// already generous for "the first controller is still coming up".
 			problems = append(problems, fmt.Errorf(
-				"waitFor: %q is longer than the %s maximum", t.WaitFor, maxWaitFor))
+				"%s.waitFor: %q is longer than the %s maximum", field, t.WaitFor, maxWaitFor))
 		}
 	}
 
@@ -363,7 +369,7 @@ func (c *Config) validateAuthPass() []error {
 	}
 
 	if hasSource {
-		return c.HA.AuthPassFrom.validate()
+		return c.HA.AuthPassFrom.validate("ha.authPassFrom")
 	}
 
 	if len(c.HA.AuthPass) > keepalivedAuthPassLimit {
@@ -519,4 +525,62 @@ func validateRAIDFilesystem(field string, array RAIDArray) []error {
 	}
 
 	return problems
+}
+
+func (c *Config) validateAPI() []error {
+	var problems []error
+
+	hasInline := c.API.OperatorCA != ""
+	hasSource := c.API.OperatorCAFrom != nil
+
+	if hasInline && hasSource {
+		problems = append(problems, errors.New(
+			"api: set either operatorCA or operatorCAFrom, not both"))
+	}
+
+	// Naming the CA that owns a node and refusing to run the daemon are
+	// contradictory statements. Picking a winner would mean one of them
+	// silently does nothing, which is exactly the class of mistake that costs
+	// an operator a reboot cycle to find.
+	if c.API.Enabled != nil && !*c.API.Enabled && (hasInline || hasSource) {
+		problems = append(problems, errors.New(
+			"api: enabled is false but an operator CA is set; remove one of them, "+
+				"since a node cannot both refuse the API and name its owner"))
+	}
+
+	if hasSource {
+		problems = append(problems, c.API.OperatorCAFrom.validate("api.operatorCAFrom")...)
+	}
+
+	if hasInline {
+		problems = append(problems, validateOperatorCA(c.API.OperatorCA)...)
+	}
+
+	return problems
+}
+
+// validateOperatorCA checks an inline operator CA, reporting against the key
+// it was written under.
+//
+// This is worth doing early. The value is pasted by hand or templated by a
+// provisioning tool, and the failure mode of getting it wrong is a node that
+// boots, serves TLS, and rejects every operator that talks to it -- which
+// looks like a networking problem for as long as it takes somebody to check
+// the certificate.
+func validateOperatorCA(pemData string) []error {
+	_, err := ParseOperatorCA([]byte(pemData))
+	if err == nil {
+		return nil
+	}
+
+	// The one problem worth more than a restatement: a key here has been
+	// written into a document that ends up in instance metadata, and saying
+	// only "wrong type" would let somebody fix the line and move on.
+	if errors.Is(err, ErrPrivateKey) {
+		return []error{fmt.Errorf(
+			"api.operatorCA: %w -- a node is given the CA certificate and never its "+
+				"key. Treat the key you just put in a configuration as compromised", err)}
+	}
+
+	return []error{fmt.Errorf("api.operatorCA: %w", err)}
 }

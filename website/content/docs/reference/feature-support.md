@@ -126,6 +126,23 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
 | Root filesystem on RAID | — | Works, but install-time only: hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](/docs/guides/raid/) |
 
+### Management API
+
+Off unless asked for, and covered by
+[ADR 4](/docs/reference/adr-0004-management-api/).
+
+| Feature | Field | Notes |
+|---|---|---|
+| The API itself | `api.enabled` | Off by default. A node with no `api:` block runs no daemon and binds no port |
+| Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
+| Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
+| Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until `cctl enroll` claims it |
+
+A node in maintenance mode is not a cluster member: it validates its
+configuration and waits, rather than joining first and being claimed later.
+Enrolment carries no configuration — it sends a CA certificate and nothing
+else, and the node's role and join token still come from cloud-init.
+
 ### Where configuration comes from
 
 | Feature | Notes |
@@ -240,8 +257,9 @@ should be.
 | Not supported | Why |
 |---|---|
 | **k0s Autopilot** | Autopilot upgrades Kubernetes by replacing the k0s binary on disk. Corium's binary lives in the read-only `/usr`, because Kubernetes ships with the OS. Two upgrade mechanisms, each able to move the version independently, is a worse position than one |
-| **Fleet management** | Corium provisions a node and stops. It does not track, group or reconcile machines. That is a control plane's job, and there are good ones |
-| **A bespoke configuration API** | The value of cloud-init is that every cloud, hypervisor and PXE setup already speaks it |
+| **Fleet management** | Corium provisions a node and stops. It does not track, group or reconcile machines. That is a control plane's job, and there are good ones. The management API does not change this: it is one daemon per node answering for that node, with no registry, no inventory and no desired state. A rolling upgrade is a `cctl` loop over addresses you supplied |
+| **A bespoke configuration API** | The value of cloud-init is that every cloud, hypervisor and PXE setup already speaks it. The management API is not one: it cannot write a `corium:` block, and there is no `cctl apply-config` |
+| **Arbitrary command execution over the API** | There is no `exec` endpoint and no endpoint taking a command line. One would make the API an SSH with a worse client, and every argument for keeping its surface small would stop applying |
 | **Forking or patching k0s** | Corium configures upstream k0s. A fork would mean owning Kubernetes bugs, which is not a business worth being in |
 | **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Deleting a chart from the configuration leaves the release in place — remove it with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/) |
 | **Multiple Kubernetes distributions** | Only k0s. Supporting k3s or RKE2 as well would mean an abstraction that fits none of them properly |
@@ -255,7 +273,7 @@ enough, not because they are wrong.
 |---|---|
 | **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) by dropping an image bundle in `<data-dir>/images/`. Corium can already bake one into the image with a `COPY`, but there is no `corium:` field for it and it is untested |
 | **Worker profiles as a modelled field** | Reachable through the patch today |
-| **Uninstalling or resetting a node** | `k0s reset` exists; Corium does not wrap it. On an image-based OS, reprovisioning is usually the better answer |
+| **Uninstalling or resetting a node** | `k0s reset` exists; Corium does not wrap it yet. [ADR 4](/docs/reference/adr-0004-management-api/) gives it a home as `cctl reset` — the one operation that takes a node out of its cluster and returns it to maintenance mode. On an image-based OS, reprovisioning is still often the better answer |
 
 ---
 
