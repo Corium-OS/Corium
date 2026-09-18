@@ -120,6 +120,11 @@ One difference worth knowing: `cctl upgrade` refuses an image the node's own
 signing policy would accept unsigned, which is what stops a typo rebasing a
 Kubernetes node onto a desktop image. `bootc switch` by hand does not ask.
 
+That check applies to images you build too, and it is the first thing people hit
+when they derive one: your repository falls under the policy's permissive
+default, so it is refused until you sign it and say so. See
+[building your own image](derived-images.md).
+
 ### Controllers
 
 With three controllers you can lose one and keep etcd quorum, so upgrade them
