@@ -298,6 +298,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 - **`mise run k0s-lock vX.Y.Z+k0s.N` repins the Kubernetes version.**
   `build/k0s.lock` has always documented a command to refresh it; that command
   now exists.
+- **The VM console is quieter at boot.** `quiet loglevel=3`, shipped as a bootc
+  kernel argument under `/usr/lib/bootc/kargs.d` and so reapplied on every
+  upgrade, drops routine kernel chatter — device probes, netfilter, the bridge
+  module — while warnings, errors, and the enrolment code still print. The code
+  is written straight to `/dev/console` by `corium-apid`, not through the kernel
+  log, so lowering the printk level cannot hide it. cloud-init's output is left
+  on the console on purpose, so a first boot that goes wrong still says so.
 
 ## [0.1.0] - 2026-09-17
 
