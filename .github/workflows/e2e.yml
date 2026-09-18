@@ -1,0 +1,194 @@
+# End-to-end: boot a real node and drive it with cctl.
+#
+# Every one of this project's worst bugs passed review and unit tests and only
+# appeared on a running machine -- a systemd ordering cycle that deleted the
+# bootstrap job, every node registering as "fedora", an HA controller claiming
+# the virtual IP as its own, an SSH key the API accepted and sshd silently
+# refused. This is the cheapest imitation of a running machine that CI can hold.
+#
+# It is off by default and runs only when a pull request carries the `e2e`
+# label, because it builds an image and a disk and then boots them: twenty-odd
+# minutes, against two for the rest of CI.
+name: End-to-end
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Boot a node and drive it with cctl
+    # `labeled` alone would not re-run on a later push, and `synchronize` alone
+    # would not run when the label is first applied. Asking the payload whether
+    # the label is on the pull request right now covers both.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check this runner can accelerate a virtual machine
+        run: |
+          # Without KVM, QEMU emulates, k0s takes ten to twenty times longer to
+          # come up, and this job times out with a failure that looks like a bug
+          # in Corium. Say what is actually wrong, first thing.
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm is absent: this runner cannot accelerate a VM." >&2
+            exit 1
+          fi
+
+          # Present but not usable by the runner user is the common case, and it
+          # is fixable rather than fatal.
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+              sudo tee /etc/udev/rules.d/99-kvm-for-the-runner.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+
+          ls -l /dev/kvm
+          [ -r /dev/kvm ] && [ -w /dev/kvm ] || {
+            echo "::error::/dev/kvm exists but is not usable by this job." >&2
+            exit 1
+          }
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install what boots a disk image
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 ovmf cloud-image-utils
+
+      - name: Build cctl
+        run: |
+          # Plain go build: this runner has Go and not mise, and installing mise
+          # to run one task would pull Hugo and Node with it.
+          go build -o bin/cctl ./cmd/cctl
+          ./bin/cctl version
+
+      - name: Build the OS image
+        run: podman build --tag localhost/corium:e2e --file Containerfile .
+
+      - name: Build a disk from it
+        run: |
+          mkdir -p output
+          # The same invocation the release path uses, so this exercises the
+          # artefact route rather than a private one.
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            -v "${PWD}/output:/output" \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type qcow2 --local localhost/corium:e2e
+          sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
+          qemu-img resize output/qcow2/disk.qcow2 20G
+
+      - name: Seed it with a configuration that says nothing about the node
+        run: |
+          # Deliberately minimal: the API on, and a node that waits to be told
+          # what it is. Everything that makes this machine a particular node
+          # arrives over the API, which is the thing under test. The account
+          # exists and has no key, so the SSH check has a baseline to fail
+          # against before the API grants one.
+          cat > user-data <<'CONFIG'
+          #cloud-config
+          corium:
+            api:
+              enabled: true
+              awaitConfig: true
+          users:
+            - name: core
+              groups: [wheel]
+              sudo: 'ALL=(ALL) NOPASSWD:ALL'
+              shell: /bin/bash
+          ssh_pwauth: false
+          CONFIG
+
+          # Checked before it is baked into a disk: a document the agent would
+          # refuse turns into a node that boots and does nothing, which reads
+          # like a bug in the boot path rather than a typo in this file.
+          go run ./cmd/corium-agent validate user-data
+
+          cloud-localds seed.iso user-data
+
+      - name: Boot it
+        run: |
+          # The firmware is UEFI because the image is: fedora-bootc ships no
+          # BIOS path. Ubuntu moved the 4 MB variants under new names, so take
+          # whichever this runner has rather than pinning one.
+          code="$(ls /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd 2>/dev/null | head -1)"
+          vars="$(ls /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd 2>/dev/null | head -1)"
+          [ -n "${code}" ] && [ -n "${vars}" ] || {
+            echo "::error::no OVMF firmware found; the image only boots UEFI" >&2
+            ls -l /usr/share/OVMF/ || true
+            exit 1
+          }
+          cp "${vars}" vars.fd
+
+          # User-mode networking, so no bridge and no privileges. cctl pins the
+          # node by the fingerprint of the certificate it serves rather than by
+          # hostname, which is exactly what makes reaching it on 127.0.0.1
+          # through a forwarded port legitimate instead of a fudge.
+          qemu-system-x86_64 \
+            -machine q35,accel=kvm -cpu host -smp 4 -m 4096 \
+            -drive "if=pflash,format=raw,readonly=on,file=${code}" \
+            -drive "if=pflash,format=raw,file=vars.fd" \
+            -drive "file=output/qcow2/disk.qcow2,if=virtio,format=qcow2" \
+            -drive "file=seed.iso,if=virtio,format=raw,readonly=on" \
+            -netdev "user,id=net0,hostfwd=tcp::7443-:7443,hostfwd=tcp::2222-:22" \
+            -device virtio-net-pci,netdev=net0 \
+            -display none -serial file:console.log -daemonize
+
+      - name: Wait for the node to offer itself
+        run: |
+          # The banner on the console is the signal, not the open port: the
+          # daemon binds before it has minted an identity, and the pairing code
+          # is what the test needs next.
+          for attempt in $(seq 1 120); do
+            if grep -q "pairing code" console.log 2>/dev/null; then
+              echo "the node is up and waiting to be claimed"
+              grep -A6 "unenrolled" console.log | tail -8
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::the node never printed a pairing code" >&2
+          tail -60 console.log || true
+          exit 1
+
+      - name: Drive it with cctl
+        env:
+          ADDRESS: 127.0.0.1:7443
+          CCTL: ${{ github.workspace }}/bin/cctl
+          CONSOLE: ${{ github.workspace }}/console.log
+          SSH_PORT: "2222"
+        run: .github/e2e/drive-a-node.sh
+
+      - name: What the node said, whatever happened
+        if: always()
+        run: |
+          echo "::group::console"
+          tail -200 console.log || true
+          echo "::endgroup::"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: node-console
+          path: console.log
+          retention-days: 7
