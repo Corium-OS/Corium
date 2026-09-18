@@ -60,7 +60,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Service address range | `network.serviceCIDR` | Default `10.96.0.0/12`, matching k0s |
 | kube-router | `network.cni: kuberouter` | k0s's default: networking, policy and service proxy in one component |
 | Calico | `network.cni: calico` | |
-| Bring your own CNI | `network.cni: custom` | k0s deploys nothing; the node stays `NotReady` until you install one |
+| Bring your own CNI | `network.cni: custom` | k0s deploys nothing; the node stays `NotReady` until you install one. [Worked example with Cilium](/docs/guides/cilium/) |
 
 ### Storage
 

@@ -213,8 +213,10 @@ in an HA cluster, which defeats the point.
 | `cni` | enum | `kuberouter` | `kuberouter`, `calico`, `custom` |
 
 `cni: custom` installs nothing. The node stays `NotReady` and pods stay
-`Pending` until you install a network — expected, not broken. See
-[`examples/custom-cni.yaml`](examples/custom-cni.yaml).
+`Pending` until you install a network — expected, not broken. [Installing
+Cilium](cilium.md) walks through one, and
+[`examples/custom-cni.yaml`](examples/custom-cni.yaml) is the document it
+boots from.
 
 kube-router is k0s's default and covers networking, network policy and service
 proxying in a single component. Tuning any of the three, changing the

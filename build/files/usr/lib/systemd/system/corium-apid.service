@@ -55,7 +55,6 @@ PrivateTmp=yes
 # protocol" after k0s has already stopped -- leaving a node out of its cluster
 # and still owned. Found on a real node; every test that stubbed k0s out passed.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
-RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
@@ -68,6 +67,14 @@ MemoryDenyWriteExecute=yes
 # while every test that stubbed bootc out passed. A daemon that rebases the
 # operating system cannot have the operating system read-only; saying otherwise
 # was theatre that happened to break the feature.
+#
+# RestrictNamespaces=yes is absent for the same kind of reason and was found
+# the same way: bootc assembles its container storage in a mount namespace, and
+# forbidding namespaces turns every first stage on a node into "Operation not
+# permitted". It survived one round of testing because that round re-staged an
+# image the node had already pulled, which needs no namespace and proves
+# nothing -- the isolation was run against a cached path and the conclusion was
+# wrong. A clean node found it.
 #
 # DeviceAllow would switch DevicePolicy from auto to closed, and the pairing
 # code goes to /dev/console.

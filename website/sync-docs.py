@@ -32,7 +32,7 @@ PAGES = [
      "How Corium works and why it is shaped this way: the image, the "
      "filesystem contract, first boot, and node identity."),
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
-     "From an empty machine to a working Kubernetes node in five steps, with "
+     "From a published image to a working Kubernetes node in four steps, with "
      "the mistakes that cost the most time."),
     ("install/downloads.md", "install", "downloads", "Downloads", 300,
      "Where the installer ISO, the qcow2 and the image are published, why "
@@ -40,6 +40,10 @@ PAGES = [
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
+    ("cilium.md", "guides", "cilium", "Cilium", 125,
+     "Replacing kube-router with Cilium from the node's own cloud-config: "
+     "what k0s stops doing, what installs the chart, and the kube-proxy-free "
+     "variant."),
     ("raid.md", "guides", "raid", "Software RAID", 130,
      "Declaring mdadm arrays on a node's spare disks, why they are built "
      "before k0s starts, and where a RAID root filesystem stands today."),

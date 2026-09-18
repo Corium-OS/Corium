@@ -14,6 +14,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **A guide for installing Cilium**, [docs/cilium.md](docs/cilium.md). Corium
+  already supported it — `network.cni: custom` plus an `addons:` entry — but
+  nothing said how the two fit together, or that the chart installs from the
+  controller and therefore works before the cluster has a pod network. The
+  guide covers the single-node case, the kube-proxy-free variant and what it
+  costs, what a worker may and may not declare, and the failure modes. The
+  example it is built on, `examples/custom-cni.yaml`, moves to Cilium 1.20.2
+  and drops a `cni.binPath` override that only restated the chart's defaults.
+
 - **An `api:` block, ahead of the daemon it configures.** The schema and its
   validation land first so the rest can be built against something settled.
   `api.enabled` turns the management API on; `api.operatorCA` and
