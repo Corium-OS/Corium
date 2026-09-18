@@ -81,7 +81,14 @@ jobs:
           ./bin/cctl version
 
       - name: Build the OS image
-        run: podman build --tag localhost/corium:e2e --file Containerfile .
+        run: |
+          # sudo, because bootc-image-builder below runs as root and reads the
+          # root container store. Built rootless, the image lands in the runner
+          # user's store instead and the builder reports "image not known" --
+          # which is what happened the first time this ran. The release path
+          # never meets this: it pulls a published image, and the pull is what
+          # puts it where the builder looks.
+          sudo podman build --tag localhost/corium:e2e --file Containerfile .
 
       - name: Build a disk from it
         run: |
@@ -93,7 +100,7 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             -v "${PWD}/output:/output" \
             quay.io/centos-bootc/bootc-image-builder:latest \
-            --type qcow2 --local localhost/corium:e2e
+            --type qcow2 localhost/corium:e2e
           sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
           qemu-img resize output/qcow2/disk.qcow2 20G
 
