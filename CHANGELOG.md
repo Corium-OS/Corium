@@ -156,7 +156,7 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   mask a baked-in configuration. The ISO is the artefact this works for.
 
 - **`cctl` is published with each release**, for linux and macOS on amd64 and
-  arm64, and installable with `mise use -g ubi:Corium-OS/Corium[exe=cctl]`.
+  arm64, and installable with `mise use -g github:Corium-OS/Corium[exe=cctl]`.
   Until now it was built from a checkout and the documentation said plainly
   that this was a gap rather than a decision; it is closed.
 
@@ -166,6 +166,9 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   up a workstation: the installers people already use read release assets. A
   single signed `SHA256SUMS` covers every archive, under the same key as the OS
   image. There is no Windows build, because nobody has run `cctl` there once.
+
+  Pin the version if you want a stable one: mise resolves an unpinned
+  `github:Corium-OS/Corium` to the newest tag, release candidates included.
 
 ### Changed
 

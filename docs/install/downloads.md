@@ -24,7 +24,7 @@ With [mise](https://mise.jdx.dev), which picks the right one and keeps it
 current:
 
 ```bash
-mise use -g ubi:Corium-OS/Corium[exe=cctl]
+mise use -g github:Corium-OS/Corium[exe=cctl]
 ```
 
 By hand, checking what you downloaded:
@@ -102,7 +102,7 @@ a file*.
 `cctl` is attached, because the same reasoning points the other way for it. It
 is three megabytes, it is fetched by a person setting up a workstation rather
 than by a machine, and the installers people already use — `mise use
-ubi:Corium-OS/Corium[exe=cctl]` — read release assets and not registries.
+github:Corium-OS/Corium[exe=cctl]` — read release assets and not registries.
 Signing it as a blob rather than as an OCI artefact costs one extra file and
 keeps it reachable by the tools that would actually go looking.
 

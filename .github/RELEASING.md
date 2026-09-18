@@ -180,13 +180,18 @@ coverage than it has is worse than a short one.
 - The image carries `org.opencontainers.image.version` matching its tag.
 - `podman run --rm <image> k0s version` matches `build/k0s.lock`.
 - `mise run docs-sync` produces no diff.
-- **`mise use -g ubi:Corium-OS/Corium[exe=cctl]` installs the release's client,
-  and `cctl version` reports the release.** This is the one item here that
-  cannot be checked before a tag exists: the archives are attached by the
-  release job, and whether an installer picks the right one out of four is a
-  question about the file names it sees. A release candidate is where that gets
-  answered -- a prerelease is skipped by default, so pass the exact version:
-  `mise use -g ubi:Corium-OS/Corium[exe=cctl,tag=vX.Y.Z-rc.N]`.
+- **`mise x "github:Corium-OS/Corium[exe=cctl]@X.Y.Z" -- cctl version` reports
+  the release.** This is the one item here that cannot be checked before a tag
+  exists: the archives are attached by the release job, and whether an installer
+  picks the right one out of four is a question about the file names it sees. A
+  release candidate is where that gets answered. `mise x` rather than
+  `mise use -g`, so that checking a candidate does not put it in your own
+  global tool set.
+
+  Pin the version. mise's `github` backend resolved a bare
+  `github:Corium-OS/Corium[exe=cctl]` to `0.2.0-rc.4` while that was the newest
+  tag, prerelease or not -- so an unpinned check tells you about whatever is
+  newest rather than about the thing you are releasing.
 - `sha256sum --check --ignore-missing SHA256SUMS` passes against a downloaded
   archive, and `cosign verify-blob --key cosign.pub --signature SHA256SUMS.sig
   SHA256SUMS` verifies.

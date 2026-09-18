@@ -47,7 +47,7 @@ for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
 	cp LICENSE "${staging}/LICENSE"
 
 	# The name carries the OS and the architecture in the shape the usual
-	# installers look for, so `mise use ubi:Corium-OS/Corium[exe=cctl]` picks
+	# installers look for, so `mise use github:Corium-OS/Corium[exe=cctl]` picks
 	# the right archive without being told which.
 	tar -czf "${dist}/cctl_${version}_${os}_${arch}.tar.gz" -C "${staging}" cctl LICENSE
 	rm -rf "${staging}"

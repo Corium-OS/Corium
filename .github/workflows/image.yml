@@ -686,7 +686,7 @@ jobs:
             printf 'The command line client, attached below for linux and macOS on amd64\n'
             printf 'and arm64. With [mise](https://mise.jdx.dev):\n\n'
             printf '```bash\n'
-            printf 'mise use -g ubi:%s[exe=cctl]\n' "${GH_REPO}"
+            printf 'mise use -g github:%s[exe=cctl]\n' "${GH_REPO}"
             printf '```\n\n'
             printf 'Or by hand, verifying what you downloaded:\n\n'
             printf '```bash\n'
