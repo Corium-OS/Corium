@@ -17,7 +17,13 @@ ADDRESS="${ADDRESS:?set ADDRESS to host:port of the management API}"
 CCTL="${CCTL:-cctl}"
 WORK="${WORK:-$(mktemp -d)}"
 
-export CORIUM_DIR="${WORK}/operator"
+# cctl keeps the operator CA and the client certificate in ~/.corium, and takes
+# --dir per command rather than globally. Moving HOME is both shorter and
+# stricter: nothing this script does can reach the real one, and a stray
+# fingerprint cannot be remembered outside the run.
+export HOME="${WORK}"
+CORIUM_DIR="${HOME}/.corium"
+mkdir -p "${HOME}"
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 fail() { printf '\033[31mFAIL: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -39,15 +45,15 @@ echo "fingerprint ${FINGERPRINT}"
 
 # An unenrolled node must refuse everything but enrolment. This is the property
 # the whole trust model rests on, so it is checked before anything else.
-if "${CCTL}" --dir "${CORIUM_DIR}" status "${ADDRESS}" \
+if "${CCTL}" status "${ADDRESS}" \
 	--fingerprint "${FINGERPRINT}" >/dev/null 2>&1; then
 	fail "an unenrolled node answered status; it must refuse until claimed"
 fi
 echo "unenrolled node refuses status, as it must"
 
 step "an operator CA, and a certificate under it"
-"${CCTL}" --dir "${CORIUM_DIR}" pki init
-"${CCTL}" --dir "${CORIUM_DIR}" pki issue --role admin
+"${CCTL}" pki init
+"${CCTL}" pki issue --role admin
 
 step "claim the node and tell it what to be, in one call"
 cat > "${WORK}/node.yaml" <<YAML
@@ -66,39 +72,39 @@ if [ -z "${CODE}" ]; then
 fi
 echo "pairing code from the console: ${CODE}"
 
-"${CCTL}" --dir "${CORIUM_DIR}" enroll "${ADDRESS}" \
+"${CCTL}" enroll "${ADDRESS}" \
 	--code "${CODE}" --fingerprint "${FINGERPRINT}" --config "${WORK}/node.yaml"
 
 step "wait for the node to bootstrap and come back authenticated"
 for attempt in $(seq 1 60); do
-	if "${CCTL}" --dir "${CORIUM_DIR}" health "${ADDRESS}" >/dev/null 2>&1; then
+	if "${CCTL}" health "${ADDRESS}" >/dev/null 2>&1; then
 		break
 	fi
 	[ "${attempt}" -lt 60 ] || fail "the node never answered an authenticated call"
 	sleep 5
 done
-"${CCTL}" --dir "${CORIUM_DIR}" health "${ADDRESS}"
+"${CCTL}" health "${ADDRESS}"
 
 step "status reports what the configuration asked for"
-STATUS="$("${CCTL}" --dir "${CORIUM_DIR}" status "${ADDRESS}")"
+STATUS="$("${CCTL}" status "${ADDRESS}")"
 echo "${STATUS}"
 grep -q "role *single" <<<"${STATUS}" || fail "status does not report role single"
 grep -q "cluster *e2e" <<<"${STATUS}" ||
 	fail "status does not name the cluster the applied configuration asked for, so the node bootstrapped with the document it booted with rather than the one it was sent"
 
 step "a bootstrapped node refuses a new configuration"
-if "${CCTL}" --dir "${CORIUM_DIR}" apply "${ADDRESS}" --file "${WORK}/node.yaml" >/dev/null 2>&1; then
+if "${CCTL}" apply "${ADDRESS}" --file "${WORK}/node.yaml" >/dev/null 2>&1; then
 	fail "apply succeeded on a bootstrapped node; it must refuse with 409"
 fi
 echo "refused, as it must"
 
 step "services and journals"
-"${CCTL}" --dir "${CORIUM_DIR}" services "${ADDRESS}"
-"${CCTL}" --dir "${CORIUM_DIR}" logs "${ADDRESS}" --unit corium-apid --since 10m | tail -5
+"${CCTL}" services "${ADDRESS}"
+"${CCTL}" logs "${ADDRESS}" --unit corium-apid --since 10m | tail -5
 
 step "kubernetes is up, and the kubeconfig works"
 for attempt in $(seq 1 60); do
-	if "${CCTL}" --dir "${CORIUM_DIR}" kubeconfig "${ADDRESS}" > "${WORK}/kubeconfig" 2>/dev/null; then
+	if "${CCTL}" kubeconfig "${ADDRESS}" > "${WORK}/kubeconfig" 2>/dev/null; then
 		break
 	fi
 	[ "${attempt}" -lt 60 ] || fail "the node never produced a kubeconfig"
@@ -121,18 +127,18 @@ if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
 fi
 echo "ssh refused before the key is granted, as it must be"
 
-"${CCTL}" --dir "${CORIUM_DIR}" access ssh add "${ADDRESS}" \
+"${CCTL}" access ssh add "${ADDRESS}" \
 	--user core --key-file "${WORK}/key.pub"
-"${CCTL}" --dir "${CORIUM_DIR}" access ssh list "${ADDRESS}"
+"${CCTL}" access ssh list "${ADDRESS}"
 
 ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes \
 	-o UserKnownHostsFile=/dev/null -p "${SSH_PORT:-2222}" \
 	-i "${WORK}/key" "core@${SSH_HOST:-127.0.0.1}" 'echo logged in' ||
 	fail "ssh was refused after the API granted the key. The mode or the SELinux label on /var/lib/corium/ssh is wrong, and sshd reports neither"
 
-KEY_FINGERPRINT="$("${CCTL}" --dir "${CORIUM_DIR}" access ssh list "${ADDRESS}" |
+KEY_FINGERPRINT="$("${CCTL}" access ssh list "${ADDRESS}" |
 	grep -oE 'SHA256:[A-Za-z0-9+/]+' | head -1)"
-"${CCTL}" --dir "${CORIUM_DIR}" access ssh revoke "${ADDRESS}" \
+"${CCTL}" access ssh revoke "${ADDRESS}" \
 	--key-fingerprint "${KEY_FINGERPRINT}"
 
 if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
