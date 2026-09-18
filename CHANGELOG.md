@@ -14,6 +14,16 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **The pairing code is on the node's screen, above the login prompt.** It was
+  written to `/dev/console`, which on a node booting with
+  `console=tty0 console=ttyS0` reaches the last of those and no other — so it
+  went to the serial port and the hypervisor's own console view never showed
+  it. It is now also an issue drop-in in `/run/issue.d`, which every getty
+  reprints each time it draws a prompt, so it survives whatever scrolls past
+  and is there on the screen an operator is actually looking at. It is removed
+  when the node is claimed, so a prompt never advertises a code that no longer
+  works.
+
 - **The documentation uses the CLI where it earns its place.** The quick start
   gains a fifth step for managing a node without SSH; the upgrade guide leads
   with `cctl upgrade` and keeps the manual sequence as what it does; the HA

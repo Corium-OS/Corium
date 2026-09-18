@@ -95,6 +95,12 @@ Corium node is unenrolled and is not in a cluster.
 Both values are there for a reason. The code authenticates you to the node; the
 fingerprint authenticates the node to you.
 
+You will also find it above the login prompt on the node's screen — the
+hypervisor console, the IPMI view, whatever you have — because a one-shot line
+scrolls away and an unclaimed node is one you cannot log in to anyway. It is
+removed the moment the node is claimed, so a prompt never advertises a code
+that no longer works.
+
 ```console
 $ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
 Claimed 192.168.1.51:7443.
