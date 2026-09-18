@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
@@ -144,6 +145,18 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 	}
 
 	server.Lifecycle(&lifecycle.Manager{Dir: stateDir})
+
+	// The keys the API trusts live beside the rest of Corium's state, under the
+	// same directory a test can redirect, so a daemon pointed at a test tree
+	// never writes to the real one.
+	keys := &access.Manager{Dir: filepath.Join(stateDir, "ssh")}
+	server.Access(keys)
+
+	// A relabel of /var resets these files to a type sshd will not read, which
+	// turns a trusted key into a refused login with nothing said anywhere. Put
+	// right at every start, so a machine that has been relabelled repairs
+	// itself on the next boot rather than waiting for somebody to notice.
+	keys.Reconcile(ctx)
 
 	return server.Serve(ctx)
 }

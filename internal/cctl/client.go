@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
@@ -524,6 +525,58 @@ func (c *Client) RotateCA(ctx context.Context, operatorCA, proof []byte) error {
 	}
 
 	return c.call(ctx, http.MethodPost, "/v1/ca/rotate", body, nil)
+}
+
+// AddSSHKey trusts an SSH public key for a user that already exists on the
+// node. The node creates no account: the user is cloud-init's to make.
+//
+// The reply is access.Key, decoded here rather than restated, for the same
+// reason Node reuses nodeinfo.Node: a second definition of the same shape is a
+// second thing to keep in step.
+func (c *Client) AddSSHKey(ctx context.Context, user, key string) (*access.Key, error) {
+	body, err := json.Marshal(map[string]string{"user": user, "key": key})
+	if err != nil {
+		return nil, fmt.Errorf("encoding the request: %w", err)
+	}
+
+	var added access.Key
+	if err := c.call(ctx, http.MethodPost, "/v1/access/ssh", body, &added); err != nil {
+		return nil, err
+	}
+
+	return &added, nil
+}
+
+// ListSSHKeys reports the SSH keys a node trusts, by fingerprint.
+func (c *Client) ListSSHKeys(ctx context.Context) ([]access.Key, error) {
+	var reply struct {
+		Keys []access.Key `json:"keys"`
+	}
+
+	if err := c.call(ctx, http.MethodGet, "/v1/access/ssh", nil, &reply); err != nil {
+		return nil, err
+	}
+
+	return reply.Keys, nil
+}
+
+// RevokeSSHKey stops a node trusting the key with the given fingerprint, and
+// reports what it removed.
+//
+// The fingerprint travels as a query parameter because an SSH SHA-256
+// fingerprint contains '/', which a path segment cannot carry.
+func (c *Client) RevokeSSHKey(ctx context.Context, fingerprint string) ([]access.Key, error) {
+	path := "/v1/access/ssh?" + url.Values{"fingerprint": {fingerprint}}.Encode()
+
+	var reply struct {
+		Removed []access.Key `json:"removed"`
+	}
+
+	if err := c.call(ctx, http.MethodDelete, path, nil, &reply); err != nil {
+		return nil, err
+	}
+
+	return reply.Removed, nil
 }
 
 // Kubeconfig fetches the cluster's administrator credentials from a node.

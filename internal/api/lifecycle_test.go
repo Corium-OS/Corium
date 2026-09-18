@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 )
 
@@ -40,6 +41,10 @@ func lifecycleNode(t *testing.T, run lifecycle.Runner) (*authority, string, *Sto
 
 	dir := t.TempDir()
 	server.Lifecycle(&lifecycle.Manager{Run: run, Dir: dir, Hostname: "worker-01"})
+
+	// A test directory for the SSH keys too, so a reset's Purge never reaches
+	// the real /var/lib/corium/ssh on the machine running the tests.
+	server.Access(&access.Manager{Dir: filepath.Join(dir, "ssh")})
 
 	return ca, serveOn(t, server), store, dir
 }
@@ -243,6 +248,36 @@ func TestResetLeavesTheClusterBeforeItForgetsItsOwner(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Errorf("%s survived the reset", name)
 		}
+	}
+}
+
+func TestResetRemovesTrustedSSHKeys(t *testing.T) {
+	// A node handed back unclaimed must not keep admitting a shell: the keys the
+	// API was trusting leave with the enrolment that authorised them.
+	m := &machine{reachable: true}
+	ca, address, store, dir := lifecycleNode(t, m.runner())
+
+	keys := filepath.Join(dir, "ssh")
+	if err := os.MkdirAll(keys, 0o700); err != nil {
+		t.Fatalf("seeding the keys directory: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(keys, "worker-01"), []byte("ssh-ed25519 AAAA\n"), 0o600); err != nil {
+		t.Fatalf("seeding a key: %v", err)
+	}
+
+	status, body := postRaw(t, client(t, store, ca.issue(t, RoleAdmin)),
+		"https://"+address+"/v1/lifecycle/reset", `{"confirm":"worker-01"}`)
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%v)", status, body)
+	}
+
+	// The purge runs before the reboot, so waiting for the reboot means it has
+	// already happened.
+	m.waitFor(t, "systemctl reboot")
+
+	if _, err := os.Stat(keys); !os.IsNotExist(err) {
+		t.Error("the trusted SSH keys survived the reset")
 	}
 }
 

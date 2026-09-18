@@ -14,6 +14,14 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **The API can grant SSH access to a node.** `cctl access ssh add`, `list` and
+  `revoke` trust an SSH key for a user that already exists, so getting a shell
+  on a node no longer means a reset or a trip back through cloud-init. Corium
+  creates no account and keeps a key file of its own, separate from the user's
+  own `~/.ssh`; the account, its password and its shell stay cloud-init's.
+  Adding a key is `admin` and logged by fingerprint, listing is `readonly`, and
+  a reset removes every key the API was trusting.
+
 - **The pairing code is on the node's screen, above the login prompt.** It was
   written to `/dev/console`, which on a node booting with
   `console=tty0 console=ttyS0` reaches the last of those and no other — so it
