@@ -1,0 +1,21 @@
+# An appliance image: a machine that boots, joins nothing, and waits to be told
+# what it is over the management API.
+#
+# Read deploy/appliance/README.md before building this. The configuration it
+# bakes in accepts an unauthenticated claim, and that is a decision with a
+# blast radius rather than a convenience flag.
+ARG BASE=ghcr.io/corium-os/corium:latest
+FROM ${BASE}
+
+# /usr/share/corium/config.yaml is the last source in the chain, and the one
+# meant for machines that have no datasource to hand them a document. Putting
+# the configuration here is what makes this an appliance rather than something
+# an operator has to configure at install time.
+#
+# It loses to every other source, which is deliberate: anything written on the
+# machine, in cloud-init, or on the kernel command line overrides it. See §3 of
+# docs/reference.md.
+COPY config.yaml /usr/share/corium/config.yaml
+
+# bootc wants the image to still pass its own lint after a derivation.
+RUN bootc container lint

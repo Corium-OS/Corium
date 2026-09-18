@@ -41,6 +41,10 @@ IMAGE = "{{ env.REGISTRY | default(value='ghcr.io/corium-os') }}/{{ env.IMAGE_NA
 # must run on a Linux host: it mounts the root filesystem it creates in order
 # to populate it.
 BIB = "{{ env.BIB | default(value='quay.io/centos-bootc/bootc-image-builder:latest') }}"
+
+# The appliance image is built locally and never pushed: it accepts an
+# unauthenticated claim, so publishing one would be handing out machines.
+APPLIANCE_IMAGE = "{{ env.APPLIANCE_IMAGE | default(value='localhost/corium-appliance:dev') }}"
 OUTPUT_DIR = "{{ env.OUTPUT_DIR | default(value = config_root ~ '/output') }}"
 
 # ---------------------------------------------------------------- Go
@@ -135,6 +139,23 @@ sudo podman run --rm --privileged \
 	-v /var/lib/containers/storage:/var/lib/containers/storage \
 	-v "${OUTPUT_DIR}:/output" \
 	"${BIB}" --type "${usage_type}" "${IMAGE}"
+'''
+
+[tasks."appliance-image"]
+description = "Build an unauthenticated appliance image (read deploy/appliance/README.md)"
+run = '''
+set -eu
+podman build \
+	--tag "${APPLIANCE_IMAGE}" \
+	--build-arg "BASE=${IMAGE}" \
+	--file deploy/appliance/Containerfile \
+	deploy/appliance
+echo
+echo "Built ${APPLIANCE_IMAGE} from ${IMAGE}."
+echo "A machine built from it is claimed by whoever reaches it first:"
+echo "  deploy/appliance/README.md"
+echo
+echo "For an ISO:  IMAGE=${APPLIANCE_IMAGE} mise run artefact-anaconda-iso"
 '''
 
 [tasks."artefact-qcow2"]

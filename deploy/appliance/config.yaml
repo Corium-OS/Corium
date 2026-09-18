@@ -1,0 +1,27 @@
+# Baked into an appliance image at /usr/share/corium/config.yaml.
+#
+# This describes a machine that is nothing yet: no role, no cluster, no
+# workloads. It boots, holds its bootstrap, and waits for an operator to claim
+# it and say what it should be -- both of which happen over the API, so nobody
+# has to visit a console or write a cloud-config.
+corium:
+  api:
+    # Run the management API on 7443.
+    enabled: true
+
+    # Accept a claim from anybody, with nothing to prove.
+    #
+    # THIS IS THE LINE THAT MATTERS. The first client to reach this port owns
+    # the machine for the rest of its life, because the CA it pins is the CA
+    # the node will obey from then on. What stops that being catastrophic is
+    # the rule the rest of Corium enforces anyway -- an unclaimed node is in no
+    # cluster, so winning the race gets a bare machine -- but it is still a
+    # machine somebody else now owns.
+    #
+    # Delete this line and bake in api.operatorCA instead wherever you have a
+    # CA to bake. That is zero touch too, and it has no unauthenticated port.
+    insecure: true
+
+    # Wait to be told what to be, rather than defaulting to a single-node
+    # cluster the moment somebody claims it.
+    awaitConfig: true

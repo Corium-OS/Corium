@@ -139,6 +139,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   [ADR 4](docs/adr/0004-management-api.md) is amended with the reasoning, since
   it previously ruled this out altogether.
 
+- **A recipe for an appliance image**, [deploy/appliance](deploy/appliance/).
+  Three lines of Containerfile bake a `corium:` document into
+  `/usr/share/corium/config.yaml`, so a machine installed from the resulting
+  ISO boots into the management API and waits to be claimed and told what it
+  is — no cloud-init, no console visit, no pairing code. `mise run
+  appliance-image` builds it.
+
+  It is a recipe and not a published artefact on purpose: the configuration it
+  ships accepts an unauthenticated claim, so whoever reaches the node first
+  owns it for life. Its README says so first and says what to use instead —
+  baking in `api.operatorCA`, which is zero touch too and has no
+  unauthenticated port. It also documents the trap: the source chain stops at
+  the first source that yields a *document*, not the first that contains a
+  `corium:` block, so cloud-init carrying nothing but an SSH key is enough to
+  mask a baked-in configuration. The ISO is the artefact this works for.
+
 ### Changed
 
 - **Building from source uses [mise](https://mise.jdx.dev) instead of make.**
