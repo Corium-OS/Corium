@@ -1,4 +1,4 @@
-package bootstrap
+package secret
 
 import (
 	"context"
@@ -24,33 +24,33 @@ func TestWaitsForAFileThatAppearsLater(t *testing.T) {
 		_ = os.WriteFile(path, []byte("the-token\n"), 0o600)
 	}()
 
-	secret, err := resolveSecret(context.Background(),
+	secret, err := Resolve(context.Background(),
 		&config.SecretSource{File: path, WaitFor: "10s"}, "join token")
 	if err != nil {
-		t.Fatalf("resolveSecret() error = %v, want it to wait", err)
+		t.Fatalf("Resolve() error = %v, want it to wait", err)
 	}
 
 	if secret != "the-token" {
-		t.Errorf("resolveSecret() = %q, want the-token", secret)
+		t.Errorf("Resolve() = %q, want the-token", secret)
 	}
 }
 
 func TestDoesNotWaitWhenNotAskedTo(t *testing.T) {
 	// Without waitFor the old behaviour stands: fail immediately.
-	_, err := resolveSecret(context.Background(),
+	_, err := Resolve(context.Background(),
 		&config.SecretSource{File: "/nonexistent/token"}, "join token")
 	if err == nil {
-		t.Fatal("resolveSecret() error = nil, want an immediate failure")
+		t.Fatal("Resolve() error = nil, want an immediate failure")
 	}
 }
 
 func TestGivesUpAtTheDeadline(t *testing.T) {
 	start := time.Now()
 
-	_, err := resolveSecret(context.Background(),
+	_, err := Resolve(context.Background(),
 		&config.SecretSource{File: "/nonexistent/token", WaitFor: "1s"}, "join token")
 	if err == nil {
-		t.Fatal("resolveSecret() error = nil, want a timeout")
+		t.Fatal("Resolve() error = nil, want a timeout")
 	}
 
 	if !strings.Contains(err.Error(), "did not appear within") {
@@ -75,10 +75,10 @@ func TestRejectedCredentialFailsImmediately(t *testing.T) {
 
 	start := time.Now()
 
-	_, err := resolveSecret(context.Background(),
+	_, err := Resolve(context.Background(),
 		&config.SecretSource{URL: server.URL, WaitFor: "30s"}, "join token")
 	if err == nil {
-		t.Fatal("resolveSecret() error = nil, want a refusal")
+		t.Fatal("Resolve() error = nil, want a refusal")
 	}
 
 	if errors.Is(err, errNotYet) {
@@ -111,14 +111,14 @@ func TestWaitsThroughNotFoundThenSucceeds(t *testing.T) {
 		}))
 	defer server.Close()
 
-	secret, err := resolveSecret(context.Background(),
+	secret, err := Resolve(context.Background(),
 		&config.SecretSource{URL: server.URL, WaitFor: "30s"}, "join token")
 	if err != nil {
-		t.Fatalf("resolveSecret() error = %v, want it to wait out the 404s", err)
+		t.Fatalf("Resolve() error = %v, want it to wait out the 404s", err)
 	}
 
 	if secret != "late-token" {
-		t.Errorf("resolveSecret() = %q, want late-token", secret)
+		t.Errorf("Resolve() = %q, want late-token", secret)
 	}
 }
 

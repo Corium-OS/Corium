@@ -548,6 +548,16 @@ func (c *Config) validateAPI() []error {
 				"since a node cannot both refuse the API and name its owner"))
 	}
 
+	// Insecure only has meaning while a node is waiting to be claimed. With a
+	// CA configured the node was never unclaimed, and with the API off there
+	// is nothing to open -- in both cases the key would silently do nothing,
+	// which is the mistake that costs an operator a reboot cycle to find.
+	if c.API.Insecure && c.API.Mode() != APIModeMaintenance {
+		problems = append(problems, errors.New(
+			"api.insecure: only applies to maintenance mode, and this node is not "+
+				"waiting to be claimed; remove it, or remove the operator CA"))
+	}
+
 	if hasSource {
 		problems = append(problems, c.API.OperatorCAFrom.validate("api.operatorCAFrom")...)
 	}

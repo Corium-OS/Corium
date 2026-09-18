@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -23,6 +24,10 @@ import (
 
 // StateDir is where a node keeps what it knows about its own management.
 //
+// It sits inside lifecycle.StateDir rather than beside it, so that erasing a
+// node's state erases this too and corium-apid needs one directory rather than
+// two that have to be kept in step.
+//
 // It sits under /var because that is the only part of the filesystem that
 // survives an OS upgrade, and because enrolment surviving a reboot is a
 // security property rather than a convenience: if it did not, power-cycling a
@@ -33,7 +38,50 @@ const (
 	operatorCAFile = "operator-ca.pem"
 	serverKeyFile  = "server.key"
 	serverCertFile = "server.crt"
+	claimFile      = "claim.json"
 )
+
+// ClaimMethod records how a node's ownership was established.
+//
+// It is kept because the three are not equally trustworthy, and afterwards
+// there is no other way to tell them apart: a node holds the same pinned CA
+// either way. Somebody auditing a fleet is entitled to know which of its nodes
+// were claimed by whoever reached them first.
+type ClaimMethod string
+
+const (
+	// ClaimedFromConfiguration is modes A and B: the CA was named in the
+	// node's own configuration, so it was never unclaimed.
+	ClaimedFromConfiguration ClaimMethod = "configuration"
+
+	// ClaimedWithPairingCode is maintenance mode as it is meant to be used:
+	// somebody read a code off the console.
+	ClaimedWithPairingCode ClaimMethod = "pairing-code"
+
+	// ClaimedOpenly is api.insecure: nothing was asked and nothing was proved.
+	ClaimedOpenly ClaimMethod = "open"
+
+	// ClaimedByRotation is an owner handing the node to another CA over the
+	// authenticated API.
+	ClaimedByRotation ClaimMethod = "rotation"
+)
+
+// Claim is what the node remembers about being claimed.
+type Claim struct {
+	Method ClaimMethod `json:"method"`
+	At     time.Time   `json:"at"`
+
+	// Tainted records that at some point this node was taken by somebody who
+	// proved nothing. It is sticky across rotations on purpose: an owner who
+	// acquired a node openly and then handed it to a second CA has not thereby
+	// made the first acquisition legitimate, and somebody auditing a fleet
+	// should still be able to find it.
+	Tainted bool `json:"tainted,omitempty"`
+}
+
+// Authenticated reports whether this node's ownership was ever established
+// without anybody proving anything.
+func (c Claim) Authenticated() bool { return !c.Tainted }
 
 // ErrUnenrolled reports that no operator has claimed this node.
 var ErrUnenrolled = errors.New("node is not enrolled")
@@ -137,6 +185,104 @@ func (s *Store) Adopt(pemData []byte) error {
 	// secret, and the fact that it is not is the reason the whole scheme can
 	// put it in cloud-init in clear.
 	return s.write(operatorCAFile, pemData, 0o644)
+}
+
+// RecordClaim notes how the node came to be owned.
+//
+// It is written after the CA, not before: a claim record without a pinned CA
+// would describe something that did not happen.
+func (s *Store) RecordClaim(method ClaimMethod) error {
+	// A rotation inherits whatever taint the node already carried; every other
+	// method starts the record afresh and decides its own.
+	tainted := method == ClaimedOpenly
+
+	if method == ClaimedByRotation {
+		previous, err := s.Claim()
+		if err != nil {
+			return err
+		}
+
+		tainted = previous.Tainted
+	}
+
+	encoded, err := json.Marshal(Claim{Method: method, At: time.Now().UTC(), Tainted: tainted})
+	if err != nil {
+		return fmt.Errorf("encoding the claim record: %w", err)
+	}
+
+	return s.write(claimFile, encoded, 0o644)
+}
+
+// Claim returns how the node was claimed, if it knows.
+//
+// A node claimed by an earlier version has no record, which reads as an
+// unknown method rather than as an error: it is a missing note about the past,
+// not a broken node.
+func (s *Store) Claim() (Claim, error) {
+	data, err := os.ReadFile(s.path(claimFile))
+
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return Claim{}, nil
+	case err != nil:
+		return Claim{}, fmt.Errorf("reading the claim record: %w", err)
+	}
+
+	var claim Claim
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return Claim{}, fmt.Errorf("parsing the claim record: %w", err)
+	}
+
+	return claim, nil
+}
+
+// Rotate replaces the pinned CA on a node that already has one.
+//
+// Unlike Adopt this overwrites, which is why it is a separate method rather
+// than a flag: enrolment being one-way is a property worth being unable to
+// reach by accident, and the two callers are not the same kind of caller.
+// Adopt answers a stranger at the door; this answers the owner.
+func (s *Store) Rotate(pemData []byte) error {
+	if _, err := config.ParseOperatorCA(pemData); err != nil {
+		return fmt.Errorf("refusing operator CA: %w", err)
+	}
+
+	enrolled, err := s.Enrolled()
+	if err != nil {
+		return err
+	}
+
+	if !enrolled {
+		// Rotating an unclaimed node would be enrolment by another name, and
+		// would skip the pairing code that guards it.
+		return ErrUnenrolled
+	}
+
+	if err := s.write(operatorCAFile, pemData, 0o644); err != nil {
+		return err
+	}
+
+	return s.RecordClaim(ClaimedByRotation)
+}
+
+// Forget erases everything that makes this node somebody's.
+//
+// The serving identity goes too, not just the CA. A machine handed on with the
+// certificate its previous owner pinned is a machine that owner's tooling will
+// still accept without a word -- and the whole value of the fingerprint is
+// that it means one machine.
+//
+// It is called last in a reset, after the node has already left its cluster,
+// so that there is no moment at which the machine is both a member and
+// unclaimed.
+func (s *Store) Forget() error {
+	for _, name := range []string{operatorCAFile, claimFile, serverCertFile, serverKeyFile} {
+		if err := os.Remove(s.path(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("removing %s: %w", name, err)
+		}
+	}
+
+	return nil
 }
 
 // Identity returns the node's serving certificate, minting one on first use.

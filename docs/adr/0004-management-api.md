@@ -65,15 +65,37 @@ follow; `dmesg`. Units are named from an allowlist rather than passed through,
 so that the API is not a way to start arbitrary systemd units.
 
 **Upgrades**, the mechanism issue #2 spends most of its length on: stage an
-image, apply it, roll back. The node refuses an image that is not a Corium
-image — the signature is verified against the policy already shipped in
-`/etc/containers/policy.json`, and the image's labels are checked — so that a
-typo cannot rebase a cluster node onto Silverblue. Health gating and the
-one-node-at-a-time roll-out live in `cctl`, which knows about the other nodes;
-the daemon only ever knows about its own.
+image, apply it, roll back. The node refuses an image its own signing policy
+would accept unsigned, so that a typo cannot rebase a cluster node onto
+Silverblue. Health gating and the one-node-at-a-time roll-out live in `cctl`,
+which knows about the other nodes; the daemon only ever knows about its own.
+
+An earlier version of this record said the image's *labels* would be checked as
+well. They are not, for two reasons found while building it. A Corium node
+ships no skopeo, no podman and no jq — a container engine on the host is
+deliberately absent, because k0s supervises its own — and bootc's status output
+carries no labels, so there is nothing on the machine that can read them.
+More importantly, a label is not worth reading: anybody can write
+`LABEL org.opencontainers.image.title="Corium"`, so it catches a typo and
+nothing else.
+
+The signing policy catches the typo *and* the attacker, needs no tooling, and
+is enforced by the runtime at pull time regardless. It is also the right shape
+for the derived images Corium supports: an operator who builds their own adds
+their repository and key to `/etc/containers/policy.json`, and their image
+becomes acceptable because they said so rather than because it claimed to be
+Corium.
 
 **Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
-destructive and are marked as such in the schema. Reset is the strongest of
+destructive and are marked as such in the schema.
+
+Cordon and drain land differently from the rest, and the record should say so
+rather than let somebody discover it: they work on controllers only. A node
+acts on itself, and evicting a pod needs cluster admin credentials that only a
+controller holds locally. Draining a worker stays a cluster operation, done
+with `kubectl` against the kubeconfig this API will hand over — which is a
+consequence of the node-local rule rather than a gap in it, and is the second
+place that rule costs something visible. Reset is the strongest of
 them: it takes the node out of the cluster, wipes `/var/lib/k0s`, and drops the
 machine back to unenrolled — it is the one operation that returns a node to
 maintenance mode, and it cannot leave it half-way.
@@ -85,8 +107,26 @@ that takes a command line. The moment one exists this is SSH with a worse client
 and a second authentication system to keep correct, and every argument for
 keeping the surface small stops applying.
 
-No Kubernetes. The API does not proxy the apiserver, list pods, or hold a
-kubeconfig on the operator's behalf. `kubectl` is not a gap.
+Almost no Kubernetes. The API does not proxy the apiserver, list pods, or keep
+a kubeconfig on the operator's behalf. `kubectl` is not a gap.
+
+The exception, added after the rest was built and working: it will hand over
+the administrator kubeconfig k0s minted, once, on request. That was left out of
+the first version of this record on the grounds above, and leaving it out was
+wrong — it is the one Kubernetes-adjacent thing with no other answer. Without
+it, getting a usable `kubectl` out of a freshly bootstrapped node means SSHing
+into a controller and running `cat` on a file, which is the exact shape of
+problem this API exists to remove.
+
+It is `admin`, and it outranks everything else here: every other call acts on
+one machine, and this one hands over a cluster. `reset` destroys a node; this
+gives away every workload in the cluster, to somebody nothing here can take it
+back from. The node says so in its journal for that reason.
+
+What it does not become is a Kubernetes client. It reads the file k0s wrote,
+rewrites the server address to one that will keep working — the virtual IP on
+an HA control plane, since a kubeconfig aimed at one particular controller
+stops working the first time that controller does — and returns it.
 
 No package installation, no file writing, no configuration.
 
@@ -274,6 +314,32 @@ does not have.
 That last sentence is also the cost: **mode C needs console access** — serial,
 IPMI, SOL, or the hypervisor's view. An operator with neither a console nor a
 PKI is not served by mode C, and should use mode A.
+
+#### And an opt-in that gives the code up
+
+`api.insecure: true` drops the pairing code: the first client to reach an
+unclaimed node claims it. That is Talos's model, argued against above, and it
+is offered anyway — with the argument left standing rather than rewritten,
+because it is still the reason this is not the default.
+
+What makes it defensible where it is used is the rule the rest of this record
+already enforces. An unclaimed node is in no cluster, so winning the race gets
+a bare machine; and enrolment is still one-way, so the window closes the moment
+anybody uses it. The cases it is for are real: a bench, a lab, a provisioning
+network controlled end to end, a PXE fleet where visiting consoles is not a
+thing anybody is going to do. Mode C otherwise asks for one console visit per
+machine, which is a price some fleets will not pay and will route around with
+something worse.
+
+Three things keep it honest. It is refused anywhere it would silently do
+nothing — with a CA configured, or with the API off — because a key that does
+nothing is the mistake that costs a reboot cycle to find. The node says so on
+its console, in words aimed at somebody who did not write the configuration
+that opened it. And the node **records that its claim was unauthenticated**,
+in `/var/lib/corium/api/claim.json`, which `cctl status` then shows: a node
+holds the same pinned CA whichever way it was claimed, so without that record
+there is no way to tell afterwards which of a fleet's machines were taken by
+whoever reached them first.
 
 #### The node's own certificate
 

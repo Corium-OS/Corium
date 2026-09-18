@@ -1,0 +1,88 @@
+[Unit]
+Description=Corium management API
+Documentation=https://github.com/Corium-OS/Corium/blob/main/docs/adr/0004-management-api.md
+
+# The daemon reads the `corium:` block to learn whether it should run at all and
+# who owns this node, so it must start after cloud-init has fetched and merged
+# the document. Same reasoning as corium-bootstrap.service, and the same trap:
+# see the [Install] section there before changing any of this.
+After=cloud-final.service
+Wants=cloud-final.service
+
+# Binding a port needs an address to bind to.
+After=network-online.target
+Wants=network-online.target
+
+# These belong to the unit, not the service: systemd moved them in v229 and
+# still parses them in [Service] only to warn about it.
+StartLimitIntervalSec=30s
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/corium-apid
+
+# Exit 0 means "enrolled, come back up requiring client certificates". The
+# restart is how that happens: rebuilding a TLS configuration under a live
+# listener is the kind of thing that works until the one request that matters
+# arrives mid-swap.
+Restart=always
+RestartSec=2s
+
+# Exit 78 (EX_CONFIG) means the node's configuration asks for no API. That is
+# the overwhelmingly common case, it is a success, and it must not restart --
+# otherwise every ordinary node in a fleet ends up with a unit in `failed` and
+# a system that reports `degraded` for doing exactly what it was told.
+SuccessExitStatus=78
+RestartPreventExitStatus=78
+
+# The pairing code is printed on /dev/console by the daemon itself rather than
+# by routing all of its output there, because everything after the banner is
+# ordinary logging that nobody wants on a console.
+StandardOutput=journal
+StandardError=journal
+
+# The API reboots the machine, drives bootc and reads the journal, so it runs
+# privileged and there is no version of it that does not. That is the argument
+# for the surface being as small as it is, and the reason there is no exec
+# endpoint -- see ADR 4. What can be taken away without lying about it, is.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+# AF_NETLINK is here because `k0s reset` needs it: cleaning up a node's
+# network links goes through netlink, and without it the reset fails with
+# "failed to get link list from netlink: address family not supported by
+# protocol" after k0s has already stopped -- leaving a node out of its cluster
+# and still owned. Found on a real node; every test that stubbed k0s out passed.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# Note what is absent, and why, because both were tried on a real node.
+#
+# ProtectSystem=strict mounts the whole hierarchy read-only bar /dev, /proc and
+# /sys -- including /run. bootc writes /run/bootc/storage while staging an
+# image, so every upgrade failed with "Read-only file system (os error 30)"
+# while every test that stubbed bootc out passed. A daemon that rebases the
+# operating system cannot have the operating system read-only; saying otherwise
+# was theatre that happened to break the feature.
+#
+# RestrictNamespaces=yes is absent for the same kind of reason and was found
+# the same way: bootc assembles its container storage in a mount namespace, and
+# forbidding namespaces turns every first stage on a node into "Operation not
+# permitted". It survived one round of testing because that round re-staged an
+# image the node had already pulled, which needs no namespace and proves
+# nothing -- the isolation was run against a cached path and the conclusion was
+# wrong. A clean node found it.
+#
+# DeviceAllow would switch DevicePolicy from auto to closed, and the pairing
+# code goes to /dev/console.
+#
+# Everything above this comment was verified to survive a real `bootc switch`:
+# the namespace, memory and privilege restrictions all stay.
+
+[Install]
+# cloud-init.target rather than multi-user.target, for the ordering-cycle
+# reason spelled out in corium-bootstrap.service.
+WantedBy=cloud-init.target

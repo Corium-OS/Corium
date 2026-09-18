@@ -148,6 +148,7 @@ attached to the release itself, and how to check what you got.
 - [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
 - [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
 - [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
+- [**cctl**](docs/cli.md) — every command of the management CLI, what each role reaches, and how to read a refusal
 - [**Changelog**](CHANGELOG.md) — what each release changed, and what is known to be broken
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions
 - [`docs/examples/`](docs/examples/) — annotated configuration examples

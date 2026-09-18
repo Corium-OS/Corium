@@ -37,6 +37,7 @@ Usage:
 Commands:
   bootstrap    Configure this node and start k0s (run once, on first boot)
   validate     Parse and validate a configuration without applying it
+  api set-ca   Replace the operator CA this node obeys, locally
   version      Print version information
 
 Run 'corium-agent <command> -h' for command-specific flags.
@@ -74,6 +75,8 @@ func run() error {
 		return bootstrapCommand(ctx, args)
 	case "validate":
 		return validateCommand(ctx, args)
+	case "api":
+		return apiCommand(args)
 	case "version":
 		fmt.Printf("corium-agent %s (%s)\n", version, commit)
 		return nil

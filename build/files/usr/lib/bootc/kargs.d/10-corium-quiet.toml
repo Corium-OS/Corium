@@ -1,0 +1,19 @@
+# Quieten the VM console.
+#
+# Placed under kargs.d rather than in the [install] block of 00-corium.toml so
+# that these arguments are reapplied on every `bootc switch`, not just at first
+# install -- the same reasoning that keeps the Kubernetes sysctls in /usr rather
+# than writing them once. bootc reads this file at install time and merges it
+# into the bootloader entry on each upgrade.
+#
+# quiet       drops routine kernel boot chatter -- device probes, netfilter, the
+#             bridge module -- from the console.
+# loglevel=3  raises the console threshold to KERN_ERR, so warnings and errors
+#             still print while everything below stays in the journal, which is
+#             where anyone debugging a boot should be reading anyway.
+#
+# What this deliberately leaves alone: the enrolment code. corium-apid writes it
+# straight to /dev/console rather than through the kernel log, so lowering the
+# printk level cannot hide it -- see corium-apid.service. cloud-init's output is
+# left on the console too, so a first boot that goes wrong still says so.
+kargs = ["quiet", "loglevel=3"]

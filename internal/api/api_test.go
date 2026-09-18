@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,7 +189,7 @@ func TestIdentityIsMintedOnceAndReused(t *testing.T) {
 func TestEnrollHappyPath(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -222,7 +223,7 @@ func TestEnrollAcceptsWhatSomebodyActuallyTypes(t *testing.T) {
 	} {
 		store := newTestStore(t)
 
-		enroller, err := NewEnroller(store)
+		enroller, err := NewEnroller(store, RequirePairingCode)
 		if err != nil {
 			t.Fatalf("NewEnroller() error = %v", err)
 		}
@@ -236,7 +237,7 @@ func TestEnrollAcceptsWhatSomebodyActuallyTypes(t *testing.T) {
 func TestEnrollLocksOutAfterFiveWrongCodes(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -273,7 +274,7 @@ func TestABadCertificateDoesNotCostAnAttempt(t *testing.T) {
 	// not spend the attempts they will need to correct it.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -294,7 +295,7 @@ func TestEnrolmentIsStickyAcrossRestarts(t *testing.T) {
 	// power-cycling a machine would be enough to take it.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -304,7 +305,7 @@ func TestEnrolmentIsStickyAcrossRestarts(t *testing.T) {
 	}
 
 	// The next boot, against the same /var.
-	if _, err := NewEnroller(NewStore(store.dir)); !errors.Is(err, ErrAlreadyEnrolled) {
+	if _, err := NewEnroller(NewStore(store.dir), RequirePairingCode); !errors.Is(err, ErrAlreadyEnrolled) {
 		t.Fatalf("NewEnroller() on a claimed node = %v, want %v", err, ErrAlreadyEnrolled)
 	}
 }
@@ -314,7 +315,7 @@ func TestConcurrentGuessesShareTheAttemptLimit(t *testing.T) {
 	// codes in parallel rather than one at a time.
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -385,7 +386,7 @@ func TestPairingCodeShape(t *testing.T) {
 func TestBannerCarriesBothHalvesOfTheTrust(t *testing.T) {
 	store := newTestStore(t)
 
-	enroller, err := NewEnroller(store)
+	enroller, err := NewEnroller(store, RequirePairingCode)
 	if err != nil {
 		t.Fatalf("NewEnroller() error = %v", err)
 	}
@@ -404,6 +405,136 @@ func TestBannerCarriesBothHalvesOfTheTrust(t *testing.T) {
 	for _, want := range []string{enroller.Code(), fingerprint, "192.168.1.51:7443", "cctl enroll"} {
 		if !strings.Contains(banner, want) {
 			t.Errorf("banner does not mention %q:\n%s", want, banner)
+		}
+	}
+}
+
+func TestOpenEnrolmentAsksForNothing(t *testing.T) {
+	store := newTestStore(t)
+
+	enroller, err := NewEnroller(store, OpenToAnyone)
+	if err != nil {
+		t.Fatalf("NewEnroller() error = %v", err)
+	}
+
+	if !enroller.OpenToAnyone() {
+		t.Fatal("OpenToAnyone() = false")
+	}
+
+	// No code is printed, because there is none to print.
+	if enroller.Code() != "" {
+		t.Errorf("Code() = %q, want empty on an open node", enroller.Code())
+	}
+
+	// And anything is accepted, including nothing.
+	if err := enroller.Enroll("", operatorCA(t, "whoever got here first")); err != nil {
+		t.Fatalf("Enroll() error = %v", err)
+	}
+}
+
+func TestOpenEnrolmentIsStillOnlyOnce(t *testing.T) {
+	// Asking for nothing does not make the door stay open. The first claimant
+	// still wins for good, which is the whole risk being accepted.
+	store := newTestStore(t)
+
+	enroller, err := NewEnroller(store, OpenToAnyone)
+	if err != nil {
+		t.Fatalf("NewEnroller() error = %v", err)
+	}
+
+	if err := enroller.Enroll("", operatorCA(t, "first")); err != nil {
+		t.Fatalf("Enroll() error = %v", err)
+	}
+
+	if err := enroller.Enroll("", operatorCA(t, "second")); !errors.Is(err, ErrAlreadyEnrolled) {
+		t.Errorf("a second Enroll() = %v, want %v", err, ErrAlreadyEnrolled)
+	}
+
+	// And a reboot does not reopen it.
+	if _, err := NewEnroller(NewStore(store.dir), OpenToAnyone); !errors.Is(err, ErrAlreadyEnrolled) {
+		t.Errorf("NewEnroller() after a claim = %v, want %v", err, ErrAlreadyEnrolled)
+	}
+}
+
+func TestTheNodeRecordsHowItWasClaimed(t *testing.T) {
+	// The three are not equally trustworthy, and afterwards the node holds the
+	// same pinned CA either way -- so without this there is no way to tell.
+	for _, tc := range []struct {
+		how    Enrolment
+		method ClaimMethod
+		honest bool
+	}{
+		{RequirePairingCode, ClaimedWithPairingCode, true},
+		{OpenToAnyone, ClaimedOpenly, false},
+	} {
+		store := newTestStore(t)
+
+		enroller, err := NewEnroller(store, tc.how)
+		if err != nil {
+			t.Fatalf("NewEnroller() error = %v", err)
+		}
+
+		if err := enroller.Enroll(enroller.Code(), operatorCA(t, "operators")); err != nil {
+			t.Fatalf("Enroll() error = %v", err)
+		}
+
+		claim, err := store.Claim()
+		if err != nil {
+			t.Fatalf("Claim() error = %v", err)
+		}
+
+		if claim.Method != tc.method {
+			t.Errorf("Method = %q, want %q", claim.Method, tc.method)
+		}
+
+		if claim.Authenticated() != tc.honest {
+			t.Errorf("Authenticated() = %v, want %v", claim.Authenticated(), tc.honest)
+		}
+	}
+}
+
+func TestBannerSaysWhenTheNodeIsOpen(t *testing.T) {
+	store := newTestStore(t)
+
+	enroller, err := NewEnroller(store, OpenToAnyone)
+	if err != nil {
+		t.Fatalf("NewEnroller() error = %v", err)
+	}
+
+	banner := enroller.Banner("192.168.1.51:7443", "SHA256:abc")
+
+	// Somebody may be reading this console without having written the
+	// configuration that opened the node.
+	if !strings.Contains(banner, "api.insecure") ||
+		!strings.Contains(banner, "claims this node for good") {
+		t.Errorf("banner does not say the node is open:\n%s", banner)
+	}
+
+	if strings.Contains(banner, "--code") {
+		t.Errorf("banner offers a code the node does not want:\n%s", banner)
+	}
+}
+
+func TestTheBannerPrintsAnAddressSomebodyCanType(t *testing.T) {
+	// A wildcard listener reports itself as [::]:7443, which is true and
+	// useless: `cctl enroll [::]:7443` is not a command anybody can run, and
+	// the console is the one place where what is printed has to be typed back.
+	for _, listening := range []string{"[::]:7443", "0.0.0.0:7443", ":7443"} {
+		got := reachableAddress(listening)
+
+		if got == listening {
+			t.Errorf("reachableAddress(%q) = %q, want a routable host", listening, got)
+		}
+
+		if _, port, err := net.SplitHostPort(got); err != nil || port != "7443" {
+			t.Errorf("reachableAddress(%q) = %q, want the port kept", listening, got)
+		}
+	}
+
+	// An address that was already specific is left alone.
+	for _, listening := range []string{"192.168.1.51:7443", "127.0.0.1:9000"} {
+		if got := reachableAddress(listening); got != listening {
+			t.Errorf("reachableAddress(%q) = %q, want it unchanged", listening, got)
 		}
 	}
 }

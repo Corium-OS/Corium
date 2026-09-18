@@ -3,14 +3,18 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
+	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/source"
 )
 
@@ -34,6 +38,10 @@ type Options struct {
 
 	// DryRun renders everything and applies nothing.
 	DryRun bool
+
+	// StateDir overrides where the management API keeps the operator CA.
+	// Empty means the real path; setting it is for tests.
+	StateDir string
 }
 
 // Run bootstraps the node. It is idempotent: on an already-bootstrapped node it
@@ -74,7 +82,7 @@ func Run(ctx context.Context, opts Options) error {
 	// A node nobody has claimed is a node in no cluster. This is checked before
 	// the hostname is settled and before any disk is touched, because for an
 	// unclaimed node the correct amount of the machine to change is none of it.
-	if err := gateOnEnrolment(cfg); err != nil {
+	if err := gateOnEnrolment(ctx, cfg, opts); err != nil {
 		return err
 	}
 
@@ -202,6 +210,12 @@ func apply(ctx context.Context, cfg *config.Config, rendered []byte, args []stri
 		return err
 	}
 
+	// What the node became, recorded before the marker so that a machine the
+	// marker calls bootstrapped can always say what it was bootstrapped as.
+	if err := recordState(cfg); err != nil {
+		return err
+	}
+
 	if err := markBootstrapped(); err != nil {
 		return err
 	}
@@ -237,6 +251,55 @@ func alreadyBootstrapped() (bool, error) {
 	default:
 		return false, fmt.Errorf("checking %s: %w", MarkerFile, err)
 	}
+}
+
+// recordState writes what this node was actually made into.
+//
+// It is deliberately separate from the configuration it came from: a
+// cloud-config can be edited after a node has joined a cluster, and from then
+// on it describes an intention rather than a machine. The management API
+// reports from this file for that reason.
+func recordState(cfg *config.Config) error {
+	state := nodeinfo.State{
+		Role:           string(cfg.Role),
+		Cluster:        cfg.Cluster.Name,
+		Endpoint:       clusterEndpoint(cfg),
+		BootstrappedAt: time.Now().UTC(),
+	}
+
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encoding node state: %w", err)
+	}
+
+	if err := os.MkdirAll(StateDir, 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", StateDir, err)
+	}
+
+	return writeFile(nodeinfo.StateFile, encoded, 0o644)
+}
+
+// clusterEndpoint is the address clients should use to reach this cluster.
+//
+// The virtual IP wins where there is one: on an HA control plane it is the
+// whole point, since it is the address that survives losing any one
+// controller, and a kubeconfig pointing at a particular controller is a
+// kubeconfig that stops working the first time that controller does.
+//
+// Empty means the node's own address is the answer, which is true for a single
+// node and for a cluster nobody gave an endpoint.
+func clusterEndpoint(cfg *config.Config) string {
+	if cfg.HA.Enabled && cfg.HA.VirtualIP != "" {
+		// Stored in CIDR form because keepalived needs the prefix length to
+		// add the address to an interface. A client wants the address.
+		if address, _, found := strings.Cut(cfg.HA.VirtualIP, "/"); found {
+			return address
+		}
+
+		return cfg.HA.VirtualIP
+	}
+
+	return cfg.Cluster.Endpoint
 }
 
 func markBootstrapped() error {

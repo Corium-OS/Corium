@@ -449,6 +449,24 @@ type API struct {
 	// OperatorCAFrom resolves OperatorCA at first boot, for a CA minted by the
 	// same run that builds the cluster. Exactly one of the two may be set.
 	OperatorCAFrom *SecretSource `yaml:"operatorCAFrom,omitempty" json:"operatorCAFrom,omitempty"`
+
+	// Insecure drops the pairing code from maintenance mode: the first client
+	// to reach the node claims it, with nothing to prove.
+	//
+	// This is Talos's model, and Corium's default is deliberately not it --
+	// see docs/adr/0004-management-api.md. Whoever wins the race owns the node
+	// for the rest of its life, and the node then joins a cluster with
+	// credentials its configuration supplied, under their CA.
+	//
+	// What makes it defensible where it is used is the rule the rest of the
+	// design already enforces: an unclaimed node is in no cluster, so the
+	// prize is a bare machine. On a provisioning network you control end to
+	// end, or a bench, or a PXE fleet where visiting consoles is not a real
+	// option, that is a fair trade. On anything shared it is not.
+	//
+	// A plain bool, unlike Enabled: absent and false say the same thing.
+	// The node records that it was claimed this way, and says so afterwards.
+	Insecure bool `yaml:"insecure,omitempty" json:"insecure,omitempty"`
 }
 
 // Mode reports what this configuration asks corium-apid to do.
@@ -468,6 +486,15 @@ func (a API) Mode() APIMode {
 	default:
 		return APIModeDisabled
 	}
+}
+
+// OpenEnrolment reports whether the node will let anyone who reaches it claim
+// it, with no pairing code.
+//
+// It is only ever true in maintenance mode: a node whose configuration names
+// its owner was never unclaimed, and a node with no API serves nothing to open.
+func (a API) OpenEnrolment() bool {
+	return a.Insecure && a.Mode() == APIModeMaintenance
 }
 
 // HoldsBootstrap reports whether the node must wait to be claimed before it

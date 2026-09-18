@@ -213,8 +213,10 @@ in an HA cluster, which defeats the point.
 | `cni` | enum | `kuberouter` | `kuberouter`, `calico`, `custom` |
 
 `cni: custom` installs nothing. The node stays `NotReady` and pods stay
-`Pending` until you install a network — expected, not broken. See
-[`examples/custom-cni.yaml`](examples/custom-cni.yaml).
+`Pending` until you install a network — expected, not broken. [Installing
+Cilium](cilium.md) walks through one, and
+[`examples/custom-cni.yaml`](examples/custom-cni.yaml) is the document it
+boots from.
 
 kube-router is k0s's default and covers networking, network policy and service
 proxying in a single component. Tuning any of the three, changing the
@@ -452,17 +454,19 @@ you meant.
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](adr/0004-management-api.md).
 
-> **Not implemented yet.** The schema below is settled and validated; the
-> daemon is not written. A node naming an operator CA bootstraps normally and
-> logs that nothing is serving the API. A node asking for maintenance mode
-> refuses to bootstrap, since there is nothing to enrol against and joining a
-> cluster unclaimed is the outcome the design exists to prevent.
+> **Implemented, unreleased.** All four management surfaces are in place, along
+> with CA rotation and the local recovery path. The daemon runs unconfined under
+> SELinux — see below — and `cctl` has no release artefact yet.
+>
+> This section is the `api:` schema. Using it — claiming a node, reading its
+> journals, upgrading it, handing it on — is [cctl](cli.md).
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `enabled` | bool | `false` | Setting either key below implies `true` |
+| `enabled` | bool | `false` | Setting either key below implies `true`. False masks `corium-apid.service` |
 | `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
+| `insecure` | bool | `false` | Drop the pairing code. Maintenance mode only |
 
 Set at most one of `operatorCA` and `operatorCAFrom`.
 
@@ -490,25 +494,149 @@ Writing `enabled: false` alongside either key is an error rather than a
 precedence rule. The configuration is saying two contradictory things, and
 guessing which one you meant would leave the other silently doing nothing.
 
-#### Maintenance mode
+#### The three ways a node is claimed
 
-`enabled: true` with no CA. The node reads its configuration, validates it, and
-then **stops before bootstrapping k0s**, printing a single-use pairing code and
-its certificate fingerprint to the console, the serial port and the journal:
+| `api:` | Mode | What happens |
+|---|---|---|
+| absent, or `enabled: false` | off | No daemon, no port. The node bootstraps as it always did |
+| `operatorCA` | A | The CA is named inline, in clear. Unattended, and nothing secret is in the metadata: a certificate is public |
+| `operatorCAFrom` | B | The same, resolved at first boot from a `SecretSource` (§3.14) |
+| `enabled: true`, neither key | C | Maintenance mode: the node holds its bootstrap and waits to be claimed |
+
+Modes A and B claim the node at boot, so it joins its cluster unattended. Mode C
+does not: **a node waiting to be claimed is in no cluster.** It validates its
+configuration, stops before bootstrapping k0s, and prints a single-use pairing
+code and its certificate fingerprint on the console, the serial port and the
+journal.
+
+That ordering is the load-bearing part rather than a detail. Bootstrapping first
+would produce a machine that is running workloads and holding cluster
+credentials while still obeying whoever first reaches an unauthenticated port —
+valuable and unclaimed at once. The rule runs the other way too, which is what
+gives `cctl reset` its meaning: a node cannot return to maintenance mode while
+it is a cluster member, so a reset takes it out of the cluster on the way.
+
+Enrolment carries no configuration. It sends a CA certificate and nothing else;
+the node's role and join token still come from cloud-init. This is not
+`apply-config` under another name, and decisions 6 and 7 are untouched.
+
+The cost of mode C is that it is **not zero touch**: three nodes means three
+consoles. If you want unattended provisioning with nothing secret in the
+metadata, use `operatorCA` — the certificate is not a secret.
+
+Claiming a node, and everything afterwards, is [`cctl`](cli.md).
+
+#### `insecure`
+
+`api.insecure: true` drops the pairing code: the first client to reach an
+unclaimed node claims it, with nothing to prove. It applies to maintenance mode
+only, and setting it anywhere it would do nothing — alongside an operator CA,
+or with the API off — is a validation error rather than being ignored.
+
+What bounds the risk is that an unclaimed node is in no cluster, so whoever
+wins the race gets a bare machine, and enrolment is still one-way, so the
+window shuts the moment anybody uses it. What they do get is that machine's
+future: the CA they pin is the CA it will obey.
+
+This is for a bench, a lab, a provisioning network you control end to end, or a
+PXE fleet where one console visit per machine is not going to happen. The node
+is loud about it:
 
 ```
-Corium node is unenrolled and is not in a cluster.
-
-  address       192.168.1.51:7443
-  pairing code  K7QM-93XF
-  fingerprint   SHA256:tQ2f...9c1a
-
-  cctl enroll 192.168.1.51 --code K7QM-93XF
+  !! api.insecure is set: no pairing code is required, so the
+  !! first client to reach this port claims this node for good.
 ```
 
-`cctl enroll` pins the CA and releases the bootstrap, which proceeds from the
-cloud-init configuration the node has been holding all along. Enrolment sends a
-CA certificate and nothing else — it is not a way to configure a node.
+And it **records that its claim was unauthenticated**, which `cctl status`
+reports from then on. A node holds the same pinned CA whichever way it was
+claimed, so without that record there would be no way to tell afterwards which
+of a fleet's machines were taken by whoever got there first — and rotating the
+CA later does not clear it.
+
+#### Precedence and validation
+
+| Written | Result |
+|---|---|
+| `enabled: false` with either CA key | Validation error: the configuration says two contradictory things |
+| both CA keys | Validation error, matching `token` and `tokenFrom` |
+| `insecure` outside maintenance mode | Validation error: it would silently do nothing |
+
+An inline `operatorCA` is checked at validation time: it must be one PEM
+certificate, it must be a CA, and it must not have expired. **A private key
+pasted there is rejected by name**, because it means the key that owns your
+fleet has been written into a document that ends up in instance metadata —
+treat it as compromised.
+
+Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
+because a certificate is not a secret, the node's own serving key at `0600`
+because that one is — and it survives reboots and upgrades. A node that has
+been claimed never falls back to maintenance mode on its own, or power-cycling
+a machine would be enough to take it.
+
+#### Where the daemon stands with SELinux
+
+`corium-apid` runs as `unconfined_service_t`, like `corium-agent` and every
+other service on the image. There is no confined domain for it, and no policy
+module ships.
+
+A types-only module was tried and withdrawn. `semodule` writes the whole policy
+store into `/var/lib/selinux`, and `/var` on a bootc image is seeded at install
+and never updated afterwards — so the module would never reach a node that
+upgraded into it, and `bootc container lint` refuses the image for putting 1279
+files in `/var`. The same build passed in CI and failed on a real host, which
+is worth knowing before trusting either.
+
+What the unit does enforce was checked on a node rather than reasoned about.
+`ProtectSystem=strict` had to go: it mounts everything read-only including
+`/run`, and bootc writes `/run/bootc/storage` while staging an image.
+`RestrictAddressFamilies` had to gain `AF_NETLINK`, which `k0s reset` needs to
+clean up a node's links. Everything else — `NoNewPrivileges`, `ProtectHome`,
+`PrivateTmp`, `RestrictNamespaces`, `MemoryDenyWriteExecute`,
+`LockPersonality` — survived a real `bootc switch` and a real `k0s reset`.
+
+What the daemon touches, which is what a confined domain has to allow:
+
+| Access | What for |
+|---|---|
+| bind `7443/tcp` | the listener |
+| read/write `/var/lib/corium/api/**` | the operator CA, the serving key, the claim record |
+| read/remove `/var/lib/corium/{bootstrapped,node.json,cordoned-by-corium}` | reporting the node's role, and resetting it |
+| write `/var/lib/corium/cordoned-by-corium` | cordon |
+| read `/etc/machine-id`, `/etc/os-release`, `/proc/uptime`, `/proc/sys/kernel/osrelease` | `cctl status` |
+| read `/etc/containers/policy.json` | refusing an image the node would take unsigned |
+| read `/var/lib/cloud/**` | finding the `corium:` block on first start |
+| write `/dev/console` | the pairing code, for somebody who cannot log in yet |
+| execute `bootc`, `k0s`, `systemctl`, `journalctl` | every surface |
+
+Writing the domain wants a machine, not a desk. Boot a node, put it in
+permissive mode, exercise every command, and build the module from what was
+actually denied:
+
+```console
+$ sudo semanage permissive -a corium_apid_t     # once the domain exists
+$ cctl status … && cctl logs … && cctl upgrade … && cctl reset …
+$ sudo ausearch -m AVC -ts recent | audit2allow -M corium-apid
+```
+
+Rules derived from real denials rather than guessed at is the difference
+between a policy that confines the daemon and one that stops it answering on a
+fleet.
+
+One thing to weigh before handing out `corium:readonly`: it reads journals, and
+journals are not sanitised. Whatever any software on the node has logged is in
+there.
+
+`curl` works too, which is half the reason the API speaks JSON over HTTP:
+
+```console
+$ curl -k --cert ~/.corium/client.crt --key ~/.corium/client.key \
+    https://192.168.1.51:7443/v1/health
+{"status":"ok","role":"corium:admin"}
+```
+
+The `-k` is not a shortcut: the node signs its own certificate, because no
+private key is ever carried in a configuration. The fingerprint is the check,
+and `cctl` pins it for you.
 
 Two consequences worth knowing before choosing this mode:
 
@@ -519,9 +647,9 @@ Two consequences worth knowing before choosing this mode:
   directions: a node cannot return to maintenance mode while it is a cluster
   member, so `cctl reset` takes it out of the cluster on the way.
 
-Enrolment is recorded under `/var/lib/corium/api/` and survives reboots and
-upgrades. A node that has been claimed never falls back to maintenance mode on
-its own, or power-cycling a machine would be enough to take it.
+Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
+because a certificate is not a secret, and the node's own serving key at `0600`
+because that one is — and it survives reboots and upgrades.
 
 ### 3.12 Defaults
 

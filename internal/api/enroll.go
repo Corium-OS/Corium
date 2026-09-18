@@ -26,6 +26,25 @@ var (
 	ErrLockedOut = fmt.Errorf("too many incorrect pairing codes; reboot the node to try again")
 )
 
+// Enrolment says what a node asks of somebody claiming it.
+type Enrolment int
+
+const (
+	// RequirePairingCode is the default: the code printed on the console must
+	// be presented. See docs/adr/0004-management-api.md for why this is the
+	// default rather than the alternative below.
+	RequirePairingCode Enrolment = iota
+
+	// OpenToAnyone asks for nothing. The first client to reach the node claims
+	// it, and owns it for the rest of its life.
+	//
+	// What keeps this from being reckless where it is used is the rule the
+	// rest of the design enforces anyway: an unclaimed node is in no cluster,
+	// so winning the race gets a bare machine. What it does get is that
+	// machine's future, since the CA it pins is the CA it will obey.
+	OpenToAnyone
+)
+
 // Enroller is the one thing an unclaimed node will do for a stranger.
 //
 // It is safe for concurrent use, which is not a formality: the whole point of
@@ -33,6 +52,7 @@ var (
 // parallel.
 type Enroller struct {
 	store *Store
+	how   Enrolment
 
 	mu           sync.Mutex
 	code         string
@@ -47,7 +67,7 @@ type Enroller struct {
 // stickiness the design depends on: a claimed node must not offer itself again
 // after a reboot, or the pairing code would be guarding a door that reopens on
 // its own.
-func NewEnroller(store *Store) (*Enroller, error) {
+func NewEnroller(store *Store, how Enrolment) (*Enroller, error) {
 	enrolled, err := store.Enrolled()
 	if err != nil {
 		return nil, err
@@ -62,13 +82,21 @@ func NewEnroller(store *Store) (*Enroller, error) {
 		return nil, fmt.Errorf("minting pairing code: %w", err)
 	}
 
-	return &Enroller{store: store, code: code, attemptsLeft: maxAttempts}, nil
+	return &Enroller{store: store, how: how, code: code, attemptsLeft: maxAttempts}, nil
 }
 
-// Code is the pairing code, grouped as it is printed on the console.
+// OpenToAnyone reports whether this node asks nothing of a claimant.
+func (e *Enroller) OpenToAnyone() bool { return e.how == OpenToAnyone }
+
+// Code is the pairing code, grouped as it is printed on the console. It is
+// empty on a node that asks for nothing, because there is nothing to print.
 func (e *Enroller) Code() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if e.how == OpenToAnyone {
+		return ""
+	}
 
 	return formatCode(e.code)
 }
@@ -102,7 +130,13 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 		return ErrLockedOut
 	}
 
-	if !codeMatches(e.code, typedCode) {
+	if e.how == OpenToAnyone {
+		// Nothing was asked and nothing was proved. The claim is recorded as
+		// such so that afterwards anybody looking at this node can see that
+		// its ownership was established by whoever got there first.
+		slog.Warn("accepting an unauthenticated enrolment",
+			"reason", "api.insecure is set on this node")
+	} else if !codeMatches(e.code, typedCode) {
 		e.attemptsLeft--
 
 		// Logged without the code that was tried. A journal is read by more
@@ -130,6 +164,10 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 
 	e.claimed = true
 
+	if err := e.store.RecordClaim(e.method()); err != nil {
+		return err
+	}
+
 	certificate, err := e.store.OperatorCA()
 	if err != nil {
 		return err
@@ -140,6 +178,14 @@ func (e *Enroller) Enroll(typedCode string, operatorCA []byte) error {
 		"fingerprint", Fingerprint(certificate.Raw))
 
 	return nil
+}
+
+func (e *Enroller) method() ClaimMethod {
+	if e.how == OpenToAnyone {
+		return ClaimedOpenly
+	}
+
+	return ClaimedWithPairingCode
 }
 
 // Banner is what an unclaimed node prints on the console, the serial port and
@@ -154,9 +200,21 @@ func (e *Enroller) Banner(address, fingerprint string) string {
 
 	out.WriteString("\nCorium node is unenrolled and is not in a cluster.\n\n")
 	fmt.Fprintf(&out, "  address       %s\n", address)
-	fmt.Fprintf(&out, "  pairing code  %s\n", e.Code())
-	fmt.Fprintf(&out, "  fingerprint   %s\n\n", fingerprint)
-	fmt.Fprintf(&out, "  cctl enroll %s --code %s\n\n", address, e.Code())
+
+	if e.OpenToAnyone() {
+		fmt.Fprintf(&out, "  fingerprint   %s\n\n", fingerprint)
+		fmt.Fprintf(&out, "  cctl enroll %s\n\n", address)
+
+		// Said plainly, because somebody may be reading this console without
+		// having written the configuration that opened it.
+		out.WriteString("  !! api.insecure is set: no pairing code is required, so the\n" +
+			"  !! first client to reach this port claims this node for good.\n\n")
+	} else {
+		fmt.Fprintf(&out, "  pairing code  %s\n", e.Code())
+		fmt.Fprintf(&out, "  fingerprint   %s\n\n", fingerprint)
+		fmt.Fprintf(&out, "  cctl enroll %s --code %s\n\n", address, e.Code())
+	}
+
 	out.WriteString("The node joins no cluster until an operator claims it.\n")
 
 	return out.String()

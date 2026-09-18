@@ -9,6 +9,13 @@ Documentation=https://github.com/Corium-OS/Corium
 After=cloud-final.service
 Wants=cloud-final.service
 
+# A node in maintenance mode waits here until an operator claims it, and the
+# thing it is waiting for is corium-apid serving the enrolment route. Ordering
+# after it means the pairing code is on the console before anything tells the
+# operator to go and read it.
+After=corium-apid.service
+Wants=corium-apid.service
+
 # Bootstrapping is a first-boot concern. The agent is idempotent and exits early
 # on an already-bootstrapped node, but not starting at all is cheaper and makes
 # the intent legible in `systemctl list-units`.
@@ -18,6 +25,13 @@ ConditionPathExists=!/var/lib/corium/bootstrapped
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/corium-agent bootstrap
+
+# No start timeout, because on a node in maintenance mode this unit is waiting
+# for a person to walk to a console. Any finite value would resolve to either
+# killing the wait -- leaving a node that joins nothing and says nothing -- or
+# to a number somebody picked hoping the operator would be quicker. Every other
+# path through the agent is bounded internally.
+TimeoutStartSec=infinity
 
 # A failed bootstrap is not retried indefinitely. A node that half-joined a
 # cluster and keeps retrying is worse than a node that stopped and said why:

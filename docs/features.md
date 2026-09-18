@@ -51,7 +51,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Service address range | `network.serviceCIDR` | Default `10.96.0.0/12`, matching k0s |
 | kube-router | `network.cni: kuberouter` | k0s's default: networking, policy and service proxy in one component |
 | Calico | `network.cni: calico` | |
-| Bring your own CNI | `network.cni: custom` | k0s deploys nothing; the node stays `NotReady` until you install one |
+| Bring your own CNI | `network.cni: custom` | k0s deploys nothing; the node stays `NotReady` until you install one. [Worked example with Cilium](cilium.md) |
 
 ### Storage
 
@@ -119,15 +119,33 @@ spelling forever; that promise is expensive, so it is made sparingly.
 
 ### Management API
 
-Off unless asked for, and covered by
-[ADR 4](adr/0004-management-api.md).
+Off unless asked for. The decision is [ADR 4](adr/0004-management-api.md); the
+commands are [cctl](cli.md).
 
 | Feature | Field | Notes |
 |---|---|---|
 | The API itself | `api.enabled` | Off by default. A node with no `api:` block runs no daemon and binds no port |
 | Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
 | Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
-| Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until `cctl enroll` claims it |
+| Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |
+| Open enrolment | `api.insecure` | Drops the pairing code: the first client to reach the node claims it. For benches and controlled provisioning networks. The node says so on its console and records that its claim was unauthenticated |
+| Transport | — | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
+| Roles | — | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin`. Every route names the lowest role that may call it |
+| Node state | — | `cctl status`: role, cluster, booted and staged image digests, kernel, k0s version and service, greenboot verdict, uptime. Read-only |
+| Services | — | `cctl services` lists what the API knows about. Units come from a fixed list, never passed through |
+| Journals | — | `cctl logs`, per unit or across all of them, with `--since`, `--follow` and `--unit kernel`. Bounded: 10000 records, one hour of following |
+| Restarting k0s | — | `cctl restart --unit k0sworker`, at `corium:operator`. Units that run once — the bootstrap above all — are readable and not restartable |
+| Upgrades | — | `cctl upgrade <nodes...> --image`, one node at a time, stopping at the first that does not come back on the digest it was sent |
+| Image validation | — | A node refuses an image its own signing policy would accept unsigned. Not a label check: labels are forgeable |
+| Rollback | — | `cctl rollback <node>` marks the previous image as next to boot, and does not reboot |
+| Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`, **on controllers only**: a worker holds kubelet credentials, which cannot evict pods. Draining a worker is `kubectl drain` with the kubeconfig `cctl kubeconfig` fetches. A drain a pod disruption budget refuses is not forced, and the node stays cordoned |
+| Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
+| Kubeconfig | — | `cctl kubeconfig <node>`, at `corium:admin`. Points at the cluster's virtual IP where there is one; `--server` overrides |
+| Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |
+| CA rotation | — | `cctl ca rotate <nodes...> --to <dir>`, at `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
+| Losing the CA key | — | `corium-agent api set-ca --file`, run as root on the node. Local only; the node keeps its cluster membership |
+| SELinux | — | The daemon runs unconfined, as the agent always has. `/var/lib/corium/api` carries a type of its own so a confined domain has an anchor; the parent keeps `var_lib_t` because greenboot and systemd read it |
+| Operator PKI | — | `cctl pki init` and `cctl pki issue` create the CA and sign client certificates. The CA key stays on your machine |
 
 A node in maintenance mode is not a cluster member: it validates its
 configuration and waits, rather than joining first and being claimed later.
@@ -264,7 +282,7 @@ enough, not because they are wrong.
 |---|---|
 | **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) by dropping an image bundle in `<data-dir>/images/`. Corium can already bake one into the image with a `COPY`, but there is no `corium:` field for it and it is untested |
 | **Worker profiles as a modelled field** | Reachable through the patch today |
-| **Uninstalling or resetting a node** | `k0s reset` exists; Corium does not wrap it yet. [ADR 4](adr/0004-management-api.md) gives it a home as `cctl reset` — the one operation that takes a node out of its cluster and returns it to maintenance mode. On an image-based OS, reprovisioning is still often the better answer |
+
 
 ---
 

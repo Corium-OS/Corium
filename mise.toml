@@ -46,7 +46,7 @@ OUTPUT_DIR = "{{ env.OUTPUT_DIR | default(value = config_root ~ '/output') }}"
 # ---------------------------------------------------------------- Go
 
 [tasks.build]
-description = "Build the corium-agent binary for the host platform"
+description = "Build corium-agent, corium-apid and cctl for the host platform"
 run = '''
 set -eu
 
@@ -62,13 +62,15 @@ if [ -z "${version}" ]; then
 fi
 commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
-go build -trimpath \
-	-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
-	-o bin/corium-agent ./cmd/corium-agent
+for command in corium-agent corium-apid cctl; do
+	go build -trimpath \
+		-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
+		-o "bin/${command}" "./cmd/${command}"
+done
 '''
 
 [tasks."build-linux"]
-description = "Build a static linux/amd64 agent for the OS image"
+description = "Build the static linux/amd64 binaries for the OS image"
 run = '''
 set -eu
 
@@ -80,10 +82,12 @@ if [ -z "${version}" ]; then
 fi
 commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-	go build -trimpath \
-	-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
-	-o bin/linux-amd64/corium-agent ./cmd/corium-agent
+for command in corium-agent corium-apid cctl; do
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+		go build -trimpath \
+		-ldflags "-s -w -X main.version=${version} -X main.commit=${commit}" \
+		-o "bin/linux-amd64/${command}" "./cmd/${command}"
+done
 '''
 
 [tasks.test]

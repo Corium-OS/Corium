@@ -38,6 +38,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
 	-ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
 	-o /out/corium-agent ./cmd/corium-agent
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
+	go build -trimpath \
+	-ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+	-o /out/corium-apid ./cmd/corium-apid
+
 # ---------------------------------------------------------------------------
 # Stage 2 — the operating system.
 # ---------------------------------------------------------------------------
@@ -99,6 +104,7 @@ RUN rm -rf /opt && ln -s var/opt /opt
 
 # --- Corium agent ----------------------------------------------------------
 COPY --from=agent-builder /out/corium-agent /usr/bin/corium-agent
+COPY --from=agent-builder /out/corium-apid /usr/bin/corium-apid
 
 # --- System overlay --------------------------------------------------------
 #
@@ -118,6 +124,7 @@ COPY build/files/etc /etc
 # into cloud-init-main.service and cloud-init-network.service. Enabling them by
 # name buys nothing and breaks on upgrade.
 RUN systemctl enable corium-bootstrap.service \
+	&& systemctl enable corium-apid.service \
 	&& systemctl enable qemu-guest-agent.service \
 	&& systemctl enable greenboot-healthcheck.service \
 	&& systemctl enable corium-uncordon.service

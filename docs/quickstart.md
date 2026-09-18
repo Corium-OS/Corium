@@ -1,12 +1,11 @@
 # Quick start
 
-From nothing to a working Kubernetes node in five steps.
+From nothing to a working Kubernetes node in four steps.
 
 The short version, if you are in a hurry:
 
 ```bash
-mise run image                  # build the OS
-mise run artefact-qcow2         # turn it into a bootable disk
+oras pull ghcr.io/corium-os/corium-qcow2:0.1.0   # download a ready-made disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -21,77 +20,54 @@ If you would rather understand the model before typing anything, read
 
 ## Before you start
 
-You need a **Linux host** with `podman` and about 20 GB of free disk, plus
-[mise](https://mise.jdx.dev), which runs every command below and provisions the
-toolchain they need. `mise install` once, in the checkout.
+Every release publishes a ready-made, signed disk image, so the quick path needs
+no build host at all. You only need two things:
 
-macOS and Windows cannot build the disk images. `bootc-image-builder` mounts the
-root filesystem it creates in order to populate it, which needs a real Linux
-kernel. A Linux VM is fine; so is the hypervisor you are deploying to, which is
-often the most convenient place.
+- **Somewhere to run the node** — Proxmox, KVM/libvirt, or any cloud that accepts
+  a qcow2 or an ISO.
+- **A way to download it** — [`oras`](https://oras.land), `curl`, or a browser.
+  Any of the three works from macOS, Windows or Linux, and none needs `sudo`.
 
-```bash
-podman --version     # 4.x or newer
-nproc; free -g       # 2 cores and 4 GB are enough to build
-```
-
-The Go toolchain is **not** required: the agent is compiled inside the container
-build.
+You do **not** need `podman`, a Linux host, or 20 GB of build space unless you
+mean to change the image and rebuild it yourself — that path is covered in
+[build your own image](#build-your-own-image) at the end.
 
 ---
 
-## 1. Build the OS image
+## 1. Get a bootable disk
 
-```bash
-mise run image
-```
+Pull the artefact that matches where the node will run:
 
-This produces an ordinary OCI image. Inspect it like any other:
-
-```bash
-podman run --rm localhost/corium:dev k0s version
-podman run --rm localhost/corium:dev corium-agent version
-```
-
-The build ends with `bootc container lint`. If it reports warnings, read them —
-they catch real problems, such as content written to `/var` that will not
-survive an upgrade.
-
-To publish it:
-
-```bash
-REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push
-```
-
----
-
-## 2. Make something bootable
-
-**If you only want to install a release, skip this section.** Every release
-publishes a ready-made installer ISO and a qcow2 disk image, both signed, that
-you can download with `oras`, with `curl`, or from a browser -- no Linux host
-and no `sudo` required to obtain either. See [downloads](install/downloads.md), which
-also covers how to check that what you received is what was published.
-
-Build your own when you have changed the image. Pick the artefact that matches
-where the node will run:
-
-| Command | Produces | Use it for |
+| Artefact | Pull it with | Use it for |
 |---|---|---|
-| `mise run artefact-qcow2` | `output/qcow2/disk.qcow2` | Proxmox, KVM, libvirt |
-| `mise run artefact-raw` | `output/image/disk.raw` | Bare metal, most cloud import paths |
-| `mise run artefact-anaconda-iso` | `output/bootiso/install.iso` | Bare-metal installs |
-| `mise run artefacts` | all three | |
+| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.1.0` | Proxmox, KVM, libvirt |
+| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.1.0` | Bare metal. Installs unattended |
 
-Each takes several minutes and needs `sudo`, because the builder runs
-privileged.
+The tag above is only an example. **The exact coordinates for a given version,
+with their digests, are on that version's
+[release page](https://github.com/Corium-OS/Corium/releases/latest)** — they
+change every release, so they are published with it rather than written down
+here.
+
+No `oras`? A plain `curl` or a browser download works just as well. See
+[downloads](install/downloads.md), which also covers how to check that what you
+received is what was published:
+
+```bash
+cosign verify ghcr.io/corium-os/corium-qcow2:0.1.0 \
+  --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 The ISO is **unattended**: it deploys the image embedded in it with no prompts
 and no kickstart to write.
 
+Changed the image and need your own disk instead? Build a qcow2, a raw disk or an
+ISO from it — see [build your own image](#build-your-own-image).
+
 ---
 
-## 3. Write a node configuration
+## 2. Write a node configuration
 
 A complete single-node cluster:
 
@@ -111,7 +87,7 @@ users:
 document stays an ordinary cloud-config — `write_files`, `runcmd` and the rest
 keep working.
 
-Check it before you boot anything:
+If you have the repository checked out, validate it before you boot anything:
 
 ```bash
 go run ./cmd/corium-agent validate node.yaml
@@ -133,7 +109,7 @@ See [`examples/`](examples/) for workers, add-ons, a custom CNI, and HA.
 
 ---
 
-## 4. Boot it
+## 3. Boot it
 
 ### Proxmox
 
@@ -192,7 +168,7 @@ join:
 
 ---
 
-## 5. Check it worked
+## 4. Check it worked
 
 ```bash
 ssh core@192.168.0.190
@@ -229,7 +205,7 @@ node's address.
   balancer and no certificates required.
 - **Add-ons** — declare Helm charts under `addons:` and k0s installs them at
   bootstrap. No Helm binary, no in-cluster operator.
-- **A different CNI** — [`examples/custom-cni.yaml`](examples/custom-cni.yaml).
+- **A different CNI** — [installing Cilium](cilium.md), start to finish.
 - **Anything Corium does not model** — `k0s.patch` is applied verbatim to the
   rendered `k0s.yaml`, so every k0s setting stays reachable.
 - **Every field in detail** — the [configuration reference](reference.md).
@@ -280,3 +256,65 @@ an interrupted install leaves nothing bootable behind.
 from the machine ID when the hostname is still generic. If you cloned a disk
 *after* first boot, the machine ID came along with it — clear `/etc/machine-id`
 on the clone, or set `node.name` explicitly.
+
+---
+
+## Build your own image
+
+Everything above uses a published image. You only need this section when you have
+changed the image and want a disk built from your own version.
+
+This is the one part that needs a **Linux host** with `podman` and about 20 GB of
+free disk, plus [mise](https://mise.jdx.dev), which runs every command below and
+provisions the toolchain they need. `mise install` once, in the checkout.
+
+macOS and Windows cannot build the disk images. `bootc-image-builder` mounts the
+root filesystem it creates in order to populate it, which needs a real Linux
+kernel. A Linux VM is fine; so is the hypervisor you are deploying to, which is
+often the most convenient place.
+
+```bash
+podman --version     # 4.x or newer
+nproc; free -g       # 2 cores and 4 GB are enough to build
+```
+
+The Go toolchain is **not** required: the agent is compiled inside the container
+build.
+
+### Build the OS image
+
+```bash
+mise run image
+```
+
+This produces an ordinary OCI image. Inspect it like any other:
+
+```bash
+podman run --rm localhost/corium:dev k0s version
+podman run --rm localhost/corium:dev corium-agent version
+```
+
+The build ends with `bootc container lint`. If it reports warnings, read them —
+they catch real problems, such as content written to `/var` that will not
+survive an upgrade.
+
+To publish it:
+
+```bash
+REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push
+```
+
+### Turn it into a disk
+
+Pick the artefact that matches where the node will run:
+
+| Command | Produces | Use it for |
+|---|---|---|
+| `mise run artefact-qcow2` | `output/qcow2/disk.qcow2` | Proxmox, KVM, libvirt |
+| `mise run artefact-raw` | `output/image/disk.raw` | Bare metal, most cloud import paths |
+| `mise run artefact-anaconda-iso` | `output/bootiso/install.iso` | Bare-metal installs |
+| `mise run artefacts` | all three | |
+
+Each takes several minutes and needs `sudo`, because the builder runs
+privileged. From here, pick up at [step 2](#2-write-a-node-configuration) with
+the disk you just built.

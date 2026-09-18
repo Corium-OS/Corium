@@ -1,51 +1,114 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"time"
 
+	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/config"
 )
 
-// errUnclaimed stops a node that has asked to be claimed by an operator before
-// it joins anything.
+// enrolmentPoll is how often the bootstrap checks whether an operator has
+// turned up.
 //
-// This is the whole of maintenance mode that exists today. The daemon that
-// would print a pairing code and release the bootstrap on enrolment is not
-// written yet, so a node configured for it stops here with an explanation
-// instead of joining a cluster unclaimed -- which is precisely the state
-// ADR 4 exists to make unreachable.
-var errUnclaimed = errors.New(
-	"api.enabled is set with no operator CA, which asks for maintenance mode: " +
-		"the node must be claimed with `cctl enroll` before it joins a cluster. " +
-		"corium-apid does not exist yet, so there is nothing to enrol against -- " +
-		"set api.operatorCA, or remove the api block to bootstrap without a " +
-		"management API. See docs/adr/0004-management-api.md")
+// It is a poll rather than a watch on purpose. The thing being waited for is a
+// person walking to a console, so the difference between noticing in one
+// second and noticing in three is nothing, and an inotify watch on a directory
+// that may not exist yet is more moving parts than the problem deserves.
+const enrolmentPoll = 2 * time.Second
+
+// enrolmentReport is how often the wait says it is still waiting. Often enough
+// that `journalctl -fu corium-bootstrap` looks alive, rarely enough that an
+// overnight wait does not fill the journal.
+const enrolmentReport = time.Minute
+
+// waitForEnrolment holds a node outside any cluster until an operator claims
+// it.
+//
+// This is the ordering ADR 4 rests on. Bootstrapping first and enrolling later
+// would leave a machine that runs workloads and holds cluster credentials
+// while still obeying whoever first reaches an unauthenticated port; there is
+// no way to defend that state, so it is not reachable.
+//
+// The wait has no deadline, and that is the honest behaviour rather than an
+// omission: it is waiting for a human, and a timeout would resolve to either
+// joining unclaimed — the one thing ruled out — or failing a node that its
+// operator was on their way to.
+func waitForEnrolment(ctx context.Context, store *api.Store) error {
+	enrolled, err := store.Enrolled()
+	if err != nil {
+		return err
+	}
+
+	if enrolled {
+		return nil
+	}
+
+	slog.Warn("node is not enrolled and will not join a cluster until it is",
+		"claimWith", "cctl enroll",
+		"pairingCode", "printed on the console by corium-apid")
+
+	ticker := time.NewTicker(enrolmentPoll)
+	defer ticker.Stop()
+
+	lastReport := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting to be enrolled: %w", ctx.Err())
+
+		case <-ticker.C:
+		}
+
+		enrolled, err := store.Enrolled()
+		if err != nil {
+			return err
+		}
+
+		if enrolled {
+			slog.Info("node enrolled, continuing with bootstrap")
+
+			return nil
+		}
+
+		if time.Since(lastReport) >= enrolmentReport {
+			slog.Info("still waiting to be enrolled")
+
+			lastReport = time.Now()
+		}
+	}
+}
 
 // gateOnEnrolment decides whether this node may proceed to bootstrap.
 //
 // It runs after validation and before anything is mutated, because the answer
-// for an unclaimed node is that nothing should be mutated at all.
-func gateOnEnrolment(cfg *config.Config) error {
+// for an unclaimed node is that nothing should be mutated at all — not a
+// hostname, not a disk.
+func gateOnEnrolment(ctx context.Context, cfg *config.Config, opts Options) error {
 	switch cfg.API.Mode() {
-	case config.APIModeDisabled:
-		return nil
-
-	case config.APIModeConfigured:
-		// Accepted and recorded, but nothing serves it yet. Saying so in the
-		// journal is the difference between a key that is not implemented and
-		// a key that silently does nothing, and an operator who wrote it is
-		// entitled to know which one they got.
-		slog.Warn("management API configured, but corium-apid is not implemented yet",
-			"node", "bootstrapping without a management API")
-
+	case config.APIModeDisabled, config.APIModeConfigured:
+		// A configured CA is pinned by corium-apid, which is ordered before
+		// this unit. Nothing here has to wait for it: a node whose owner is
+		// named in its own configuration was never unclaimed.
 		return nil
 
 	case config.APIModeMaintenance:
-		return errUnclaimed
+		if opts.DryRun {
+			// A dry run renders and applies nothing, so blocking it would only
+			// stop somebody checking a document on their workstation.
+			slog.Info("configuration asks for maintenance mode; a real boot would wait here")
+
+			return nil
+		}
+
+		return waitForEnrolment(ctx, api.NewStore(opts.StateDir))
 
 	default:
-		// Mode returns one of the three above. A fourth means someone added a
+		// Mode returns one of the three above. A fourth means somebody added a
 		// mode and did not come back here, which is worth failing over rather
 		// than defaulting to "carry on".
 		return errors.New("unknown api mode")
