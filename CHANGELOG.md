@@ -129,6 +129,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **A node bootstrapped before 0.2.0 reported itself as never bootstrapped.**
+  The role and cluster are read from `/var/lib/corium/node.json`, which only
+  0.2.0 writes — so a node upgraded from 0.1.0 said it ran no Kubernetes,
+  refused to hand over a kubeconfig, and would have been **skipped by
+  `cctl upgrade`**, whose health gate asks exactly that. That is every machine
+  in service on the day this ships. Such a node is now recognised by the
+  bootstrap marker it has always written, with its role derived from the k0s
+  unit that was installed — the same signal the greenboot check uses.
+
 - **A bad `ha.authPassFrom` now says `ha.authPassFrom`.** Every problem with a
   secret source was reported as `join.tokenFrom` whichever key it was reached
   through, which sent you to a line that was not the one at fault.

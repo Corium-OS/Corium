@@ -27,6 +27,15 @@ import (
 // node whose cloud-config has been edited since, only one of those is true.
 const StateFile = "/var/lib/corium/node.json"
 
+// MarkerFile is what corium-agent has written on a successful bootstrap since
+// before StateFile existed.
+//
+// It is the only thing a node bootstrapped by 0.1.0 leaves behind, and reading
+// it is what stops such a node reporting itself as never bootstrapped after an
+// upgrade -- which would have `cctl upgrade` refuse to touch every machine in
+// service today, since its health gate asks exactly that.
+const MarkerFile = "/var/lib/corium/bootstrapped"
+
 // State is what corium-agent writes when a bootstrap completes.
 type State struct {
 	Role    string `json:"role"`
@@ -158,11 +167,22 @@ func (i *Inspector) Collect(ctx context.Context) *Node {
 	node.Hostname, _ = os.Hostname()
 	node.MachineID = strings.TrimSpace(i.read("/etc/machine-id"))
 
-	if state := i.state(); state != nil {
+	switch state := i.state(); {
+	case state != nil:
 		node.Bootstrapped = true
 		node.Role = state.Role
 		node.Cluster = state.Cluster
 		node.Endpoint = state.Endpoint
+
+	case i.exists(MarkerFile):
+		// Bootstrapped before this file existed. The role is derived from the
+		// unit that was installed rather than recorded, so it distinguishes a
+		// control plane from a worker and nothing finer -- k0scontroller backs
+		// single, controller and controller+worker alike. That is enough for
+		// everything this report is used for, and claiming more would be
+		// inventing it.
+		node.Bootstrapped = true
+		node.Role = i.roleFromUnits(ctx)
 	}
 
 	node.OS = i.operatingSystem(ctx)
@@ -265,6 +285,23 @@ func (i *Inspector) kubernetes(ctx context.Context, role string) Kubernetes {
 	return kubernetes
 }
 
+// roleFromUnits works backwards from the unit a bootstrap installed.
+//
+// The same signal the greenboot health check uses, and for the same reason: it
+// is the only one a node that predates node.json has.
+func (i *Inspector) roleFromUnits(ctx context.Context) string {
+	for unit, role := range map[string]string{
+		"k0scontroller.service": "controller",
+		"k0sworker.service":     "worker",
+	} {
+		if _, err := i.run(ctx, "systemctl", "cat", unit); err == nil {
+			return role
+		}
+	}
+
+	return ""
+}
+
 // serviceFor names the unit a role installs. It mirrors k0s.ServiceName rather
 // than importing it, because that package is about building a node and this one
 // is about reading it -- and because the mapping is a fact about k0s, not a
@@ -301,6 +338,15 @@ func (i *Inspector) health(ctx context.Context) Health {
 	}
 
 	return health
+}
+
+// exists reports whether a path is there. It is separate from read because the
+// bootstrap marker is an empty file: its contents say nothing and its presence
+// says everything.
+func (i *Inspector) exists(path string) bool {
+	_, err := os.Stat(filepath.Join(i.Root, path))
+
+	return err == nil
 }
 
 // read returns a file's contents, or empty if it cannot be read. Callers treat

@@ -227,3 +227,74 @@ func TestOSRelease(t *testing.T) {
 		t.Errorf("osRelease() = %q for an absent key, want empty", got)
 	}
 }
+
+func TestANodeBootstrappedBeforeNodeJSONIsStillBootstrapped(t *testing.T) {
+	// The upgrade path this guards: a node bootstrapped by 0.1.0 has no
+	// node.json, because the agent that made it never wrote one. Reporting it
+	// as never bootstrapped makes `cctl upgrade` refuse to touch it -- and
+	// that is every machine in service on the day 0.2.0 ships.
+	root := fakeRoot(t, map[string]string{
+		"/etc/machine-id": "abc\n",
+		MarkerFile:        "",
+	})
+
+	inspector := &Inspector{Root: root, Run: func(
+		_ context.Context, name string, args ...string,
+	) ([]byte, error) {
+		if name == "systemctl" && len(args) > 1 && args[0] == "cat" &&
+			args[1] == "k0scontroller.service" {
+			return []byte("# k0scontroller.service"), nil
+		}
+
+		return nil, errors.New("no such unit")
+	}}
+
+	node := inspector.Collect(t.Context())
+
+	if !node.Bootstrapped {
+		t.Error("Bootstrapped = false; cctl upgrade would refuse this node")
+	}
+
+	// Derived from the unit, which distinguishes a control plane from a worker
+	// and nothing finer.
+	if node.Role != "controller" {
+		t.Errorf("Role = %q, want it derived from the installed unit", node.Role)
+	}
+
+	if node.Kubernetes.Service != "k0scontroller.service" {
+		t.Errorf("Service = %q, want the controller unit", node.Kubernetes.Service)
+	}
+}
+
+func TestAWorkerBootstrappedBeforeNodeJSONReadsAsAWorker(t *testing.T) {
+	root := fakeRoot(t, map[string]string{MarkerFile: ""})
+
+	inspector := &Inspector{Root: root, Run: func(
+		_ context.Context, name string, args ...string,
+	) ([]byte, error) {
+		if name == "systemctl" && len(args) > 1 && args[1] == "k0sworker.service" {
+			return []byte("# k0sworker.service"), nil
+		}
+
+		return nil, errors.New("no such unit")
+	}}
+
+	if got := inspector.Collect(t.Context()).Role; got != "worker" {
+		t.Errorf("Role = %q, want worker", got)
+	}
+}
+
+func TestNodeJSONWinsOverTheMarker(t *testing.T) {
+	// A node that has both is a 0.2.0 node: what was recorded beats what can
+	// be inferred, and it carries the endpoint and cluster name too.
+	root := fakeRoot(t, map[string]string{
+		MarkerFile: "",
+		StateFile:  `{"role":"controller+worker","cluster":"prod","endpoint":"192.168.0.200"}`,
+	})
+
+	node := (&Inspector{Root: root, Run: commands(nil)}).Collect(t.Context())
+
+	if node.Role != "controller+worker" || node.Endpoint != "192.168.0.200" {
+		t.Errorf("node = %+v, want the recorded state", node)
+	}
+}
