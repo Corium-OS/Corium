@@ -107,7 +107,7 @@ silently ignored key means a setting you carefully wrote never took effect.
 | Step | What happens |
 |---|---|
 | **Parse** | Locate the schema in the document and decode it strictly |
-| **Defaults** | Fill unset fields (§3.12). Idempotent |
+| **Defaults** | Fill unset fields (§3.13). Idempotent |
 | **Validate** | Report **every** problem at once, offline |
 | **Hostname** | Settle the node's name before anything reads it (§4) |
 | **Secrets** | Resolve `tokenFrom` / `authPassFrom` / `operatorCAFrom` |
@@ -168,8 +168,9 @@ referred to indirectly in the journal.
 | `ha` | object | no | Control plane load balancing (§3.8) |
 | `upgrades` | object | no | Unattended upgrades (§3.9) |
 | `raid` | list | no | Software RAID on spare disks (§3.10) |
-| `api` | object | no | The management API, off by default (§3.11) |
-| `k0s` | object | no | Escape hatch (§3.13) |
+| `wireguard` | list | no | Host WireGuard overlay interfaces (§3.11) |
+| `api` | object | no | The management API, off by default (§3.12) |
+| `k0s` | object | no | Escape hatch (§3.15) |
 
 ### `role`
 
@@ -266,7 +267,7 @@ an external cluster, is reachable through `k0s.patch`. See
 | Key | Type | Notes |
 |---|---|---|
 | `token` | string | Inline. Convenient for labs, a liability in production |
-| `tokenFrom` | object | Resolved at first boot (§3.14) |
+| `tokenFrom` | object | Resolved at first boot (§3.15) |
 
 Set exactly one. Required for `worker`; rejected for `single`, which bootstraps
 its own cluster.
@@ -356,7 +357,7 @@ one holds a virtual IP.
 | `interface` | string | no | Defaults to the interface holding the default route |
 | `virtualRouterID` | int | no | 1–255. Omit it and k0s assigns one starting at 51. Must be unique within the broadcast domain |
 | `authPass` | string | yes | **Eight characters or fewer** |
-| `authPassFrom` | object | — | Alternative to `authPass` (§3.14) |
+| `authPassFrom` | object | — | Alternative to `authPass` (§3.15) |
 | `unicastPeers` | list | no | The other controllers' addresses |
 
 `authPass` is capped because **keepalived silently truncates it to eight
@@ -458,7 +459,84 @@ Prefer `/dev/disk/by-id/...` over `/dev/sdb`. Kernel names are handed out in
 discovery order, so on a first boot they can name a different disk than the one
 you meant.
 
-### 3.11 `api`
+### 3.11 `wireguard`
+
+A list of host WireGuard interfaces, brought up at first boot **before k0s**, so
+a cluster can run over an encrypted overlay between hosts that share no network —
+across sites or providers. This is a host concern, separate from the CNI: k0s can
+encrypt pod traffic, but that assumes the hosts underneath already reach each
+other. See [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md).
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** Interface name, e.g. `wg0`; unique on the node |
+| `address` | CIDR or list | — | **Required.** This node's overlay address, with prefix length. A single CIDR, or a list for a dual-stack interface (`[10.10.0.1/24, fd00::1/128]`) |
+| `listenPort` | int | — | UDP port; required on any node a peer dials |
+| `mtu` | int | — | Overrides the interface MTU |
+| `nodeAddress` | bool | `false` | Register this address with k0s (see below). At most one interface |
+| `privateKey` | string | — | Base64 key. Inline is a liability; prefer `privateKeyFrom` |
+| `privateKeyFrom` | object | — | Resolve the key at first boot (§3.15) |
+| `peers` | list | — | The other ends of the overlay |
+
+Each entry in `peers`:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `publicKey` | string | — | **Required.** Base64. Not a secret |
+| `endpoint` | string | — | `host:port`; prefer an IP |
+| `allowedIPs` | list | — | **Required.** CIDRs routed to this peer; may not overlap another peer's |
+| `persistentKeepalive` | int | — | Seconds; set it behind NAT (25 is usual) |
+| `presharedKey` | string | — | Base64. A secret; prefer `presharedKeyFrom` |
+| `presharedKeyFrom` | object | — | Resolve it at first boot (§3.15) |
+
+```yaml
+corium:
+  role: controller+worker
+  cluster:
+    endpoint: 10.10.0.1          # the overlay address, not the physical one
+  wireguard:
+    - name: wg0
+      address: 10.10.0.1/24
+      listenPort: 51820
+      nodeAddress: true          # k0s registers this address, not the physical NIC
+      privateKeyFrom:
+        file: /run/corium/wg0.key
+      peers:
+        - publicKey: "PEER_PUBLIC_KEY_BASE64"
+          endpoint: node-b.example:51820
+          allowedIPs: [10.10.0.0/24]
+          persistentKeepalive: 25
+```
+
+**`nodeAddress` is what turns an overlay into a cluster transport.** Without it,
+the kubelet registers whatever address it finds on the physical NIC, and the node
+is then unreachable from across the overlay for logs, exec, port-forward and
+metrics — the same failure `ha` avoids for the virtual IP. Set it on the one
+interface whose address other nodes should reach this node at, and `corium-agent`
+passes it to the kubelet as `--node-ip`. At most one interface may set it, and on
+a dual-stack interface the first address listed is the one registered — order the
+address you want as the node IP first.
+
+The interface comes up before k0s and returns on every reboot: `corium-agent`
+writes `/etc/wireguard/<name>.conf` — mode `0600`, since it carries the private
+key — and enables `wg-quick@<name>`, then orders the k0s service to require it, so
+a node whose overlay failed to come up does not half-join a cluster.
+`wireguard-tools` ships in the image, present but inert until an interface is
+declared; the kernel module is in-tree and loads on demand.
+
+Rejected at validation, before anything is brought up: a bad or duplicate
+interface name, an address with no prefix length, a port or MTU out of range, a
+key that is not a 32-byte base64 value, more than one `nodeAddress`, a peer with
+no public key or a duplicate one, an endpoint that is not `host:port`, a missing
+or malformed `allowedIPs`, and two peers claiming overlapping ranges. A private
+or preshared key is never echoed in an error.
+
+For an overlay that is **not** the cluster transport, or on a node with no
+cloud-init datasource, the escape hatch remains — a `write_files` config and an
+enabled `wg-quick@` unit — and [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md) covers
+when to prefer which.
+
+### 3.12 `api`
 
 The node's management API, `corium-apid`. Off unless asked for, and covered in
 full by [ADR 4](/docs/reference/adr-0004-management-api/).
@@ -474,7 +552,7 @@ full by [ADR 4](/docs/reference/adr-0004-management-api/).
 |---|---|---|---|
 | `enabled` | bool | `false` | Setting either key below implies `true`. False masks `corium-apid.service` |
 | `operatorCA` | string | — | PEM certificate of the CA that signs operator client certificates |
-| `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.14) |
+| `operatorCAFrom` | object | — | Resolve it at first boot instead (§3.15) |
 | `insecure` | bool | `false` | Drop the pairing code. Maintenance mode only |
 | `awaitConfig` | bool | `false` | Hold the bootstrap until an operator sends a configuration |
 
@@ -529,7 +607,7 @@ guessing which one you meant would leave the other silently doing nothing.
 |---|---|---|
 | absent, or `enabled: false` | off | No daemon, no port. The node bootstraps as it always did |
 | `operatorCA` | A | The CA is named inline, in clear. Unattended, and nothing secret is in the metadata: a certificate is public |
-| `operatorCAFrom` | B | The same, resolved at first boot from a `SecretSource` (§3.14) |
+| `operatorCAFrom` | B | The same, resolved at first boot from a `SecretSource` (§3.15) |
 | `enabled: true`, neither key | C | Maintenance mode: the node holds its bootstrap and waits to be claimed |
 
 Modes A and B claim the node at boot, so it joins its cluster unattended. Mode C
@@ -682,7 +760,7 @@ Enrolment is recorded under `/var/lib/corium/api/` — the pinned CA at `0644`
 because a certificate is not a secret, and the node's own serving key at `0600`
 because that one is — and it survives reboots and upgrades.
 
-### 3.12 Defaults
+### 3.13 Defaults
 
 | Field | Default |
 |---|---|
@@ -696,7 +774,7 @@ because that one is — and it survives reboots and upgrades.
 
 Applying defaults is idempotent and never overwrites an explicit value.
 
-### 3.13 `k0s.patch` — the escape hatch
+### 3.14 `k0s.patch` — the escape hatch
 
 A strategic merge patch applied to the rendered `k0s.yaml` **after** Corium has
 finished, passed through without interpretation. Every k0s setting stays
@@ -725,7 +803,7 @@ The second escape hatch is that the document remains an ordinary cloud-config:
 `write_files`, `runcmd` and every other module keep working. Corium is a guest
 in that document, not its owner.
 
-### 3.14 Secret sources
+### 3.15 Secret sources
 
 Used by `join.tokenFrom`, `ha.authPassFrom` and `api.operatorCAFrom`, so a value
 need not sit in instance metadata where anything reaching the metadata service

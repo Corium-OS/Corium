@@ -86,7 +86,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Node name | `node.name` | Derived from the machine ID when unset |
 | Labels | `node.labels` | Sorted before reaching the command line, so identical input gives an identical command |
 | Taints | `node.taints` | `key`, `value`, `effect` |
-| Node address | — | Set automatically with HA, excluding the virtual IP |
+| Node address | `wireguard[].nodeAddress` | Set automatically with HA (excluding the virtual IP), or pinned to a WireGuard overlay interface |
 
 ### Joining
 
@@ -125,6 +125,20 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Mount and persist | `raid[].mountPoint` | Written to `/etc/fstab` by UUID |
 | Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
 | Root filesystem on RAID | — | Works, but install-time only: hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](/docs/guides/raid/) |
+
+### Overlay networking
+
+| Feature | Field | Notes |
+|---|---|---|
+| Host WireGuard interface | `wireguard[]` | Brought up before k0s so a cluster can run over an encrypted overlay between hosts. See [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md) |
+| Overlay as the node address | `wireguard[].nodeAddress` | The kubelet registers this address, not the physical NIC — the field that makes an overlay a cluster transport |
+| Peers | `wireguard[].peers` | Public key, endpoint, allowed IPs, keepalive, optional preshared key |
+| Private key as a secret | `wireguard[].privateKeyFrom` | Resolved at first boot, written `0600`, never logged — like a join token |
+| k0s waits for the overlay | — | The k0s service is ordered to require the interface, so a node whose overlay failed does not half-join |
+
+This is a host concern, distinct from the pod-traffic encryption a CNI offers:
+the overlay is what lets hosts on different sites or providers reach each other at
+all. `wireguard-tools` ships present but inert until an interface is declared.
 
 ### Management API
 
