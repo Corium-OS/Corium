@@ -51,6 +51,10 @@ PAGES = [
      "Deriving a Corium image to add your own agents, certificates or drivers: "
      "where things have to live, how to sign it so nodes accept it, and the "
      "mistakes that only show up after an upgrade."),
+    ("wireguard-overlay.md", "guides", "wireguard-overlay", "WireGuard overlay", 140,
+     "Joining hosts across sites or providers over an encrypted overlay from "
+     "cloud-init: the escape-hatch recipe, why the tools have to be in the "
+     "image, and the three things it cannot do."),
     ("comparison.md", "reference", "comparison", "Comparison", 201,
      "How Corium compares to Talos, Kairos, Flatcar, Bottlerocket and running "
      "k0s on an ordinary distribution -- and when not to use it."),
@@ -94,6 +98,11 @@ PAGES = [
      "Why the management API can add, list and revoke SSH keys for a user that "
      "already exists, how it stays out of cloud-init's authority over accounts, "
      "and why it is admin-only."),
+    ("adr/0006-host-wireguard-overlay.md", "reference", "adr-0006-host-wireguard-overlay",
+     "ADR 6 — Host WireGuard overlay", 960,
+     "Why a host WireGuard interface declared from the corium: block earns its "
+     "place over a cloud-init recipe, with the schema sketch and validation "
+     "rules it needs."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
