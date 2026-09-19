@@ -116,6 +116,10 @@ spelling forever; that promise is expensive, so it is made sparingly.
 | Mount and persist | `raid[].mountPoint` | Written to `/etc/fstab` by UUID |
 | Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
 | Root filesystem on RAID | — | Works, but install-time only: hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](raid.md) |
+| ZFS pools on data disks | `zfs[]` | Mirror/raidz, created before k0s; needs the ZFS image variant. See [ZFS on data disks](zfs.md) |
+| ZFS datasets | `zfs[].datasets` | Per-dataset mount points and properties (compression, recordsize, quota) |
+| ZFS refuses to destroy data | `zfs[].wipe` | Off by default; a device in a pool cannot also be in a `raid[]` array |
+| Root filesystem on ZFS | — | Out of scope: needs the module in the initramfs, which bootc has no declarative path for. See [ADR 7](adr/0007-zfs-data-disks.md) |
 
 ### Overlay networking
 

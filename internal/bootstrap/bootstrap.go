@@ -118,6 +118,13 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 
+		// ZFS pools on the same footing as RAID, and before k0s for the same
+		// reason: a pool imported after the kubelet has started is a mount it has
+		// already written past.
+		if err := applyZFS(ctx, cfg); err != nil {
+			return err
+		}
+
 		// The overlay before k0s, for the same reason as the disks: the node
 		// registers over it and joins over it, so the interface has to be up
 		// before k0s decides its address or reaches the control plane.
