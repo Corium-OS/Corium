@@ -117,6 +117,13 @@ func Run(ctx context.Context, opts Options) error {
 		if err := applyRAID(ctx, cfg); err != nil {
 			return err
 		}
+
+		// The overlay before k0s, for the same reason as the disks: the node
+		// registers over it and joins over it, so the interface has to be up
+		// before k0s decides its address or reaches the control plane.
+		if err := applyWireGuard(ctx, cfg); err != nil {
+			return err
+		}
 	}
 
 	rendered, err := k0s.Render(cfg)
@@ -124,11 +131,16 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	// The address the kubelet registers with. An overlay interface the operator
+	// marked as the node address wins: computed from configuration alone, so a
+	// dry run reports the same address a real boot would register.
+	nodeIP := cfg.WireGuardNodeAddress()
+
 	// A dry run reaches no further than this process. Resolving the token would
 	// mean contacting a secret store to produce output nobody applies, which is
 	// both a surprise and, on a shared network, a leak of intent.
 	if opts.DryRun {
-		return report(cfg, rendered, k0s.InstallArgs(cfg, cfg.Join.Required(), ""))
+		return report(cfg, rendered, k0s.InstallArgs(cfg, cfg.Join.Required(), nodeIP))
 	}
 
 	token, err := resolveToken(ctx, cfg)
@@ -152,11 +164,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	// Pin the address the kubelet registers with, so that a controller holding
-	// the virtual IP does not advertise an address that moves on failover.
-	var nodeIP string
-
-	if cfg.HA.Enabled {
+	// Pin the address the kubelet registers with. The overlay address, if the
+	// operator marked one, is already in nodeIP. Otherwise, on an HA controller,
+	// detect the real address so a node holding the virtual IP does not advertise
+	// one that moves on failover.
+	switch {
+	case nodeIP != "":
+		slog.Info("registering with the overlay address", "nodeIP", nodeIP)
+	case cfg.HA.Enabled:
 		if nodeIP, err = detectNodeIP(cfg.HA.VirtualIP); err != nil {
 			return err
 		}

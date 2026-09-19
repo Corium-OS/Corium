@@ -12,6 +12,19 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **A host WireGuard overlay can be declared from the `corium:` block.** A new
+  `wireguard:` list brings up encrypted interfaces at first boot, before k0s, so
+  nodes across sites or providers can form one cluster over a private overlay.
+  Mark an interface `nodeAddress: true` and k0s registers the overlay address
+  rather than the physical NIC — the piece a cloud-init recipe cannot get right,
+  because the address is chosen inside the agent, after cloud-init has run. The
+  private key resolves through the same secret references as a join token
+  (`privateKeyFrom`), is written `0600`, and is never logged; `wireguard-tools`
+  now ships in the image, present but inert until an interface is declared. See
+  [ADR 6](docs/adr/0006-host-wireguard-overlay.md).
+
 ## [0.2.0] - 2026-09-19
 
 ### Added

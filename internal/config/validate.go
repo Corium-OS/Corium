@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"regexp"
@@ -31,6 +33,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
 	problems = append(problems, c.validateRAID()...)
+	problems = append(problems, c.validateWireGuard()...)
 	problems = append(problems, c.validateAPI()...)
 
 	return errors.Join(problems...)
@@ -613,4 +616,221 @@ func validateOperatorCA(pemData string) []error {
 	}
 
 	return []error{fmt.Errorf("api.operatorCA: %w", err)}
+}
+
+// wgInterfaceNamePattern is what the kernel accepts for an interface name.
+var wgInterfaceNamePattern = regexp.MustCompile(`^[a-z0-9][-a-z0-9]*$`)
+
+// wgInterfaceNameMax is IFNAMSIZ minus the trailing NUL: the longest name the
+// kernel will take for a network interface.
+const wgInterfaceNameMax = 15
+
+// wireGuardKeyBytes is the length a Curve25519 key decodes to. A base64 string
+// that decodes to anything else is a truncated or mistyped key.
+const wireGuardKeyBytes = 32
+
+func (c *Config) validateWireGuard() []error {
+	var problems []error
+
+	// Two interfaces sharing a name would collide on the same device and the
+	// same wg-quick unit instance.
+	seenNames := make(map[string]bool, len(c.WireGuard))
+	nodeAddresses := 0
+
+	for i := range c.WireGuard {
+		iface := &c.WireGuard[i]
+		field := fmt.Sprintf("wireguard[%d]", i)
+
+		problems = append(problems, validateWireGuardName(field, iface.Name, seenNames)...)
+
+		if iface.Address == "" {
+			problems = append(problems, fmt.Errorf("%s.address: required", field))
+		} else if _, err := netip.ParsePrefix(iface.Address); err != nil {
+			problems = append(problems, fmt.Errorf(
+				"%s.address: %q must be an address with a prefix length, such as 10.10.0.2/24",
+				field, iface.Address))
+		}
+
+		if iface.ListenPort != 0 && (iface.ListenPort < 1 || iface.ListenPort > 65535) {
+			problems = append(problems, fmt.Errorf(
+				"%s.listenPort: %d is out of range; use 1-65535, or omit it on a client-only node",
+				field, iface.ListenPort))
+		}
+
+		if iface.MTU != 0 && (iface.MTU < 576 || iface.MTU > 65535) {
+			problems = append(problems, fmt.Errorf(
+				"%s.mtu: %d is out of range; use 576-65535, or omit it to let wg-quick decide",
+				field, iface.MTU))
+		}
+
+		if iface.NodeAddress {
+			nodeAddresses++
+		}
+
+		problems = append(problems, validateWireGuardKey(
+			field, "privateKey", iface.PrivateKey, iface.PrivateKeyFrom, true)...)
+
+		problems = append(problems, validateWireGuardPeers(field, iface)...)
+	}
+
+	// The kubelet registers exactly one address; two interfaces both claiming to
+	// be it is a contradiction, not a preference to resolve.
+	if nodeAddresses > 1 {
+		problems = append(problems, errors.New(
+			"wireguard: more than one interface sets nodeAddress, but a node registers exactly one address"))
+	}
+
+	return problems
+}
+
+func validateWireGuardName(field, name string, seen map[string]bool) []error {
+	switch {
+	case name == "":
+		return []error{fmt.Errorf("%s.name: required", field)}
+	case len(name) > wgInterfaceNameMax:
+		return []error{fmt.Errorf(
+			"%s.name: %q is %d characters, the limit is %d",
+			field, name, len(name), wgInterfaceNameMax)}
+	case !wgInterfaceNamePattern.MatchString(name):
+		return []error{fmt.Errorf(
+			"%s.name: %q must be lowercase letters, digits and hyphens, starting with a letter or digit",
+			field, name)}
+	}
+
+	var problems []error
+	if seen[name] {
+		problems = append(problems, fmt.Errorf(
+			"%s.name: %q is used by more than one interface", field, name))
+	}
+
+	seen[name] = true
+
+	return problems
+}
+
+func validateWireGuardPeers(field string, iface *WireGuardInterface) []error {
+	var problems []error
+
+	seenKeys := make(map[string]bool, len(iface.Peers))
+	var ranges []netip.Prefix
+
+	for j := range iface.Peers {
+		peer := &iface.Peers[j]
+		pfield := fmt.Sprintf("%s.peers[%d]", field, j)
+
+		if peer.PublicKey == "" {
+			problems = append(problems, fmt.Errorf("%s.publicKey: required", pfield))
+		} else if err := validWireGuardKeyMaterial(peer.PublicKey); err != nil {
+			problems = append(problems, fmt.Errorf("%s.publicKey: %w", pfield, err))
+		} else {
+			if seenKeys[peer.PublicKey] {
+				problems = append(problems, fmt.Errorf(
+					"%s.publicKey: this key is used by more than one peer of the interface", pfield))
+			}
+
+			seenKeys[peer.PublicKey] = true
+		}
+
+		if peer.Endpoint != "" {
+			if _, _, err := net.SplitHostPort(peer.Endpoint); err != nil {
+				problems = append(problems, fmt.Errorf(
+					"%s.endpoint: %q must be host:port", pfield, peer.Endpoint))
+			}
+		}
+
+		if len(peer.AllowedIPs) == 0 {
+			problems = append(problems, fmt.Errorf(
+				"%s.allowedIPs: required; list the ranges routed to this peer", pfield))
+		}
+
+		for k, cidr := range peer.AllowedIPs {
+			prefix, err := netip.ParsePrefix(cidr)
+			if err != nil {
+				problems = append(problems, fmt.Errorf(
+					"%s.allowedIPs[%d]: %q is not a valid CIDR", pfield, k, cidr))
+
+				continue
+			}
+
+			// WireGuard routes a packet to the peer with the longest matching
+			// prefix, so two peers claiming the same range is a routing ambiguity
+			// rather than a configuration two people can both have meant.
+			for _, existing := range ranges {
+				if existing.Overlaps(prefix) {
+					problems = append(problems, fmt.Errorf(
+						"%s.allowedIPs[%d]: %s overlaps another allowedIPs range on this interface",
+						pfield, k, prefix))
+
+					break
+				}
+			}
+
+			ranges = append(ranges, prefix)
+		}
+
+		if peer.PersistentKeepalive != 0 && (peer.PersistentKeepalive < 1 || peer.PersistentKeepalive > 65535) {
+			problems = append(problems, fmt.Errorf(
+				"%s.persistentKeepalive: %d is out of range; use 1-65535 seconds",
+				pfield, peer.PersistentKeepalive))
+		}
+
+		problems = append(problems, validateWireGuardKey(
+			pfield, "presharedKey", peer.PresharedKey, peer.PresharedKeyFrom, false)...)
+	}
+
+	return problems
+}
+
+// validateWireGuardKey checks a base64 WireGuard key given inline or by
+// reference, reporting against the field it was reached through. required says
+// whether the key must be present: an interface must have a private key, a
+// peer's preshared key is optional.
+//
+// The key value is never echoed into an error, because a private key is a secret
+// and a validation message ends up in the journal.
+func validateWireGuardKey(field, name, inline string, from *SecretSource, required bool) []error {
+	var problems []error
+
+	hasInline := inline != ""
+	hasSource := from != nil
+
+	switch {
+	case hasInline && hasSource:
+		problems = append(problems, fmt.Errorf(
+			"%s: set either %s or %sFrom, not both", field, name, name))
+	case !hasInline && !hasSource:
+		if required {
+			problems = append(problems, fmt.Errorf(
+				"%s.%s: required; set %s or %sFrom", field, name, name, name))
+		}
+	}
+
+	if hasSource {
+		problems = append(problems, from.validate(field+"."+name+"From")...)
+	}
+
+	if hasInline {
+		if err := validWireGuardKeyMaterial(inline); err != nil {
+			problems = append(problems, fmt.Errorf("%s.%s: %w", field, name, err))
+		}
+	}
+
+	return problems
+}
+
+// validWireGuardKeyMaterial reports whether a string is a base64-encoded 32-byte
+// key, so a truncated paste fails at validation rather than at wg runtime. It
+// never includes the key in its error.
+func validWireGuardKeyMaterial(key string) error {
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	if err != nil {
+		return errors.New("must be a base64-encoded key")
+	}
+
+	if len(decoded) != wireGuardKeyBytes {
+		return fmt.Errorf("must be a %d-byte key, but decodes to %d bytes",
+			wireGuardKeyBytes, len(decoded))
+	}
+
+	return nil
 }

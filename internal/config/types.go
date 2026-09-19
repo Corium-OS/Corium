@@ -8,6 +8,8 @@
 // to every node, and must be supported forever — add them reluctantly.
 package config
 
+import "strings"
+
 // Role describes what a node does in the cluster.
 type Role string
 
@@ -62,6 +64,11 @@ type Config struct {
 	// disks. It does not cover the disk the OS booted from: see the RAIDArray
 	// documentation.
 	RAID []RAIDArray `yaml:"raid,omitempty" json:"raid,omitempty"`
+
+	// WireGuard declares host WireGuard interfaces, brought up before k0s so a
+	// cluster can run over an encrypted overlay between hosts. See the
+	// WireGuardInterface documentation and docs/adr/0006-host-wireguard-overlay.md.
+	WireGuard []WireGuardInterface `yaml:"wireguard,omitempty" json:"wireguard,omitempty"`
 
 	// Upgrades controls whether the node updates itself.
 	Upgrades Upgrades `yaml:"upgrades,omitempty" json:"upgrades,omitempty"`
@@ -388,6 +395,91 @@ type RAIDArray struct {
 	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
 }
 
+// WireGuardInterface declares one host WireGuard interface, describing this
+// node's participation in an encrypted overlay between hosts.
+//
+// It is provisioned by corium-agent at first boot, before k0s, on the same
+// footing as a RAID array: the interface is up before the kubelet registers, and
+// the k0s service is ordered to wait for it. What this earns over writing the
+// same interface into cloud-init's write_files and runcmd -- the honest
+// alternative, since the interface is otherwise a plain wg-quick config -- is the
+// three things a recipe cannot reach, and they are why this is a field:
+//
+//   - It is read from the whole configuration source chain, not just cloud-init,
+//     so it configures a node with no cloud-init datasource -- bare metal, PXE,
+//     an appliance -- where write_files and runcmd never run at all.
+//   - The overlay address becomes the address k0s registers (see NodeAddress),
+//     rather than the physical NIC the kubelet would otherwise pick, which leaves
+//     the node unreachable from across the overlay.
+//   - The private key is resolved as a secret (see PrivateKeyFrom) instead of
+//     sitting in cleartext in instance metadata.
+//
+// See docs/adr/0006-host-wireguard-overlay.md.
+type WireGuardInterface struct {
+	// Name is the interface name, such as "wg0". It becomes the wg-quick unit
+	// instance, so it must be a valid Linux interface name and unique on the node.
+	Name string `yaml:"name" json:"name"`
+
+	// Address is this node's address on the overlay, in CIDR form:
+	// "10.10.0.2/24". It is a host address with a prefix length, not a bare IP.
+	Address string `yaml:"address" json:"address"`
+
+	// ListenPort is the UDP port WireGuard listens on. Leave it unset on a
+	// client-only node; it is required on any node a peer names in its endpoint,
+	// because a node with no listen port cannot be dialled.
+	ListenPort int `yaml:"listenPort,omitempty" json:"listenPort,omitempty"`
+
+	// MTU overrides the interface MTU. Left unset, wg-quick derives one, which is
+	// right on most links; set it only when the path needs a smaller value.
+	MTU int `yaml:"mtu,omitempty" json:"mtu,omitempty"`
+
+	// NodeAddress marks this interface's address as the one k0s registers with,
+	// so the node is reachable over the overlay rather than at its physical NIC.
+	// At most one interface across the block may set it.
+	NodeAddress bool `yaml:"nodeAddress,omitempty" json:"nodeAddress,omitempty"`
+
+	// PrivateKey is the interface private key, base64-encoded. Inline keys are
+	// convenient for labs and a liability in production, exactly like an inline
+	// join token: anything that can read the instance metadata can read the key.
+	// Prefer PrivateKeyFrom.
+	PrivateKey string `yaml:"privateKey,omitempty" json:"privateKey,omitempty"`
+
+	// PrivateKeyFrom resolves the private key at first boot, so it need not sit
+	// in instance metadata. Exactly one of PrivateKey or PrivateKeyFrom is set.
+	PrivateKeyFrom *SecretSource `yaml:"privateKeyFrom,omitempty" json:"privateKeyFrom,omitempty"`
+
+	// Peers are the other ends of the overlay this node talks to.
+	Peers []WireGuardPeer `yaml:"peers,omitempty" json:"peers,omitempty"`
+}
+
+// WireGuardPeer is one remote end of a WireGuard interface.
+type WireGuardPeer struct {
+	// PublicKey is the peer's public key, base64-encoded. A public key is not a
+	// secret, so it sits inline.
+	PublicKey string `yaml:"publicKey" json:"publicKey"`
+
+	// Endpoint is the peer's address, "host:port". Prefer an IP: a name has to
+	// resolve before the network the overlay itself may gate is up.
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+
+	// AllowedIPs are the ranges routed to this peer, each in CIDR form. WireGuard
+	// routes by longest match, so two peers on one interface may not claim
+	// overlapping ranges.
+	AllowedIPs []string `yaml:"allowedIPs" json:"allowedIPs"`
+
+	// PersistentKeepalive keeps a path open through NAT, in seconds. Set it on a
+	// node behind NAT that must stay reachable; 25 is the usual value.
+	PersistentKeepalive int `yaml:"persistentKeepalive,omitempty" json:"persistentKeepalive,omitempty"`
+
+	// PresharedKey adds a symmetric layer on top of the public-key handshake,
+	// base64-encoded. It is a secret, so prefer PresharedKeyFrom in production.
+	PresharedKey string `yaml:"presharedKey,omitempty" json:"presharedKey,omitempty"`
+
+	// PresharedKeyFrom resolves the preshared key at first boot. At most one of
+	// PresharedKey or PresharedKeyFrom is set.
+	PresharedKeyFrom *SecretSource `yaml:"presharedKeyFrom,omitempty" json:"presharedKeyFrom,omitempty"`
+}
+
 // Upgrades controls whether a node updates itself.
 type Upgrades struct {
 	// Automatic selects how far the node goes unattended. Defaults to none.
@@ -549,4 +641,22 @@ func (r Role) IsController() bool {
 // IsWorker reports whether the role runs workloads.
 func (r Role) IsWorker() bool {
 	return r == RoleSingle || r == RoleControllerWorker || r == RoleWorker
+}
+
+// WireGuardNodeAddress returns the bare overlay address this node should register
+// with k0s, or "" if no interface is marked as the node address.
+//
+// It is the address of the interface whose NodeAddress is set, with its prefix
+// length stripped: the kubelet wants an address, not a CIDR. Validation
+// guarantees at most one interface sets it.
+func (c *Config) WireGuardNodeAddress() string {
+	for i := range c.WireGuard {
+		if c.WireGuard[i].NodeAddress {
+			address, _, _ := strings.Cut(c.WireGuard[i].Address, "/")
+
+			return address
+		}
+	}
+
+	return ""
 }

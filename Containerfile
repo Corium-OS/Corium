@@ -62,6 +62,13 @@ LABEL org.opencontainers.image.title="Corium" \
 # Kubernetes node needs: iptables/nftables for kube-proxy and the CNI, iproute
 # for the network setup k0s performs, conntrack for service tracking.
 #
+# wireguard-tools ships present but inert, the same way sshd does: nothing enables
+# it until a node declares a corium.wireguard interface, at which point the agent
+# writes the config and starts wg-quick. It cannot be added at boot -- /usr is
+# read-only and cloud-init's packages: is disabled -- so it is an image concern.
+# The kernel module is in-tree and loads on demand. See
+# docs/adr/0006-host-wireguard-overlay.md.
+#
 # Deliberately absent: any container engine. k0s ships and supervises its own
 # containerd under /var/lib/k0s/bin. A second engine on the host would fight it
 # for cgroups and CNI state.
@@ -74,6 +81,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		conntrack-tools \
 		socat \
 		ethtool \
+		wireguard-tools \
 		qemu-guest-agent \
 		greenboot \
 	&& dnf clean all \

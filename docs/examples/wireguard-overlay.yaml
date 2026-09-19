@@ -1,0 +1,55 @@
+#cloud-config
+#
+# A node joining a cluster over a WireGuard overlay -- this is the first node
+# (controller+worker); a worker joins it over the same tunnel.
+#
+# The interface is brought up at first boot, before k0s, and marked as the node
+# address, so k0s registers the overlay address (10.10.0.1) rather than the
+# physical NIC. That ordering, and that address choice, are why this is a Corium
+# field rather than a runcmd calling wg-quick: the kubelet's address is decided
+# inside corium-agent, which a cloud-init runcmd cannot reach.
+#
+# See docs/adr/0006-host-wireguard-overlay.md and docs/reference.md (§3.11).
+
+corium:
+  role: controller+worker
+
+  cluster:
+    # The overlay address, so joining nodes and kubeconfigs use the tunnel
+    # rather than an address that only works from the same network.
+    endpoint: 10.10.0.1
+
+  wireguard:
+    - name: wg0
+      address: 10.10.0.1/24
+      listenPort: 51820
+
+      # k0s registers this address as the node's own. At most one interface
+      # across the block may set it.
+      nodeAddress: true
+
+      # The private key is a secret, so it is resolved at first boot rather than
+      # written into this document: anything that can read the instance metadata
+      # can read whatever is inline here. Place the file out of band, or with a
+      # write_files entry you keep out of any shared image. An inline privateKey
+      # exists for labs and carries the same liability as an inline join token.
+      privateKeyFrom:
+        file: /run/corium/wg0.key
+
+      peers:
+        # A public key is not a secret, so it sits inline. This all-zeros value
+        # is an obvious placeholder -- replace it with the peer's real key.
+        - publicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          endpoint: node-b.example.net:51820
+          # Only the peer's own overlay address is routed to it here; widen this
+          # to a subnet if the peer fronts one.
+          allowedIPs:
+            - 10.10.0.2/32
+          # Set on a node behind NAT that must stay reachable.
+          persistentKeepalive: 25
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com
