@@ -130,7 +130,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 
 | Feature | Field | Notes |
 |---|---|---|
-| Host WireGuard interface | `wireguard[]` | Brought up before k0s so a cluster can run over an encrypted overlay between hosts. See [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md) |
+| Host WireGuard interface | `wireguard[]` | Brought up before k0s so a cluster can run over an encrypted overlay between hosts. See [ADR 6](/docs/reference/adr-0006-host-wireguard-overlay/) |
 | Overlay as the node address | `wireguard[].nodeAddress` | The kubelet registers this address, not the physical NIC — the field that makes an overlay a cluster transport |
 | Peers | `wireguard[].peers` | Public key, endpoint, allowed IPs, keepalive, optional preshared key |
 | Private key as a secret | `wireguard[].privateKeyFrom` | Resolved at first boot, written `0600`, never logged — like a join token |
