@@ -1,6 +1,6 @@
 # 6. A host WireGuard interface declared from the `corium:` block
 
-Status: proposed
+Status: accepted
 
 ## Context
 

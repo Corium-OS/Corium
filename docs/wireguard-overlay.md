@@ -1,11 +1,11 @@
 # A WireGuard overlay between hosts
 
-Corium has no native field for a host WireGuard interface. There is a
-[proposal to add one](adr/0006-host-wireguard-overlay.md), but until it is
-accepted — and for overlays that are not the cluster's own transport, even if it
-is — you build the interface the way you build anything the `corium:` block does
-not cover: with the escape hatches every node always has, `write_files` and
-`runcmd`. This page is that recipe.
+Corium has no native field for a host WireGuard interface yet. The design is
+[decided but not yet built](adr/0006-host-wireguard-overlay.md) (ADR 6) — and
+for overlays that are not the cluster's own transport it stays optional even once
+it ships. Until the field lands you build the interface the way you build
+anything the `corium:` block does not cover: with the escape hatches every node
+always has, `write_files` and `runcmd`. This page is that recipe.
 
 It is worth being clear about what this earns you and what it does not, because
 the honest answer shapes when to use it. A WireGuard overlay gives every node an
@@ -22,7 +22,7 @@ executes it at all (section 1). It puts the private key in cleartext in your
 instance metadata (section 5). And it gives you no reliable way to make the
 kubelet register the *overlay* address as the node's address (section 3). The
 first rules the recipe out entirely off-cloud; the other two are the reason the
-[native field is proposed](adr/0006-host-wireguard-overlay.md): if the overlay is
+[native field was chosen](adr/0006-host-wireguard-overlay.md): if the overlay is
 meant to be the cluster's own transport, read section 3 before you rely on it.
 
 ---
@@ -50,7 +50,7 @@ RUN bootc container lint --fatal-warnings
 ```
 
 Everything below assumes your nodes run an image with `wireguard-tools` present.
-The [proposed native field](adr/0006-host-wireguard-overlay.md) would make Corium
+The [native field](adr/0006-host-wireguard-overlay.md) (ADR 6) will make Corium
 ship the package by default, present-but-inert the way it ships `sshd`; until
 that lands, this one line is yours to add.
 
@@ -175,8 +175,8 @@ Your options, in order of how much they cost:
   more than you wanted and worth doing deliberately.
 - **Wait for the field.** Making the overlay address the registered node address,
   before k0s, without routing everything through it, is exactly what the
-  [proposed `wireguard:` field](adr/0006-host-wireguard-overlay.md) exists to do,
-  and it is the one part of this that a recipe cannot do well.
+  [`wireguard:` field](adr/0006-host-wireguard-overlay.md) exists to do, and it
+  is the one part of this that a recipe cannot do well.
 
 ---
 
@@ -248,9 +248,9 @@ that bootstraps the overlay.
 
 Use this recipe for an overlay that is not the cluster's transport, on a node
 that has cloud-init anyway, or to try the idea out before the field lands. Prefer
-the [proposed field](adr/0006-host-wireguard-overlay.md) — and say so on the
-issue if you need it — when the overlay *is* the cluster transport, or when the
-node has no cloud-init datasource. That is where the recipe's three sharp edges
+the [native field](adr/0006-host-wireguard-overlay.md) — once it ships; say so on
+the issue if you need it sooner — when the overlay *is* the cluster transport, or
+when the node has no cloud-init datasource. That is where the recipe's three sharp edges
 are: nodes with no cloud-init never run it, the kubelet registers the wrong
 address, and the private key sits in metadata. Those three are what the field is
 designed to own, and what a recipe cannot.

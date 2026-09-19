@@ -100,9 +100,9 @@ PAGES = [
      "and why it is admin-only."),
     ("adr/0006-host-wireguard-overlay.md", "reference", "adr-0006-host-wireguard-overlay",
      "ADR 6 — Host WireGuard overlay", 960,
-     "Whether a host WireGuard interface declared from the corium: block earns "
-     "its place over a cloud-init recipe -- proposed -- with the schema sketch "
-     "and validation rules it would need."),
+     "Why a host WireGuard interface declared from the corium: block earns its "
+     "place over a cloud-init recipe, with the schema sketch and validation "
+     "rules it needs."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
