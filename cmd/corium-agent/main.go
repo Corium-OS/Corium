@@ -37,6 +37,7 @@ Usage:
 Commands:
   bootstrap    Configure this node and start k0s (run once, on first boot)
   validate     Parse and validate a configuration without applying it
+  issue        Refresh the console status banner (run on a timer)
   api set-ca   Replace the operator CA this node obeys, locally
   version      Print version information
 
@@ -75,6 +76,8 @@ func run() error {
 		return bootstrapCommand(ctx, args)
 	case "validate":
 		return validateCommand(ctx, args)
+	case "issue":
+		return issueCommand(ctx, args)
 	case "api":
 		return apiCommand(args)
 	case "version":

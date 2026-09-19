@@ -135,7 +135,8 @@ RUN systemctl enable corium-bootstrap.service \
 	&& systemctl enable corium-apid.service \
 	&& systemctl enable qemu-guest-agent.service \
 	&& systemctl enable greenboot-healthcheck.service \
-	&& systemctl enable corium-uncordon.service
+	&& systemctl enable corium-uncordon.service \
+	&& systemctl enable corium-console-banner.timer
 
 # The image decides when it updates; it does not update itself behind the
 # operator's back. Upgrades are an explicit, orchestrated, drain-aware act.
