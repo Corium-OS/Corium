@@ -686,8 +686,12 @@ jobs:
             printf 'The command line client, attached below for linux and macOS on amd64\n'
             printf 'and arm64. With [mise](https://mise.jdx.dev):\n\n'
             printf '```bash\n'
-            printf 'mise use -g github:%s[exe=cctl]\n' "${GH_REPO}"
+            printf 'mise use -g '"'"'github:%s[exe=cctl]@%s'"'"'\n' "${GH_REPO}" "${version}"
             printf '```\n\n'
+            printf 'The quotes are for zsh, which globs `[...]`; the version is because\n'
+            printf 'mise refuses a release younger than its `age` setting allows, and\n'
+            printf 'because an unpinned install resolves to the newest tag, prereleases\n'
+            printf 'included.\n\n'
             printf 'Or by hand, verifying what you downloaded:\n\n'
             printf '```bash\n'
             printf 'curl -fsSLO https://github.com/%s/releases/download/%s/cctl_%s_linux_amd64.tar.gz\n' \

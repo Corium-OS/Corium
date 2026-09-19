@@ -188,10 +188,14 @@ coverage than it has is worse than a short one.
   `mise use -g`, so that checking a candidate does not put it in your own
   global tool set.
 
-  Pin the version. mise's `github` backend resolved a bare
-  `github:Corium-OS/Corium[exe=cctl]` to `0.2.0-rc.4` while that was the newest
-  tag, prerelease or not -- so an unpinned check tells you about whatever is
-  newest rather than about the thing you are releasing.
+  Quote it and pin it, and the release notes must too. zsh globs `[...]`, so an
+  unquoted command dies in the shell with `no matches found` before mise sees
+  it. And the version is required twice over: mise's `github` backend resolved
+  a bare `github:Corium-OS/Corium[exe=cctl]` to `0.2.0-rc.4` while that was the
+  newest tag, prerelease or not; and mise refuses a release younger than its
+  `age` setting allows, so a just-published version reports `no versions found
+  ... matching date filter` until it is old enough. Both were found by a reader
+  of the 0.2.0 notes, after release.
 - `sha256sum --check --ignore-missing SHA256SUMS` passes against a downloaded
   archive, and `cosign verify-blob --key cosign.pub --signature SHA256SUMS.sig
   SHA256SUMS` verifies.

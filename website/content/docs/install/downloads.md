@@ -29,12 +29,25 @@ rather than written down here.
 The client runs on your machine and never on a node. Archives are attached to
 each release for linux and macOS, on amd64 and arm64.
 
-With [mise](https://mise.jdx.dev), which picks the right one and keeps it
-current:
+With [mise](https://mise.jdx.dev), which picks the archive matching your
+machine:
 
 ```bash
-mise use -g github:Corium-OS/Corium[exe=cctl]
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.2.0'
 ```
+
+Both the quotes and the version are load-bearing, and leaving either out fails
+in a way that does not obviously point at them.
+
+The quotes are for your shell: zsh treats `[...]` as a glob, so an unquoted
+command never reaches mise at all — it reports `no matches found` before
+anything runs.
+
+The version is for two reasons. mise refuses a release younger than its `age`
+setting allows, which is a supply-chain guard and means a freshly published
+version is not installable for a while (`no versions found ... matching date
+filter`). And an unpinned install resolves to the newest tag, **release
+candidates included** — pinning is how you say you meant the stable one.
 
 By hand, checking what you downloaded:
 
@@ -111,7 +124,8 @@ a file*.
 `cctl` is attached, because the same reasoning points the other way for it. It
 is three megabytes, it is fetched by a person setting up a workstation rather
 than by a machine, and the installers people already use — `mise use
-github:Corium-OS/Corium[exe=cctl]` — read release assets and not registries.
+github:Corium-OS/Corium[exe=cctl]@0.2.0'` — read release assets and not
+registries.
 Signing it as a blob rather than as an OCI artefact costs one extra file and
 keeps it reachable by the tools that would actually go looking.
 
