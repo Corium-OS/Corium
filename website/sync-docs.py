@@ -47,6 +47,10 @@ PAGES = [
     ("raid.md", "guides", "raid", "Software RAID", 130,
      "Declaring mdadm arrays on a node's spare disks, why they are built "
      "before k0s starts, and where a RAID root filesystem stands today."),
+    ("derived-images.md", "guides", "derived-images", "Building your own image", 135,
+     "Deriving a Corium image to add your own agents, certificates or drivers: "
+     "where things have to live, how to sign it so nodes accept it, and the "
+     "mistakes that only show up after an upgrade."),
     ("comparison.md", "reference", "comparison", "Comparison", 201,
      "How Corium compares to Talos, Kairos, Flatcar, Bottlerocket and running "
      "k0s on an ordinary distribution -- and when not to use it."),
