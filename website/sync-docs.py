@@ -47,6 +47,10 @@ PAGES = [
     ("raid.md", "guides", "raid", "Software RAID", 130,
      "Declaring mdadm arrays on a node's spare disks, why they are built "
      "before k0s starts, and where a RAID root filesystem stands today."),
+    ("zfs.md", "guides", "zfs", "ZFS on data disks", 131,
+     "Declaring ZFS pools on a node's data disks with the ZFS image variant, "
+     "why the module is baked against the image's kernel, and how it differs "
+     "from software RAID."),
     ("derived-images.md", "guides", "derived-images", "Building your own image", 135,
      "Deriving a Corium image to add your own agents, certificates or drivers: "
      "where things have to live, how to sign it so nodes accept it, and the "
@@ -103,6 +107,11 @@ PAGES = [
      "Why a host WireGuard interface declared from the corium: block earns its "
      "place over a cloud-init recipe, with the schema sketch and validation "
      "rules it needs."),
+    ("adr/0007-zfs-data-disks.md", "reference", "adr-0007-zfs-data-disks",
+     "ADR 7 — ZFS on data disks", 970,
+     "Why ZFS covers data disks in a variant image rather than the base, why the "
+     "kernel module is baked at build time rather than built with DKMS, and why "
+     "root on ZFS is out of scope."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
