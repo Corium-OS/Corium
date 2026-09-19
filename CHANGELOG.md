@@ -12,6 +12,8 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-19
+
 ### Added
 
 - **The API can grant SSH access to a node.** `cctl access ssh add`, `list` and
@@ -315,5 +317,6 @@ the node is described in cloud-init.
   turns it into a disk image is pinned to a floating tag, so two runs against
   the same digest may not produce identical bytes.
 
-[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Corium-OS/Corium/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Corium-OS/Corium/releases/tag/v0.1.0
