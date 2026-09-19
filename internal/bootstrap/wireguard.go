@@ -116,7 +116,7 @@ func renderWireGuardConf(iface *config.WireGuardInterface, privateKey string, pr
 
 	b.WriteString("# Written by corium-agent from corium.wireguard. Do not edit.\n")
 	b.WriteString("[Interface]\n")
-	fmt.Fprintf(&b, "Address = %s\n", iface.Address)
+	fmt.Fprintf(&b, "Address = %s\n", strings.Join(iface.Address, ", "))
 
 	if iface.ListenPort != 0 {
 		fmt.Fprintf(&b, "ListenPort = %d\n", iface.ListenPort)

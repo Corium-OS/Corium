@@ -461,7 +461,7 @@ other. See [ADR 6](adr/0006-host-wireguard-overlay.md).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `name` | string | — | **Required.** Interface name, e.g. `wg0`; unique on the node |
-| `address` | CIDR | — | **Required.** This node's overlay address, with prefix length |
+| `address` | CIDR or list | — | **Required.** This node's overlay address, with prefix length. A single CIDR, or a list for a dual-stack interface (`[10.10.0.1/24, fd00::1/128]`) |
 | `listenPort` | int | — | UDP port; required on any node a peer dials |
 | `mtu` | int | — | Overrides the interface MTU |
 | `nodeAddress` | bool | `false` | Register this address with k0s (see below). At most one interface |
@@ -504,7 +504,9 @@ the kubelet registers whatever address it finds on the physical NIC, and the nod
 is then unreachable from across the overlay for logs, exec, port-forward and
 metrics — the same failure `ha` avoids for the virtual IP. Set it on the one
 interface whose address other nodes should reach this node at, and `corium-agent`
-passes it to the kubelet as `--node-ip`. At most one interface may set it.
+passes it to the kubelet as `--node-ip`. At most one interface may set it, and on
+a dual-stack interface the first address listed is the one registered — order the
+address you want as the node IP first.
 
 The interface comes up before k0s and returns on every reboot: `corium-agent`
 writes `/etc/wireguard/<name>.conf` — mode `0600`, since it carries the private

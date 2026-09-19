@@ -8,7 +8,11 @@
 // to every node, and must be supported forever — add them reluctantly.
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Role describes what a node does in the cluster.
 type Role string
@@ -395,6 +399,38 @@ type RAIDArray struct {
 	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
 }
 
+// WireGuardAddresses is one or more interface addresses in CIDR form.
+//
+// It exists so the `address` key accepts either a single CIDR scalar or a list:
+// the common single-address case stays a scalar, while a dual-stack interface
+// carries both its IPv4 and IPv6 addresses, matching what wg-quick's own
+// comma-separated Address line allows.
+type WireGuardAddresses []string
+
+// UnmarshalYAML accepts either a scalar CIDR or a sequence of them.
+func (a *WireGuardAddresses) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		// An empty or null scalar leaves the slice nil, so validation reports it
+		// as required rather than as a malformed empty address.
+		if value.Value == "" {
+			return nil
+		}
+
+		*a = WireGuardAddresses{value.Value}
+
+		return nil
+	}
+
+	var list []string
+	if err := value.Decode(&list); err != nil {
+		return err
+	}
+
+	*a = list
+
+	return nil
+}
+
 // WireGuardInterface declares one host WireGuard interface, describing this
 // node's participation in an encrypted overlay between hosts.
 //
@@ -422,7 +458,11 @@ type WireGuardInterface struct {
 
 	// Address is this node's address on the overlay, in CIDR form:
 	// "10.10.0.2/24". It is a host address with a prefix length, not a bare IP.
-	Address string `yaml:"address" json:"address"`
+	//
+	// It accepts a single CIDR or a list, so a dual-stack interface can carry
+	// both its IPv4 and IPv6 addresses. When NodeAddress is set, the first
+	// address listed is the one k0s registers with.
+	Address WireGuardAddresses `yaml:"address" json:"address"`
 
 	// ListenPort is the UDP port WireGuard listens on. Leave it unset on a
 	// client-only node; it is required on any node a peer names in its endpoint,
@@ -651,8 +691,8 @@ func (r Role) IsWorker() bool {
 // guarantees at most one interface sets it.
 func (c *Config) WireGuardNodeAddress() string {
 	for i := range c.WireGuard {
-		if c.WireGuard[i].NodeAddress {
-			address, _, _ := strings.Cut(c.WireGuard[i].Address, "/")
+		if c.WireGuard[i].NodeAddress && len(c.WireGuard[i].Address) > 0 {
+			address, _, _ := strings.Cut(c.WireGuard[i].Address[0], "/")
 
 			return address
 		}

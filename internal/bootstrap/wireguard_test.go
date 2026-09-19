@@ -13,7 +13,7 @@ func TestRenderWireGuardConf(t *testing.T) {
 
 	iface := &config.WireGuardInterface{
 		Name:       "wg0",
-		Address:    "10.10.0.2/24",
+		Address:    config.WireGuardAddresses{"10.10.0.2/24"},
 		ListenPort: 51820,
 		MTU:        1420,
 		Peers: []config.WireGuardPeer{{
@@ -45,12 +45,28 @@ func TestRenderWireGuardConf(t *testing.T) {
 	}
 }
 
+func TestRenderWireGuardConfDualStackAddress(t *testing.T) {
+	t.Parallel()
+
+	iface := &config.WireGuardInterface{
+		Name:    "wg0",
+		Address: config.WireGuardAddresses{"10.10.0.2/24", "fd00::2/128"},
+		Peers:   []config.WireGuardPeer{{PublicKey: "A", AllowedIPs: []string{"0.0.0.0/0", "::/0"}}},
+	}
+
+	conf := renderWireGuardConf(iface, "K", []string{""})
+
+	if !strings.Contains(conf, "Address = 10.10.0.2/24, fd00::2/128") {
+		t.Errorf("dual-stack address not joined into one line:\n%s", conf)
+	}
+}
+
 func TestRenderWireGuardConfIsDeterministic(t *testing.T) {
 	t.Parallel()
 
 	iface := &config.WireGuardInterface{
 		Name:    "wg0",
-		Address: "10.10.0.2/24",
+		Address: config.WireGuardAddresses{"10.10.0.2/24"},
 		Peers: []config.WireGuardPeer{
 			{PublicKey: "A", AllowedIPs: []string{"10.10.0.0/24"}},
 			{PublicKey: "B", AllowedIPs: []string{"10.20.0.0/24"}},
@@ -71,7 +87,7 @@ func TestRenderWireGuardConfOmitsAbsentOptionals(t *testing.T) {
 
 	iface := &config.WireGuardInterface{
 		Name:    "wg0",
-		Address: "10.10.0.2/24",
+		Address: config.WireGuardAddresses{"10.10.0.2/24"},
 		Peers:   []config.WireGuardPeer{{PublicKey: "A", AllowedIPs: []string{"10.10.0.0/24"}}},
 	}
 

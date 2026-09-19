@@ -643,12 +643,16 @@ func (c *Config) validateWireGuard() []error {
 
 		problems = append(problems, validateWireGuardName(field, iface.Name, seenNames)...)
 
-		if iface.Address == "" {
+		if len(iface.Address) == 0 {
 			problems = append(problems, fmt.Errorf("%s.address: required", field))
-		} else if _, err := netip.ParsePrefix(iface.Address); err != nil {
-			problems = append(problems, fmt.Errorf(
-				"%s.address: %q must be an address with a prefix length, such as 10.10.0.2/24",
-				field, iface.Address))
+		} else {
+			for k, addr := range iface.Address {
+				if _, err := netip.ParsePrefix(addr); err != nil {
+					problems = append(problems, fmt.Errorf(
+						"%s.address[%d]: %q must be an address with a prefix length, such as 10.10.0.2/24",
+						field, k, addr))
+				}
+			}
 		}
 
 		if iface.ListenPort != 0 && (iface.ListenPort < 1 || iface.ListenPort > 65535) {
