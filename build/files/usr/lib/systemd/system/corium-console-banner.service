@@ -1,0 +1,22 @@
+[Unit]
+Description=Corium console status banner
+Documentation=https://github.com/Corium-OS/Corium
+
+# The banner reflects the state a bootstrap settles -- the node's role, its
+# cluster, whether k0s is up -- so it reads most usefully once that has run. It
+# is ordered after, not dependent on it: a node that never bootstraps still gets
+# a banner, and must, because that banner is how the console says so.
+After=corium-bootstrap.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/corium-agent issue
+
+# A console banner is cosmetic. A render that fails must never mark the node
+# degraded, so the journal is the only place a bad one is reported -- the timer
+# tries again on its next tick regardless.
+StandardOutput=journal
+StandardError=journal
+
+# No [Install] section: this unit is started by corium-console-banner.timer,
+# not wanted by a target. Enabling the timer is what puts the banner on screen.

@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh the Corium console status banner
+Documentation=https://github.com/Corium-OS/Corium
+
+[Timer]
+# A first banner shortly after boot: late enough that k0s and greenboot have
+# had a moment to settle into the state worth showing, early enough that the
+# console is not blank for long. Then a refresh often enough to track a node
+# joining a cluster or an image being staged for the next reboot, and rare
+# enough that a console nobody is watching costs almost nothing.
+OnBootSec=15s
+OnUnitActiveSec=30s
+
+# The banner is not a deadline. Letting systemd coalesce the wake-ups keeps an
+# idle node from waking its CPU on the second, every thirty seconds, forever.
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

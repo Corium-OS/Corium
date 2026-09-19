@@ -14,6 +14,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **The console says what the node is, above the login prompt.** A getty used to
+  show the Fedora banner and nothing else; it now shows the node's role, its
+  cluster, whether k0s is running, greenboot's verdict, the booted image and any
+  image staged for the next reboot. It is a drop-in in `/run/issue.d` that a
+  timer refreshes and `agetty --reload` redraws in place, so a console left open
+  tracks a node joining a cluster or an upgrade staging without anyone logging
+  in. On a node still waiting to be claimed it sits above the pairing code, not
+  instead of it.
+
 - **A host WireGuard overlay can be declared from the `corium:` block.** A new
   `wireguard:` list brings up encrypted interfaces at first boot, before k0s, so
   nodes across sites or providers can form one cluster over a private overlay.
