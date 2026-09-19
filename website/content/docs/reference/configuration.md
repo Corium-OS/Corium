@@ -465,7 +465,7 @@ A list of host WireGuard interfaces, brought up at first boot **before k0s**, so
 a cluster can run over an encrypted overlay between hosts that share no network —
 across sites or providers. This is a host concern, separate from the CNI: k0s can
 encrypt pod traffic, but that assumes the hosts underneath already reach each
-other. See [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md).
+other. See [ADR 6](/docs/reference/adr-0006-host-wireguard-overlay/).
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
@@ -533,7 +533,7 @@ or preshared key is never echoed in an error.
 
 For an overlay that is **not** the cluster transport, or on a node with no
 cloud-init datasource, the escape hatch remains — a `write_files` config and an
-enabled `wg-quick@` unit — and [ADR 6](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0006-host-wireguard-overlay.md) covers
+enabled `wg-quick@` unit — and [ADR 6](/docs/reference/adr-0006-host-wireguard-overlay/) covers
 when to prefer which.
 
 ### 3.12 `api`
