@@ -1,0 +1,205 @@
+# Rescue mode
+
+A rescue system is the live environment a provider boots instead of your disk
+when you ask for one. It is the usual way onto a dedicated server that has no
+remote console worth using, and it is enough to install Corium: the image
+installs itself, and the rescue only has to run it.
+
+There are two routes below. The first is the one to try, and it is three
+commands. The second exists because some rescue systems cannot run a container
+at all, and OVH's is one of them.
+
+## 1. Install with podman
+
+`bootc install to-disk` runs from inside the Corium image and writes a complete
+disk: partition table, ESP, bootloader, and the ostree deployment. Nothing has
+to be converted or resized afterwards.
+
+```bash
+podman run --rm --privileged --pid=host \
+  -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
+  --security-opt label=type:unconfined_t \
+  ghcr.io/corium-os/corium:0.2.0 \
+  bootc install to-disk --wipe /dev/nvme0n1
+```
+
+`--wipe` destroys everything on the target. Check `lsblk` first; a rescue
+system numbers disks in its own order and not necessarily the one the installed
+system will use.
+
+Then disable rescue mode in your provider's panel and reboot.
+
+### Configuration, when there is no cloud-init datasource
+
+A dedicated server has no metadata service and no seed device, so cloud-init
+finds nothing and the node comes up unconfigured — `no corium configuration
+found, leaving node unconfigured` in the agent's journal. Worse, **the login
+user is created by cloud-init too**, so a node that boots without configuration
+has no account to SSH into. Corium ships no root account, and its sshd drop-in
+sets `PermitRootLogin no`.
+
+The cheapest fix is a kernel argument, which `bootc install` will write for you:
+
+```bash
+  bootc install to-disk --wipe \
+    --karg corium.config=https://boot.example.com/node-01.yaml \
+    /dev/nvme0n1
+```
+
+That covers Corium's own configuration but not the user. To get both, drop a
+NoCloud seed onto the installed system instead — cloud-init looks for one in
+`/var/lib/cloud/seed/nocloud` before it gives up, and `ds-identify` finds it
+without any extra configuration. That is the route the OVH section below
+takes, because there it is needed anyway.
+
+## 2. When the rescue cannot run a container
+
+Some rescue systems run entirely from a ramfs. That breaks containers in a way
+no podman flag works around: `pivot_root` is refused when the current root is
+the initial rootfs, so every container fails with
+
+```
+Error: OCI runtime error: crun: pivot_root: Invalid argument
+```
+
+Check before assuming anything else is at fault:
+
+```bash
+findmnt -n /
+```
+
+`rootfs rootfs` means ramfs and means route 1 is out. A real filesystem —
+`tmpfs`, `ext4`, `overlay` — means containers will run, and any failure you
+hit is something else.
+
+The way through is the published qcow2, which is the same installed system
+`bootc install` would have produced, laid out for a 10 GiB disk. Write it, then
+grow the root partition to the disk you actually have.
+
+```bash
+apt-get install -y qemu-utils        # or the distribution's equivalent
+
+qemu-img convert -O raw -p corium-0.2.0-x86_64.qcow2 /dev/nvme0n1
+sync && partprobe /dev/nvme0n1
+
+sgdisk -e /dev/nvme0n1               # move the backup GPT to the end of the real disk
+growpart /dev/nvme0n1 4
+e2fsck -fp /dev/nvme0n1p4
+resize2fs /dev/nvme0n1p4
+```
+
+Partition 4 is the root filesystem; `lsblk -o NAME,SIZE,FSTYPE,LABEL` confirms
+it by its `root` label. The resize preserves the filesystem UUID, so the
+bootloader entries written into the image keep pointing at the right place.
+
+See [downloads](downloads.md) for where the qcow2 lives and how to check what
+you downloaded.
+
+### Seeding configuration and a user
+
+Mount the root filesystem and write a NoCloud seed into the deployment's
+`/var`, which in an ostree system lives at
+`ostree/deploy/default/var`:
+
+```bash
+mount /dev/nvme0n1p4 /mnt/root
+mkdir -p /mnt/root/ostree/deploy/default/var/lib/cloud/seed/nocloud
+cd /mnt/root/ostree/deploy/default/var/lib/cloud/seed/nocloud
+
+cat > meta-data <<'EOF'
+instance-id: node-01
+local-hostname: node-01
+EOF
+
+cat > user-data <<'EOF'
+#cloud-config
+users:
+  - name: core
+    groups: [wheel, adm, systemd-journal]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA... you@example.com
+
+corium:
+  role: single
+EOF
+```
+
+**SELinux is the trap here.** Corium runs enforcing, and files created from a
+rescue system that does not know about SELinux carry no label at all, which
+cloud-init is not allowed to read. Label them by hand:
+
+```bash
+for p in ../seed . meta-data user-data; do
+  setfattr -n security.selinux -v "system_u:object_r:cloud_var_lib_t:s0" "$p"
+done
+```
+
+`getfattr -n security.selinux --only-values user-data` should print
+`system_u:object_r:cloud_var_lib_t:s0`. A node that boots with an unlabelled
+seed behaves exactly like a node with no seed at all, which makes this the
+failure most likely to cost an afternoon.
+
+---
+
+## OVH dedicated servers
+
+OVH's rescue (`rescue12-customer`) runs from a ramfs, so route 2 is the one
+that works. It also has no overlayfs and no `pids` cgroup controller, which
+produce their own errors first and send you looking in the wrong direction:
+
+| What you see | Cause |
+|---|---|
+| `'overlay' is not supported over ramfs` | no overlayfs in the rescue kernel |
+| `the requested cgroup controller 'pids' is not available` | kernel built without it; `--pids-limit=0` gets past it |
+| `crun: pivot_root: Invalid argument` | the real blocker — ramfs root |
+
+Those first two are worth chasing only far enough to reach the third.
+
+### Before you start
+
+Boot the server into rescue mode from the OVH panel, then check what you are
+working with:
+
+```bash
+lsblk                                      # which disk, and what is already on it
+[ -d /sys/firmware/efi ] && echo UEFI      # recent hardware is UEFI
+findmnt -n /                               # rootfs rootfs — confirms route 2
+```
+
+A server delivered with several disks usually has the OS on the small NVMe and
+data on the large ones. Installing onto the wrong one is not recoverable, and
+`lsblk` before `--wipe` is the only thing standing in the way.
+
+### After writing the image
+
+The qcow2 carries both the removable path `EFI/BOOT/BOOTX64.EFI` and
+`EFI/fedora/shimx64.efi`, so a UEFI firmware finds a bootloader without help.
+Adding an explicit entry costs nothing and removes the question:
+
+```bash
+apt-get install -y efibootmgr
+efibootmgr -c -d /dev/nvme0n1 -p 2 -L "Corium" -l '\EFI\fedora\shimx64.efi'
+```
+
+Then unmount everything, **disable rescue mode in the OVH panel**, and reboot.
+Leaving rescue enabled boots the rescue again, and the installed system never
+runs.
+
+### Networking
+
+OVH hands out the server's address over DHCP, and the image ships no
+`NetworkManager` connection profile, so the interface comes up on its own.
+Nothing has to be configured for the node to be reachable at the address the
+panel shows.
+
+The BLS entry includes `console=ttyS0`, so the boot is visible over OVH's IPMI
+serial console if it does not come back.
+
+## What to read next
+
+- [Downloads](downloads.md) — fetching an artefact and checking it
+- [Quick start](../quickstart.md) — the configuration surface, including the
+  sources Corium reads when there is no cloud-init
+- [Configuration](../reference.md) — every field of the `corium:` block

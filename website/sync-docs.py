@@ -76,6 +76,10 @@ PAGES = [
     ("install/openstack.md", "install", "openstack", "OpenStack", 303,
      "A node on an OpenStack cloud from the published qcow2: registering a UEFI "
      "image, and how the corium: block reaches it through the metadata service."),
+    ("install/rescue.md", "install", "rescue", "Rescue mode", 304,
+     "Installing onto a dedicated server from a provider's rescue system: "
+     "bootc install to-disk, the qcow2 fallback when the rescue runs from a "
+     "ramfs, and the OVH specifics."),
     ("adr/0001-base-image.md", "reference", "adr-0001-base-image",
      "ADR 1 — Base image", 910,
      "Why the operating system is based on fedora-bootc rather than Fedora "
