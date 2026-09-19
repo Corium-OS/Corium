@@ -1,0 +1,62 @@
+#cloud-config
+#
+# A node that mirrors its two data disks into a ZFS pool and puts Kubernetes
+# state on it, compressed and checksummed.
+#
+# The pool is built at first boot, before k0s is installed -- the same ordering,
+# and the same reason for it, as raid[]: a pool imported after the kubelet has
+# started is a mount the kubelet has already written past, and the data under
+# the mount point is then invisible while still consuming the root disk.
+#
+# This needs the ZFS image variant: the module is not in the base image. Build
+# it with `IMAGE=... mise run zfs-image` (deploy/zfs/README.md). On a plain base
+# image this configuration stops the node at first boot rather than being
+# ignored.
+#
+# See docs/zfs.md.
+
+corium:
+  role: controller+worker
+
+  zfs:
+    - name: tank
+
+      # Pool properties. ashift is fixed for the life of the pool and cannot be
+      # changed later, so set it deliberately: "12" is 4K sectors, right for
+      # almost every disk in service.
+      options:
+        ashift: "12"
+
+      # Set on the pool's root dataset and inherited by every dataset below, so
+      # compression is configured once.
+      filesystemOptions:
+        compression: lz4
+
+      vdevs:
+        # A mirror: either disk can fail and the pool keeps serving.
+        #
+        # Whole disks, by ID rather than by kernel name. /dev/sdb and /dev/sdc
+        # are assigned in discovery order, which is not promised to be stable
+        # across boots -- least of all on the first boot, the one that decides
+        # which disks get overwritten.
+        - type: mirror
+          devices:
+            - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+            - /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
+
+      datasets:
+        - name: data
+          mountPoint: /var/lib/corium/data
+
+      # wipe is absent, so it is false.
+      #
+      # Any of these disks already carrying a filesystem, a partition table, or
+      # another pool's or array's label stops the bootstrap with an error naming
+      # what it found. A device may belong to a pool or a raid[] array, never
+      # both. Set wipe: true only when you mean "these disks are expendable".
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

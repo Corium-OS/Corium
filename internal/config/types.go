@@ -69,6 +69,12 @@ type Config struct {
 	// documentation.
 	RAID []RAIDArray `yaml:"raid,omitempty" json:"raid,omitempty"`
 
+	// ZFS declares ZFS pools built from this node's data disks, on the same
+	// footing as RAID: created by corium-agent at first boot, before k0s. It
+	// does not cover the disk the OS booted from. See the ZFSPool documentation
+	// and docs/adr/0007-zfs-data-disks.md.
+	ZFS []ZFSPool `yaml:"zfs,omitempty" json:"zfs,omitempty"`
+
 	// WireGuard declares host WireGuard interfaces, brought up before k0s so a
 	// cluster can run over an encrypted overlay between hosts. See the
 	// WireGuardInterface documentation and docs/adr/0006-host-wireguard-overlay.md.
@@ -397,6 +403,116 @@ type RAIDArray struct {
 	// meant to keep. Setting this true is an explicit statement that the
 	// devices listed are expendable.
 	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
+}
+
+// ZFS vdev types, naming how the devices in one vdev are combined.
+const (
+	// ZFSVdevStripe concatenates its devices with no redundancy: losing any one
+	// loses the vdev, and a vdev lost is the whole pool lost. It is the default
+	// because it is what a single-disk vdev is, and a single data disk is the
+	// common case; ask for it on purpose for anything larger.
+	ZFSVdevStripe = "stripe"
+
+	// ZFSVdevMirror keeps a full copy on every device in the vdev. Any one
+	// survivor keeps the vdev serving.
+	ZFSVdevMirror = "mirror"
+
+	// ZFSVdevRAIDZ1 tolerates one failed device per vdev, like RAID 5.
+	ZFSVdevRAIDZ1 = "raidz"
+
+	// ZFSVdevRAIDZ2 tolerates two failed devices per vdev, like RAID 6.
+	ZFSVdevRAIDZ2 = "raidz2"
+
+	// ZFSVdevRAIDZ3 tolerates three failed devices per vdev.
+	ZFSVdevRAIDZ3 = "raidz3"
+)
+
+// ZFSPool declares one ZFS storage pool built from whole disks.
+//
+// It sits alongside RAIDArray rather than replacing it: mdadm gives a block
+// device an existing filesystem is laid on, while ZFS is the volume manager and
+// the filesystem at once, with checksumming, compression and snapshots that a
+// data disk holding a local persistent volume or an image cache actually wants.
+// A node picks one or the other per set of disks; a device claimed by a pool
+// cannot also be claimed by an array.
+//
+// Like RAID, this covers data disks and not the disk the OS booted from. By the
+// time corium-agent reads this block the root filesystem is deployed and
+// mounted, and nothing here can move it. Root on ZFS is a much larger question —
+// it needs the module in the initramfs and bootc has no declarative equivalent
+// of a ZFS root — and is deliberately out of scope. See
+// docs/adr/0007-zfs-data-disks.md.
+//
+// What this earns over writing zpool into cloud-init's runcmd, which is the
+// honest alternative since cloud-init has no ZFS support of its own, is exactly
+// what RAID earns: the pool exists before k0s starts, it refuses to destroy
+// data, and it is idempotent.
+type ZFSPool struct {
+	// Name identifies the pool. It becomes the top-level dataset name and, by
+	// default, the mount point /<name>, so it must be unique on the node.
+	Name string `yaml:"name" json:"name"`
+
+	// Vdevs are the pool's virtual devices. A pool stripes across all of them,
+	// so its redundancy is that of its least redundant vdev and it survives only
+	// as long as every vdev does. At least one is required.
+	Vdevs []ZFSVdev `yaml:"vdevs" json:"vdevs"`
+
+	// MountPoint overrides where the pool's root dataset is mounted. Empty
+	// leaves ZFS's default of /<name>. Set it to "none" or "legacy" to leave the
+	// root dataset unmounted, for a pool whose datasets are mounted individually.
+	MountPoint string `yaml:"mountPoint,omitempty" json:"mountPoint,omitempty"`
+
+	// Options are pool-level properties, passed to `zpool create -o`. The one
+	// most worth setting is ashift (ashift: "12" for 4K-sector disks), because
+	// it is fixed for the life of the pool and cannot be changed afterwards.
+	Options map[string]string `yaml:"options,omitempty" json:"options,omitempty"`
+
+	// FilesystemOptions are properties set on the pool's root dataset and
+	// inherited by every dataset under it, passed to `zpool create -O`. This is
+	// where compression (compression: lz4) belongs.
+	FilesystemOptions map[string]string `yaml:"filesystemOptions,omitempty" json:"filesystemOptions,omitempty"`
+
+	// Datasets are child filesystems created within the pool, each able to carry
+	// its own mount point and properties. A pool with no datasets listed is a
+	// single filesystem mounted at the pool's mount point.
+	Datasets []ZFSDataset `yaml:"datasets,omitempty" json:"datasets,omitempty"`
+
+	// Wipe permits overwriting devices that already hold data. Off by default,
+	// for the same reason as RAIDArray.Wipe: silently consuming a disk someone
+	// meant to keep is the one failure this refuses to make convenient.
+	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
+}
+
+// ZFSVdev is one virtual device within a pool: a group of whole disks combined
+// at a single redundancy level.
+type ZFSVdev struct {
+	// Type is how the devices are combined: stripe (default), mirror, raidz,
+	// raidz2 or raidz3.
+	Type string `yaml:"type,omitempty" json:"type,omitempty"`
+
+	// Devices are the block devices making up this vdev, by path. Whole disks,
+	// not partitions.
+	//
+	// Prefer stable paths — /dev/disk/by-id/... — over kernel names, for the
+	// same reason RAID does: kernel names are assigned in discovery order and
+	// can name a different disk on the first boot than the one you meant.
+	Devices []string `yaml:"devices" json:"devices"`
+}
+
+// ZFSDataset declares one filesystem within a pool.
+type ZFSDataset struct {
+	// Name is the dataset name relative to the pool: "data" becomes
+	// <pool>/data. Slashes create a hierarchy, "k0s/containerd".
+	Name string `yaml:"name" json:"name"`
+
+	// MountPoint is where the dataset is mounted. Empty inherits the pool's
+	// layout (<pool mount point>/<name>). Set it to "none" or "legacy" to leave
+	// it unmounted.
+	MountPoint string `yaml:"mountPoint,omitempty" json:"mountPoint,omitempty"`
+
+	// Properties are ZFS properties set on this dataset, such as compression,
+	// recordsize or quota.
+	Properties map[string]string `yaml:"properties,omitempty" json:"properties,omitempty"`
 }
 
 // WireGuardAddresses is one or more interface addresses in CIDR form.

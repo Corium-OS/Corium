@@ -121,6 +121,21 @@ list entry are written with `[]`, the way you would index them.
 | `raid[].mountPoint` | [§3.11 `raid`](#311-raid) |
 | `raid[].wipe` | [§3.11 `raid`](#311-raid) |
 
+### `zfs`
+
+| Field | Section |
+|---|---|
+| `zfs[].name` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].vdevs[].type` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].vdevs[].devices` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].mountPoint` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].options` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].filesystemOptions` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].datasets[].name` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].datasets[].mountPoint` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].datasets[].properties` | [§3.17 `zfs`](#317-zfs) |
+| `zfs[].wipe` | [§3.17 `zfs`](#317-zfs) |
+
 ### `wireguard`
 
 | Field | Section |
@@ -313,6 +328,7 @@ referred to indirectly in the journal.
 | `ha` | object | no | — | Control plane load balancing (§3.9) |
 | `upgrades` | object | no | — | Unattended upgrades (§3.10) |
 | `raid` | list | no | — | Software RAID on spare disks (§3.11) |
+| `zfs` | list | no | — | ZFS pools on data disks; needs the ZFS image (§3.17) |
 | `wireguard` | list | no | — | Host WireGuard overlay interfaces (§3.12) |
 | `api` | object | no | — | The management API, off by default (§3.13) |
 | `k0s` | object | no | — | Escape hatch (§3.15) |
@@ -918,8 +934,12 @@ and `cctl` pins it for you.
 | `upgrades.automatic` | `none` |
 | `upgrades.schedule` | `daily` |
 | `node.name` | Derived from the machine ID (§4) |
+| `zfs[].vdevs[].type` | `stripe` |
+| `zfs[].mountPoint` | `/<name>` (ZFS's own default) |
 
-Applying defaults is idempotent and never overwrites an explicit value.
+Applying defaults is idempotent and never overwrites an explicit value. The ZFS
+vdev type is applied when the pool is built rather than written into the
+document, so a rendered configuration shows it unset.
 
 ### 3.15 `k0s.patch` — the escape hatch
 
@@ -993,6 +1013,73 @@ Omitting `waitFor` keeps the strict behaviour: one attempt, then fail.
 Fetches time out after 30 seconds and read at most 256 KiB. Errors never quote
 the response body, because the value being handled is a credential and a message
 echoing it into the journal has leaked it.
+
+### 3.17 `zfs`
+
+A list of ZFS pools, built from this node's **data disks** at first boot, before
+k0s. It does not cover the disk the OS booted from, and it needs the **ZFS image
+variant** — the module is not in the base image. See [ZFS on data disks](/docs/guides/zfs/)
+for the guide, [deploy/zfs/README.md](https://github.com/Corium-OS/Corium/blob/main/deploy/zfs/README.md) to build the
+image, and [ADR-0007](/docs/decisions/adr-0007-zfs-data-disks/) for why it is a variant.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** The pool name; also `/<name>` by default |
+| `vdevs` | list | — | **Required.** One or more virtual devices; the pool stripes across them |
+| `mountPoint` | string | `/<name>` | Root dataset mount; an absolute path, or `none`/`legacy` to leave it unmounted |
+| `options` | map | — | Pool properties (`zpool create -o`), e.g. `ashift: "12"` — fixed for the pool's life |
+| `filesystemOptions` | map | — | Root-dataset properties inherited by all datasets (`-O`), e.g. `compression: lz4` |
+| `datasets` | list | — | Child filesystems, each with its own `mountPoint` and `properties` |
+| `wipe` | bool | `false` | Consent to erasing devices that hold data |
+
+Each **vdev**:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `type` | enum | `stripe` | `stripe`, `mirror`, `raidz`, `raidz2`, `raidz3` |
+| `devices` | list | — | **Required.** Whole disks, absolute paths under `/dev` |
+
+Each **dataset**:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** Relative to the pool; slashes build a hierarchy |
+| `mountPoint` | string | inherited | Absolute path, or `none`/`legacy` |
+| `properties` | map | — | ZFS properties, e.g. `recordsize`, `quota`, `compression` |
+
+Minimum devices per vdev: `stripe` 1, `mirror` 2, `raidz` 2, `raidz2` 3,
+`raidz3` 4.
+
+```yaml
+corium:
+  role: controller+worker
+  zfs:
+    - name: tank
+      options:
+        ashift: "12"
+      filesystemOptions:
+        compression: lz4
+      vdevs:
+        - type: mirror
+          devices:
+            - /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+            - /dev/disk/by-id/wwn-0x5000c500a0b1c2d4
+      datasets:
+        - name: data
+          mountPoint: /var/lib/corium/data
+```
+
+Rejected at validation, before anything touches a disk: a vdev type with too few
+devices, a device claimed by two vdevs, a device claimed by both a pool and a
+`raid[]` array, two pools sharing a name, a duplicate dataset name, and a
+non-absolute mount point that is not `none` or `legacy`.
+
+**`wipe` is off by default and that is the point**, exactly as for `raid[]`: a
+device carrying a filesystem, a partition table, or another pool's or array's
+label stops the bootstrap rather than being consumed.
+
+Prefer `/dev/disk/by-id/...` over `/dev/sdb`, for the reason [`raid`](#310-raid)
+gives: kernel names are handed out in discovery order.
 
 ---
 
