@@ -219,6 +219,8 @@ func newTestClient(t *testing.T, node *fakeNode) *Client {
 
 	mux.HandleFunc("POST /v1/upgrade/stage", func(w http.ResponseWriter, _ *http.Request) {
 		if node.failStage != nil {
+			// A refusal before the pull begins still arrives as a status code,
+			// as it does on a real node.
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": node.failStage.Error()})
 
@@ -226,7 +228,14 @@ func newTestClient(t *testing.T, node *fakeNode) *Client {
 		}
 
 		node.staged = "sha256:new"
-		_ = json.NewEncoder(w).Encode(map[string]string{"digest": node.staged})
+
+		// The wire format the real node uses: a stream of progress lines, then
+		// a single terminal record with what is now staged.
+		w.Header().Set("Content-Type", "application/x-ndjson")
+
+		encoder := json.NewEncoder(w)
+		_ = encoder.Encode(map[string]any{"progress": "pulling " + node.staged})
+		_ = encoder.Encode(map[string]any{"staged": map[string]string{"digest": node.staged}})
 	})
 
 	mux.HandleFunc("POST /v1/upgrade/apply", func(w http.ResponseWriter, _ *http.Request) {

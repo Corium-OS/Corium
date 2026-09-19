@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -92,19 +94,73 @@ func TestStagingAnImageThePolicyWouldTakeUnsignedIsRefused(t *testing.T) {
 	}
 }
 
-func TestStagingReportsWhatIsNowWaiting(t *testing.T) {
+// stageStream posts to the staging route and reads the newline-delimited
+// stream, separating the progress lines from the single terminal record. A
+// refusal before the pull begins is not a stream, so it comes back as a status
+// code and a decoded body instead.
+func stageStream(t *testing.T, c *http.Client, url, body string) (int, []string, map[string]any) {
+	t.Helper()
+
+	response, err := c.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		return response.StatusCode, nil, decode(t, response.Body)
+	}
+
+	var (
+		progress []string
+		terminal map[string]any
+	)
+
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		var event map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatalf("stream line %q: %v", scanner.Text(), err)
+		}
+
+		if line, ok := event["progress"].(string); ok {
+			progress = append(progress, line)
+
+			continue
+		}
+
+		terminal = event
+	}
+
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("reading the stream: %v", err)
+	}
+
+	return response.StatusCode, progress, terminal
+}
+
+func TestStagingStreamsProgressThenTheResult(t *testing.T) {
 	ca, address, store := upgradeNode(t, shippedPolicy, bootc(stagedStatus))
 
-	status, body := postRaw(t, client(t, store, ca.issue(t, RoleOperator)),
+	status, progress, terminal := stageStream(t, client(t, store, ca.issue(t, RoleOperator)),
 		"https://"+address+"/v1/upgrade/stage",
 		`{"image":"ghcr.io/corium-os/corium:0.2"}`)
 
 	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%v)", status, body)
+		t.Fatalf("status = %d, want 200 (%v)", status, terminal)
 	}
 
-	if body["digest"] != "sha256:bbbb" {
-		t.Errorf("body = %v, want the staged digest", body)
+	// The pull announces itself: on a real node bootc's lines follow, and even
+	// with a stubbed runner this first one is what commits the stream and keeps
+	// the operator from watching a silent terminal.
+	if len(progress) == 0 {
+		t.Errorf("no progress streamed, want at least the pull announcement")
+	}
+
+	staged, _ := terminal["staged"].(map[string]any)
+	if staged["digest"] != "sha256:bbbb" {
+		t.Errorf("terminal = %v, want the staged digest", terminal)
 	}
 }
 
