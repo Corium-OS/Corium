@@ -92,7 +92,7 @@ spelling forever; that promise is expensive, so it is made sparingly.
 
 | Feature | Field | Notes |
 |---|---|---|
-| Inline token | `join.token` | |
+| Inline token | `join.token` | Or minted and rendered for you by `cctl worker-config` |
 | Token from a URL or file | `join.tokenFrom` | HTTPS only |
 | Waiting for a token to appear | `join.tokenFrom.waitFor` | Lets every node start at once instead of in sequence |
 | Bearer auth for that URL | `join.tokenFrom.authFile` | |
@@ -164,6 +164,7 @@ commands are [cctl](/docs/reference/cli/).
 | Cordon and drain | — | `cctl cordon` / `cctl drain`, at `corium:operator`, **on controllers only**: a worker holds kubelet credentials, which cannot evict pods. Draining a worker is `kubectl drain` with the kubeconfig `cctl kubeconfig` fetches. A drain a pod disruption budget refuses is not forced, and the node stays cordoned |
 | Reboot and shutdown | — | `cctl reboot` / `cctl shutdown`, at `corium:admin`. The node answers before it goes |
 | Kubeconfig | — | `cctl kubeconfig <node>`, at `corium:admin`. Points at the cluster's virtual IP where there is one; `--server` overrides |
+| Worker configuration | — | `cctl worker-config <controller>`, at `corium:admin`, **on controllers only**. Mints a fresh worker token and prints the `corium:` block to paste into a cloud-config; `--name`, `--label` and `--expiry` fill it in |
 | Reset | — | `cctl reset --confirm <node name>`. Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |
 | CA rotation | — | `cctl ca rotate <nodes...> --to <dir>`, at `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
 | Losing the CA key | — | `corium-agent api set-ca --file`, run as root on the node. Local only; the node keeps its cluster membership |

@@ -19,6 +19,7 @@ import (
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
+	"github.com/Corium-OS/Corium/internal/token"
 	"github.com/Corium-OS/Corium/internal/upgrade"
 )
 
@@ -85,6 +86,10 @@ type Server struct {
 	// kubeconfig fetches the cluster's administrator credentials.
 	kubeconfig *kubeconfig.Manager
 
+	// token mints k0s join tokens, so a controller can hand `cctl worker-config`
+	// what a new node needs to join.
+	token *token.Manager
+
 	// access manages the SSH keys this node trusts for an existing user. A
 	// field for the same reason as the rest: a test writes to its own directory
 	// rather than the real one.
@@ -128,6 +133,9 @@ func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
 // Kubeconfig replaces how the server asks k0s for credentials, likewise.
 func (s *Server) Kubeconfig(manager *kubeconfig.Manager) { s.kubeconfig = manager }
 
+// Tokens replaces how the server mints k0s join tokens, likewise.
+func (s *Server) Tokens(manager *token.Manager) { s.token = manager }
+
 // Access replaces where the server keeps the SSH keys it trusts, likewise.
 func (s *Server) Access(manager *access.Manager) { s.access = manager }
 
@@ -148,6 +156,7 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		upgrades:   &upgrade.Manager{},
 		lifecycle:  &lifecycle.Manager{},
 		kubeconfig: &kubeconfig.Manager{},
+		token:      &token.Manager{},
 		access:     &access.Manager{},
 		configPath: ConfigPath,
 		sessionDir: session,
@@ -353,6 +362,11 @@ func (s *Server) routes() http.Handler {
 	// hands over credentials to the whole cluster, which outranks every other
 	// call here: the rest act on one node.
 	mux.HandleFunc("GET /v1/kubeconfig", require(RoleAdmin, s.handleKubeconfig))
+
+	// Minting a join token hands out a credential that adds a machine to the
+	// cluster -- a worker token lets one join, a controller token is effectively
+	// cluster-admin. Admin, and logged, for the same reason kubeconfig is.
+	mux.HandleFunc("GET /v1/join-token", require(RoleAdmin, s.handleJoinToken))
 
 	// Trusting an SSH key for a user grants a shell, which steps outside every
 	// guard rail the rest of this API keeps -- so admin, and logged by

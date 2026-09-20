@@ -258,7 +258,9 @@ API deliberately will not do.
 ## Where to go next
 
 - **Add workers** — [`examples/worker.yaml`](examples/worker.yaml). Mint a token
-  on the controller with `k0s token create --role=worker --expiry=1h`.
+  on the controller with `k0s token create --role=worker --expiry=1h`, or have a
+  controller running the API mint one and print the whole block with
+  `cctl worker-config <controller> --name w-1`.
 - **Highly available control plane** —
   [`examples/ha-controller-first.yaml`](examples/ha-controller-first.yaml), or
   `deploy/proxmox/create-ha-cluster.sh` to bootstrap all three at once. No load

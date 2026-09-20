@@ -289,6 +289,29 @@ Tokens can be listed and revoked on a controller with `k0s token list` and
 `k0s token invalidate <id>`. See
 [k0s: multi-node clusters](https://docs.k0sproject.io/stable/k0s-multi-node/).
 
+Rather than minting a token by hand and pasting it, ask a controller for a
+ready-made worker block over the management API:
+
+```console
+$ cctl worker-config <controller> --name w-1 --label corium.dev/pool=general
+corium:
+  role: worker
+  node:
+    name: w-1
+    labels:
+      corium.dev/pool: general
+  join:
+    token: <a freshly minted worker token, inline>
+```
+
+It mints a fresh token on the controller (default expiry `1h`, set with
+`--expiry`) and prints the `corium:` block to paste into a cloud-config — the
+users, SSH keys and anything else stay yours to add. The block carries a live
+token in the clear, so treat the output as a secret; `cctl worker-config
+<controller> > worker.yaml` writes only the YAML, and the reminder goes to
+standard error. This needs the controller running the API (§3.12) and your
+`corium:admin` client certificate.
+
 ### 3.6 `node`
 
 | Key | Type | Notes |
