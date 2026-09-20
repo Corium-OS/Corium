@@ -12,6 +12,19 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nodes trust the signed `corium-zfs` variant out of the box.** 0.3.1 published
+  and signed the variant, but the image shipped a signing policy that named only
+  `ghcr.io/corium-os/corium`, so `cctl upgrade` onto `corium-zfs` was refused
+  ("the node's signing policy does not require a signature for this image") and a
+  hand `bootc switch` would have pulled it unverified. The shipped
+  `policy.json` now requires the signature for `corium-zfs` too, and
+  `registries.d` enables the sigstore-attachment lookup for it, without which the
+  signature sits in the registry and is never consulted. A node already running
+  ZFS gets this on its next upgrade; the same two lines can be added by hand
+  meanwhile.
+
 ## [0.3.1] - 2026-09-20
 
 ### Added
