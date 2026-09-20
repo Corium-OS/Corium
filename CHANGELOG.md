@@ -14,6 +14,16 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **A controller can hand out a worker's configuration.** `cctl worker-config
+  <controller>` asks a controller to mint a fresh worker join token and prints
+  the `corium:` block a new worker needs to join — role, the inline token, and
+  an optional `--name` and `--label` — ready to paste into a cloud-config. It
+  saves minting a token by hand with `k0s token create` and pasting it: the token
+  is generated on the controller over the management API (`corium:admin`, and only
+  a controller can answer), embedded in the clear, and short-lived by default
+  (`--expiry`, default `1h`). The block is a secret and goes to standard output
+  alone, so `> worker.yaml` writes only YAML.
+
 - **The console says what the node is, above the login prompt.** A getty used to
   show the Fedora banner and nothing else; it now shows the node's role, its
   cluster, whether k0s is running, greenboot's verdict, the booted image and any
