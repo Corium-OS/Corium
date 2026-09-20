@@ -98,11 +98,46 @@ other than being absent stops the search, because falling through to a
 baked-in default when your intent is merely unreachable is how a node joins the
 wrong cluster.
 
+### What a machine does on its very first boot
+
+Which of these happens is decided entirely by the document the chain found. It
+is worth reading once, because the difference between the last two rows costs
+a `cctl reset` to discover the hard way.
+
+| The document says | The machine does |
+|---|---|
+| nothing — no `corium:` block anywhere | Nothing. No daemon, no cluster. Somebody wanted a host, and they have one |
+| a `role`, no `api:` | Builds that node, unattended. Nobody to ask, nothing to wait for |
+| a `role` and an `operatorCA` | Builds that node, unattended, and is already owned by the CA it names |
+| a `role` and `api.enabled: true` | Waits to be claimed, then **builds that node at once** |
+| `api.enabled: true` and **no role** | Waits to be claimed *and* to be told what it is. Builds nothing until both happen |
+
+The fourth row is the one to be deliberate about. Claiming is what releases the
+bootstrap, so `cctl enroll` against such a node is not a reservation — it is
+the start of a cluster, and undoing it means `cctl reset`. The node says so and
+asks before it goes ahead.
+
+The fifth row is how a whole fleet is described by one identical cloud-config
+that carries no secrets and names no machine:
+
+```yaml
+#cloud-config
+corium:
+  api:
+    enabled: true
+```
+
+Everything machine-specific then arrives over the API, with
+`cctl enroll --config` or `cctl apply`. Writing `api.awaitConfig: true` says the
+same thing out loud, and is the way to ask for the wait in a document that does
+name a role.
+
 ## Configuration is cloud-init, not a new API
 
 The `corium:` block rides inside an ordinary cloud-config — the mechanism every
 cloud, hypervisor and PXE setup already speaks. `role` is the only required
-field.
+field — and a node that is waiting to be told what it is may leave even that
+out, as [above](#first-boot-exactly-once).
 
 Everything the schema does not model stays reachable through `k0s.patch`,
 applied verbatim. The rule the project holds itself to: **no k0s feature is

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
 )
@@ -512,3 +513,95 @@ func TestApplyTellsAHeldBootstrapThatSomebodyAnswered(t *testing.T) {
 		t.Errorf("a held bootstrap was never told the configuration arrived: %v", err)
 	}
 }
+
+func TestClaimingANodeThatWouldBootstrapIsRefusedUntilItIsMeant(t *testing.T) {
+	// Recording the claim is what releases a held bootstrap, so a node whose
+	// own document names a role starts becoming that node the instant it is
+	// claimed. This is not a permission check -- the caller holds the pairing
+	// code and is entitled to do it -- it is the node declining to do something
+	// irreversible on an unstated assumption.
+	store := newTestStore(t)
+
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	nodeThatHasNotBootstrapped(t, server)
+	server.BootedConfig(&config.Config{
+		Role:    config.RoleSingle,
+		Cluster: config.Cluster{Name: "corium"},
+	})
+
+	address := serveOn(t, server)
+	ca := newAuthority(t)
+	code := server.PairingCode()
+
+	claim := func(acknowledge bool) (int, map[string]any) {
+		t.Helper()
+
+		encoded, err := json.Marshal(enrolRequest{
+			Code:        code,
+			OperatorCA:  string(ca.pem),
+			Acknowledge: acknowledge,
+		})
+		if err != nil {
+			t.Fatalf("encoding the request: %v", err)
+		}
+
+		return postRaw(t, client(t, store), "https://"+address+"/v1/enroll", string(encoded))
+	}
+
+	status, body := claim(false)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%v)", status, body)
+	}
+
+	if body["reason"] != ReasonWouldBootstrap {
+		t.Errorf("reason = %v, want %q: cctl decides what to do next from this, not from the prose",
+			body["reason"], ReasonWouldBootstrap)
+	}
+
+	if enrolled, err := store.Enrolled(); err != nil || enrolled {
+		t.Fatalf("Enrolled() = %v (err %v), want false: a refused claim claims nothing", enrolled, err)
+	}
+
+	// The refusal cost nothing. The same pairing code works on the way back,
+	// which is the only thing that makes asking a person a reasonable design.
+	if status, body = claim(true); status != http.StatusOK {
+		t.Fatalf("status = %d after acknowledging, want 200 (%v)", status, body)
+	}
+}
+
+func TestANodeWaitingToBeToldIsClaimedWithoutQuestion(t *testing.T) {
+	// The fleet pattern: a document that names no role builds nothing on being
+	// claimed, so there is nothing here to warn anybody about. Asking would
+	// train operators to type y at the one prompt that matters.
+	store := newTestStore(t)
+
+	server, err := NewServer(store, "127.0.0.1:0", RequirePairingCode, SessionDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	nodeThatHasNotBootstrapped(t, server)
+	server.BootedConfig(&config.Config{API: config.API{Enabled: enabledPointer(true)}})
+
+	address := serveOn(t, server)
+	ca := newAuthority(t)
+
+	encoded, err := json.Marshal(enrolRequest{
+		Code:       server.PairingCode(),
+		OperatorCA: string(ca.pem),
+	})
+	if err != nil {
+		t.Fatalf("encoding the request: %v", err)
+	}
+
+	status, body := postRaw(t, client(t, store), "https://"+address+"/v1/enroll", string(encoded))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%v)", status, body)
+	}
+}
+
+func enabledPointer(v bool) *bool { return &v }

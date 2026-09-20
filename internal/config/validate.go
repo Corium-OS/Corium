@@ -44,17 +44,25 @@ func (c *Config) validateRole() []error {
 	case RoleSingle, RoleController, RoleControllerWorker, RoleWorker:
 		return nil
 	case "":
-		// A node told to wait for its configuration is allowed not to have one
-		// yet: "I will be told what I am" is the whole statement such a
-		// document makes, and demanding a placeholder role would mean writing
-		// down something untrue that takes effect the day somebody removes
-		// awaitConfig. The document that arrives later must name a role, and
-		// the bootstrap checks that before it builds anything.
-		if c.API.AwaitConfig {
+		// A document that names no role is not an incomplete document: it is a
+		// node saying "I will be told what I am". Demanding a placeholder role
+		// would mean writing down something untrue, which takes effect the day
+		// somebody turns the API off.
+		//
+		// The one thing that has to be true is that somebody can still answer.
+		// With the API running they can, over `cctl apply` or `cctl enroll
+		// --config`; with it off the question could never reach the node, and a
+		// machine waiting for an answer nobody can give is worse than one that
+		// refused to boot and said why. The document that arrives later must
+		// name a role, and the bootstrap checks that before it builds anything.
+		if c.API.Mode() != APIModeDisabled {
 			return nil
 		}
 
-		return []error{errors.New("role: required (single, controller, controller+worker or worker)")}
+		return []error{errors.New(
+			"role: required (single, controller, controller+worker or worker); " +
+				"a document may omit it only when the API is on, which is how a " +
+				"node says it is waiting to be told what it is")}
 	default:
 		return []error{fmt.Errorf("role: unknown value %q", c.Role)}
 	}

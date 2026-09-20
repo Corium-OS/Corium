@@ -139,11 +139,16 @@ func gateOnEnrolment(
 // awaitConfiguration waits for an operator to say what this node is, when it
 // has been told to, and then re-reads whatever the answer turned out to be.
 //
+// Two kinds of document ask for the wait: one that sets `api.awaitConfig`, and
+// one that names no role at all. The second is not a guess about intent -- a
+// document with no role describes no node, so there is nothing to build from
+// it.
+//
 // The re-read happens either way, and that is deliberate: an enrolment can
 // carry a document, so even a node that was not told to wait may have been
 // handed a new configuration between booting and being released.
 func awaitConfiguration(ctx context.Context, cfg *config.Config) (*config.Config, error) {
-	if cfg.API.AwaitConfig {
+	if cfg.HoldsForConfiguration() {
 		marker := filepath.Join(string(api.DefaultSessionDir), api.AppliedMarker)
 		if err := waitForConfiguration(ctx, marker); err != nil {
 			return nil, err

@@ -44,9 +44,11 @@ guide shorter; skipping it costs you nothing until something surprises you.
 
 ## What every guide assumes
 
-- **A node configuration.** `role` is the only required field. See
-  [examples](../examples.md) for complete documents, and the
-  [configuration reference](../reference.md) for every field.
+- **A node configuration.** `role` is the only required field, and a node
+  waiting to be told what it is may omit even that
+  ([§3.2](../reference.md#32-role)). See [examples](../examples.md) for
+  complete documents, and the [configuration reference](../reference.md) for
+  every field.
 - **A way in.** The login user is created by cloud-init. A node that boots with
   no configuration has no account to log into — it is a host, not a Kubernetes
   node, and that is a supported outcome rather than a failure.

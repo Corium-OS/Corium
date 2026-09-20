@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/access"
+	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
 	"github.com/Corium-OS/Corium/internal/kubeconfig"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
@@ -111,6 +112,12 @@ type Server struct {
 	// is allowed to write.
 	k0sConfigPath string
 
+	// booted is the document this node started with, or nil on a node that
+	// found none. It is read to answer one question and no other: would
+	// claiming this node release it into building something? A field so a test
+	// can serve a node holding a document without writing one to /etc.
+	booted *config.Config
+
 	// sessionDir is where the per-boot state lives: the enrolment session, and
 	// the marker that tells a held bootstrap its operator has answered.
 	sessionDir SessionDir
@@ -149,6 +156,11 @@ func (s *Server) Tokens(manager *token.Manager) { s.token = manager }
 
 // Access replaces where the server keeps the SSH keys it trusts, likewise.
 func (s *Server) Access(manager *access.Manager) { s.access = manager }
+
+// BootedConfig tells the server what this node booted with, so that an
+// enrolment can say what claiming is about to do. Nil is a valid answer and
+// means the node found no configuration.
+func (s *Server) BootedConfig(cfg *config.Config) { s.booted = cfg }
 
 // NewServer prepares a listener for whichever state the node is in.
 //
@@ -409,6 +421,12 @@ type enrolRequest struct {
 	// claimed, so a configuration meant to be bootstrapped on this boot has to
 	// arrive with the claim rather than after it.
 	Document string `json:"document,omitempty"`
+
+	// Acknowledge answers the one refusal an otherwise-correct enrolment can
+	// meet: a node whose own document names a role builds it as soon as it is
+	// claimed, and that cannot be undone without a reset. The node says so and
+	// declines; this is the caller saying they meant it.
+	Acknowledge bool `json:"acknowledge,omitempty"`
 }
 
 type enrolResponse struct {
@@ -433,10 +451,22 @@ func (s *Server) handleEnrol(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = s.enroller.EnrollWith(request.Code, []byte(request.OperatorCA),
-		s.applyDocumentDuringEnrolment(r, request.Document))
+		s.beforeClaim(r, request))
+
+	var wouldBootstrap *wouldBootstrapError
 
 	switch {
 	case err == nil:
+
+	case errors.As(err, &wouldBootstrap):
+		// 409, and a reason the client can act on rather than only print: the
+		// request is well formed and authorised, the node simply will not do
+		// something irreversible on an unstated assumption. Nothing was
+		// claimed and no attempt was spent, so the same code works on the
+		// retry that says yes.
+		writeRefusal(w, http.StatusConflict, ReasonWouldBootstrap, err.Error())
+
+		return
 
 	case errors.Is(err, ErrWrongCode):
 		// 401, not 403: the credential was wrong, and the caller may try
@@ -549,6 +579,19 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ReasonWouldBootstrap marks the refusal a node returns when claiming it would
+// release it into building whatever its own document describes.
+//
+// It travels beside the message rather than inside it because the client does
+// more than print this one: it asks a human and comes back. Matching on prose
+// would make that control flow hostage to an edit of the prose.
+const ReasonWouldBootstrap = "would-bootstrap"
+
+// writeRefusal is writeError with a stable machine-readable reason attached.
+func writeRefusal(w http.ResponseWriter, status int, reason, message string) {
+	writeJSON(w, status, map[string]string{"error": message, "reason": reason})
 }
 
 func logRequests(next http.Handler) http.Handler {

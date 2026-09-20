@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/cctl"
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/systemd"
@@ -318,6 +319,9 @@ func enrolCommand(ctx context.Context, args []string) error {
 		configFile = flags.String("config", "",
 			"a corium: document to give the node as part of claiming it; it "+
 				"bootstraps with this instead of what it booted with")
+		yes = flags.Bool("yes", false,
+			"claim a node that will bootstrap the moment it is claimed, without "+
+				"being asked to confirm it")
 	)
 
 	rest, err := parseFlags(flags, args)
@@ -359,7 +363,21 @@ func enrolCommand(ctx context.Context, args []string) error {
 
 	client := cctl.Dial(address, *fingerprint)
 
-	result, err := client.Enrol(ctx, *code, operatorCA, document)
+	result, err := client.Enrol(ctx, *code, operatorCA, document, *yes)
+
+	// One refusal is a question rather than a verdict: the node holds a
+	// document that names a role, so claiming it builds that node now. Nothing
+	// was claimed and no attempt was spent, so asking and coming back costs
+	// the operator nothing but the reading.
+	var refusal *cctl.Refusal
+	if errors.As(err, &refusal) && refusal.Reason == api.ReasonWouldBootstrap {
+		if err = confirmClaim(address, refusal.Message); err != nil {
+			return err
+		}
+
+		result, err = client.Enrol(ctx, *code, operatorCA, document, true)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -379,6 +397,39 @@ func enrolCommand(ctx context.Context, args []string) error {
 	fmt.Print("The node is restarting to require your client certificate, and its\n" +
 		"bootstrap is released: it will now join " + describes + ".\n\n" +
 		"Check with: cctl health " + address + "\n")
+
+	return nil
+}
+
+// confirmClaim asks whether a node should be released into building what its
+// own configuration describes.
+//
+// Unlike the fingerprint question this one is not a security boundary -- the
+// caller already holds the pairing code and the CA, and is entitled to do it.
+// It is asked because the consequence is asymmetric: claiming without meaning
+// to costs a reset, a drain and a reboot, while being asked costs one line.
+func confirmClaim(address, message string) error {
+	if !isTerminal(os.Stdin) {
+		return fmt.Errorf("%s: %s -- pass --yes to mean it, or --config to say "+
+			"what the node should build instead", address, message)
+	}
+
+	fmt.Printf("\n%s.\n\nClaim it anyway? [y/N] ", message)
+
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+
+	switch {
+	case errors.Is(err, io.EOF):
+		return fmt.Errorf("%s: %s -- and there is nobody here to confirm it; "+
+			"pass --yes, or --config to say what it should build instead",
+			address, message)
+	case err != nil:
+		return fmt.Errorf("reading your answer: %w", err)
+	}
+
+	if strings.ToLower(strings.TrimSpace(answer)) != "y" {
+		return errors.New("not confirmed, so the node was not claimed")
+	}
 
 	return nil
 }

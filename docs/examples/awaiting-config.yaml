@@ -23,7 +23,7 @@ corium:
     # Run the management API, and wait to be claimed.
     enabled: true
 
-    # And wait to be told what to be. Without this the node would bootstrap as
-    # a single-node cluster the moment it was claimed, because that is what an
-    # undescribed node defaults to.
-    awaitConfig: true
+# There is no `role:` here, and that is the whole document. A configuration
+# that names no role describes no node, so the bootstrap holds until an
+# operator sends one -- `api.awaitConfig: true` says the same thing out loud,
+# and is only needed in a document that does name a role.
