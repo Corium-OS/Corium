@@ -317,7 +317,7 @@ should be.
 | **A bespoke configuration API** | The value of cloud-init is that every cloud, hypervisor and PXE setup already speaks it. The management API is not one: it cannot write a `corium:` block, and there is no `cctl apply-config` |
 | **Arbitrary command execution over the API** | There is no `exec` endpoint and no endpoint taking a command line. One would make the API an SSH with a worse client, and every argument for keeping its surface small would stop applying |
 | **Forking or patching k0s** | Corium configures upstream k0s. A fork would mean owning Kubernetes bugs, which is not a business worth being in |
-| **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Remove a release with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/). `cctl apply` refuses a day-two document that drops a chart rather than reporting a removal that did not happen |
+| **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Dropping a chart from the configuration leaves the release running — remove it with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/). For the same reason, `cctl apply` refuses a day-two document that drops a chart rather than reporting a removal that did not happen |
 | **Multiple Kubernetes distributions** | Only k0s. Supporting k3s or RKE2 as well would mean an abstraction that fits none of them properly |
 
 **On fleet management.** The management API does not change that answer: it is
