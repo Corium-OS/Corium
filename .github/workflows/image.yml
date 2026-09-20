@@ -326,13 +326,15 @@ jobs:
           # The module cannot be loaded here -- a CI runner is not running this
           # image's kernel -- so `zfs version`, which auto-loads the kmod, would
           # fail with "the ZFS modules cannot be auto-loaded". Check the parts are
-          # baked in instead: the userspace tools, and the compiled module for the
-          # image's own kernel under /usr/lib/modules/<kver>/extra.
+          # baked in instead, without touching the kernel: the userspace tools and
+          # the compiled module for the image's own kernel. The kmod RPM installs
+          # it under extra/zfs/, so find it rather than guessing the exact path.
           podman run --rm localhost/corium-zfs:ci sh -c '
-            set -e
-            command -v zpool >/dev/null
-            command -v zfs >/dev/null
-            ls -1 /usr/lib/modules/*/extra/zfs.ko*
+            set -eu
+            command -v zpool
+            command -v zfs
+            found="$(find /usr/lib/modules -name "zfs.ko*" -print -quit)"
+            test -n "$found" && echo "kmod: $found"
           '
           # It is still a bootable Corium image with the same k0s underneath.
           podman run --rm localhost/corium-zfs:ci k0s version
