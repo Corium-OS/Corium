@@ -23,10 +23,26 @@ import (
 	"github.com/Corium-OS/Corium/internal/upgrade"
 )
 
-// requestTimeout bounds a single call. Every route this client speaks to
-// answers immediately or not at all; streaming routes, when they exist, will
-// need their own.
+// requestTimeout bounds the calls that answer at once -- node state, health, a
+// service restart. It is deliberately short.
+//
+// It is not for every route, though an earlier version of this comment claimed
+// it was. The routes whose work is measured in minutes do not use it: staging
+// streams and sets no deadline of its own (the node's pullTimeout is the
+// bound), and draining and resetting take slowRequestTimeout below. The old
+// invariant -- "every route answers immediately or not at all" -- was already
+// wrong the day drain shipped, and staging a half-gigabyte image made it wrong
+// in a way an operator could watch happen: a 30-second deadline here cancelled
+// the request, and cancelling the request cancelled the pull it was driving.
 const requestTimeout = 30 * time.Second
+
+// slowRequestTimeout is a ceiling for the routes whose work is minutes, not
+// seconds: draining a node, and the drain a reset does first. It sits above the
+// node's own DefaultDrainTimeout so that the node is the one that decides when
+// to give up; this only stops a wedged connection from hanging cctl for ever.
+// Staging is absent from this list on purpose -- it streams, so it has no
+// ceiling at all and is bounded by the node.
+const slowRequestTimeout = 15 * time.Minute
 
 // maxResponse caps what a node can make this tool read.
 const maxResponse = 1 << 20
@@ -214,8 +230,30 @@ func (c *Client) Node(ctx context.Context) (*nodeinfo.Node, error) {
 	return &node, nil
 }
 
-// call makes one request and turns a node's error into this tool's error.
+// withTimeout returns a copy of this client's HTTP client with a different
+// deadline, so a route whose work outlasts requestTimeout can be given the one
+// it needs without changing the client every other route shares. A copy rather
+// than a mutation for exactly that reason: the routes that answer at once keep
+// their short deadline.
+func (c *Client) withTimeout(d time.Duration) *http.Client {
+	clone := *c.http
+	clone.Timeout = d
+
+	return &clone
+}
+
+// call makes one request on the default (short) deadline and turns a node's
+// error into this tool's error.
 func (c *Client) call(ctx context.Context, method, path string, body []byte, into any) error {
+	return c.callUsing(ctx, c.http, method, path, body, into)
+}
+
+// callUsing is call, over a caller-chosen HTTP client. It exists so the routes
+// whose work is measured in minutes can carry a longer deadline than the ones
+// that answer at once.
+func (c *Client) callUsing(
+	ctx context.Context, httpClient *http.Client, method, path string, body []byte, into any,
+) error {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -230,7 +268,7 @@ func (c *Client) call(ctx context.Context, method, path string, body []byte, int
 		request.Header.Set("Content-Type", "application/json")
 	}
 
-	response, err := c.http.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return c.reach(err)
 	}
@@ -375,10 +413,7 @@ func (c *Client) Logs(ctx context.Context, options LogQuery, onRecord func(syste
 
 	// A followed stream has no length and no deadline of its own; the node
 	// bounds it, and ^C ends it.
-	streaming := *c.http
-	streaming.Timeout = 0
-
-	response, err := streaming.Do(request)
+	response, err := c.withTimeout(0).Do(request)
 	if err != nil {
 		return c.reach(err)
 	}
@@ -440,19 +475,90 @@ func (q LogQuery) values() url.Values {
 	return values
 }
 
-// Stage asks a node to pull an image and prepare to boot it.
-func (c *Client) Stage(ctx context.Context, image string) (*upgrade.Staged, error) {
+// Stage asks a node to pull an image and prepare to boot it, reporting bootc's
+// progress through onProgress as it arrives.
+//
+// It streams rather than waiting for a single answer, because the answer is
+// minutes away: the node is pulling hundreds of megabytes. Two things fall out
+// of that. There is no client deadline -- the node's own pullTimeout is the
+// bound, exactly as a followed log is bounded by the node rather than by this
+// clock -- and the outcome is the last record in the stream, not a status code,
+// because the node committed to a 200 the moment it began pulling. The refusals
+// that happen before the pull starts still arrive as a status code, and are
+// turned into an error the same way every other call's are.
+//
+// onProgress may be nil, for a caller that wants the result and not the noise.
+func (c *Client) Stage(
+	ctx context.Context, image string, onProgress func(string),
+) (*upgrade.Staged, error) {
 	body, err := json.Marshal(map[string]string{"image": image})
 	if err != nil {
 		return nil, fmt.Errorf("encoding the request: %w", err)
 	}
 
-	var staged upgrade.Staged
-	if err := c.call(ctx, http.MethodPost, "/v1/upgrade/stage", body, &staged); err != nil {
-		return nil, err
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://"+c.address+"/v1/upgrade/stage", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("building the request: %w", err)
 	}
 
-	return &staged, nil
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := c.withTimeout(0).Do(request)
+	if err != nil {
+		return nil, c.reach(err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	// A refusal before the pull began: a bad reference, or an image the policy
+	// rejects. It arrives as a status code with a JSON error, the same as any
+	// other call, because the node had not committed to the stream yet.
+	if response.StatusCode != http.StatusOK {
+		return nil, c.failure(response)
+	}
+
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxResponse)
+
+	var staged *upgrade.Staged
+
+	for scanner.Scan() {
+		var event struct {
+			Progress string          `json:"progress"`
+			Staged   *upgrade.Staged `json:"staged"`
+			Error    string          `json:"error"`
+		}
+
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			// A line this version does not understand is skipped rather than
+			// fatal, as in Logs: a newer node may add a field this client
+			// predates.
+			continue
+		}
+
+		switch {
+		case event.Error != "":
+			// The node's own words for what went wrong; see explain.
+			return nil, errors.New(event.Error)
+		case event.Staged != nil:
+			staged = event.Staged
+		case event.Progress != "" && onProgress != nil:
+			onProgress(event.Progress)
+		}
+	}
+
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("reading the stream: %w", err)
+	}
+
+	if staged == nil {
+		// The stream ended without saying what was staged or why not. Rare, and
+		// worth naming rather than returning a nil that reads like success.
+		return nil, errors.New("the node stopped staging without saying how it ended")
+	}
+
+	return staged, nil
 }
 
 // Apply tells a node to drain and reboot into what it has staged.
@@ -481,8 +587,15 @@ func (c *Client) Cordon(ctx context.Context, undo bool) error {
 }
 
 // Drain evicts a node's workloads, cordoning it first.
+//
+// Evicting pods can legitimately take minutes -- a pod disruption budget makes
+// the node wait its turn -- and the node bounds it with DefaultDrainTimeout. So
+// this gets slowRequestTimeout rather than the short deadline: the 30 seconds
+// meant for calls that answer at once would not only cut a real drain off, it
+// would cancel it, the same way it did to staging.
 func (c *Client) Drain(ctx context.Context) error {
-	return c.call(ctx, http.MethodPost, "/v1/lifecycle/drain", []byte("{}"), nil)
+	return c.callUsing(ctx, c.withTimeout(slowRequestTimeout),
+		http.MethodPost, "/v1/lifecycle/drain", []byte("{}"), nil)
 }
 
 // Reboot restarts a node. It returns once the node has accepted.
@@ -507,7 +620,11 @@ func (c *Client) Reset(ctx context.Context, confirm string) error {
 		return fmt.Errorf("encoding the request: %w", err)
 	}
 
-	return c.call(ctx, http.MethodPost, "/v1/lifecycle/reset", body, nil)
+	// A reset drains before it leaves the cluster, so it inherits the drain's
+	// minutes and then some; slowRequestTimeout, not the short deadline, for the
+	// same reason Drain uses it.
+	return c.callUsing(ctx, c.withTimeout(slowRequestTimeout),
+		http.MethodPost, "/v1/lifecycle/reset", body, nil)
 }
 
 // RotateCA hands a node to a different operator CA.

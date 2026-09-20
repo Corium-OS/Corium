@@ -91,7 +91,11 @@ func (r *Rollout) upgradeOne(ctx context.Context, address string) error {
 		return err
 	}
 
-	staged, err := client.Stage(ctx, r.Image)
+	// bootc's own progress, indented under the node it belongs to, so a pull of
+	// several hundred megabytes is visibly moving rather than a silent wait.
+	staged, err := client.Stage(ctx, r.Image, func(line string) {
+		r.say("        %s\n", line)
+	})
 	if err != nil {
 		return err
 	}

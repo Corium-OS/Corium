@@ -1,10 +1,12 @@
 package upgrade
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -78,7 +80,15 @@ var referencePattern = regexp.MustCompile(
 // Nothing here reboots anything: staging and applying are separate calls
 // because the gap between them is where an operator decides, and where cctl
 // checks the rest of the cluster.
-func (m *Manager) Stage(ctx context.Context, image string) (*Staged, error) {
+//
+// onProgress, when non-nil, is called with bootc's own output line by line as
+// the pull runs. Pulling hundreds of megabytes over whatever link a node has is
+// minutes of otherwise-silent work, and the first line onProgress receives is
+// also a boundary for the caller: everything up to it -- a malformed reference,
+// an image the policy refuses -- can still fail with a status code, and
+// everything after it is reported through the stream, because by then the
+// response has begun. A nil onProgress stages exactly as before, silently.
+func (m *Manager) Stage(ctx context.Context, image string, onProgress func(string)) (*Staged, error) {
 	image = strings.TrimSpace(image)
 
 	if !referencePattern.MatchString(image) {
@@ -92,6 +102,17 @@ func (m *Manager) Stage(ctx context.Context, image string) (*Staged, error) {
 		return nil, err
 	}
 
+	report := func(line string) {
+		if onProgress != nil {
+			onProgress(line)
+		}
+	}
+
+	// The first line, emitted after validation and before the pull on purpose:
+	// it marks the point past which the slow work has started and a failure can
+	// no longer be a status code. See the comment on onProgress above.
+	report("pulling " + image)
+
 	ctx, cancel := context.WithTimeout(ctx, pullTimeout)
 	defer cancel()
 
@@ -104,7 +125,7 @@ func (m *Manager) Stage(ctx context.Context, image string) (*Staged, error) {
 	// one, which is the weaker guarantee. The test below asserts --apply never
 	// appears, since that is now the only thing standing between this and
 	// rebooting the machine.
-	if _, err := m.run(ctx, "bootc", "switch", image); err != nil {
+	if err := m.switchTo(ctx, image, report); err != nil {
 		return nil, fmt.Errorf("staging %s: %w", image, err)
 	}
 
@@ -122,6 +143,94 @@ func (m *Manager) Stage(ctx context.Context, image string) (*Staged, error) {
 	}
 
 	return staged, nil
+}
+
+// switchTo runs `bootc switch`, streaming its progress when there is somewhere
+// to stream it to.
+//
+// The test seam wins when it is set: a stubbed Runner returns its bytes at the
+// end and cannot stream, and no test needs it to, so staging under test stays
+// the buffered call the assertions already read. On a real node m.Run is nil
+// and this streams bootc's own output instead, which is the only honest source
+// of where the pull has got to.
+func (m *Manager) switchTo(ctx context.Context, image string, report func(string)) error {
+	if m.Run != nil {
+		_, err := m.Run(ctx, "bootc", "switch", image)
+
+		return err
+	}
+
+	return runStreaming(ctx, report, "bootc", "switch", image)
+}
+
+// runStreaming runs a command and hands each line it prints to report as it
+// arrives, instead of collecting the output and returning it at the end.
+//
+// bootc writes its pull progress to stdout and stderr as plain lines -- the
+// same ones that otherwise land in the journal. The two streams are merged into
+// one pipe because progress and the occasional warning are interleaved on
+// purpose, and an operator wants them in the order bootc emitted them.
+//
+// On failure the last line bootc printed becomes the error: that is where bootc
+// says what went wrong, and it beats the bare "exit status 1" a caller would
+// get otherwise. It mirrors what m.run does with captured stderr, which is not
+// available here because stderr is being streamed rather than captured.
+func runStreaming(ctx context.Context, report func(string), name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+
+	pipe, writer := io.Pipe()
+	cmd.Stdout = writer
+	cmd.Stderr = writer
+
+	var last string
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		scanner := bufio.NewScanner(pipe)
+		scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+
+			last = line
+
+			if report != nil {
+				report(line)
+			}
+		}
+	}()
+
+	if err := cmd.Start(); err != nil {
+		_ = writer.Close()
+		<-done
+
+		return fmt.Errorf("running %s: %w", name, err)
+	}
+
+	// Wait returns only once the command has exited and everything it wrote has
+	// been copied into the pipe -- and because a pipe write blocks until it is
+	// read, that means the scanner has already seen it. Closing the writer then
+	// ends the scan, and the channel makes sure last is done being written
+	// before it is read below.
+	waitErr := cmd.Wait()
+	_ = writer.Close()
+	<-done
+
+	if waitErr != nil {
+		if last != "" {
+			return errors.New(last)
+		}
+
+		return waitErr
+	}
+
+	return nil
 }
 
 // Staged reports what is waiting, if anything.

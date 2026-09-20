@@ -143,7 +143,7 @@ func TestReferencesAreRefusedBeforeReachingBootc(t *testing.T) {
 		"UPPERCASE.io/corium/corium:1",
 		"nogregistry",
 	} {
-		if _, err := manager.Stage(t.Context(), image); !errors.Is(err, ErrBadReference) {
+		if _, err := manager.Stage(t.Context(), image, nil); !errors.Is(err, ErrBadReference) {
 			t.Errorf("Stage(%q) = %v, want %v", image, err, ErrBadReference)
 		}
 	}
@@ -179,13 +179,23 @@ func TestStageDoesNotReboot(t *testing.T) {
 	commands := &recorder{status: bootcStatus}
 	manager := &Manager{PolicyPath: policyFile(t, shippedPolicy), Run: commands.runner()}
 
-	staged, err := manager.Stage(t.Context(), "ghcr.io/corium-os/corium:0.2")
+	var progress []string
+
+	staged, err := manager.Stage(t.Context(), "ghcr.io/corium-os/corium:0.2",
+		func(line string) { progress = append(progress, line) })
 	if err != nil {
 		t.Fatalf("Stage() error = %v", err)
 	}
 
 	if staged.Digest != "sha256:bbbb" {
 		t.Errorf("staged = %+v, want the digest read back", staged)
+	}
+
+	// The pull announces itself before it starts, which is what commits the
+	// response to a stream on a real node. A stubbed runner cannot stream
+	// bootc's own lines, but this one must still arrive.
+	if len(progress) == 0 || !strings.Contains(progress[0], "ghcr.io/corium-os/corium:0.2") {
+		t.Errorf("progress = %v, want it to announce the pull", progress)
 	}
 
 	// Staging is the absence of --apply, not the presence of --apply=false:
@@ -222,9 +232,41 @@ func TestStagingSomethingAlreadyRunningSaysSo(t *testing.T) {
 	commands := &recorder{status: `{"status":{}}`}
 	manager := &Manager{PolicyPath: policyFile(t, shippedPolicy), Run: commands.runner()}
 
-	_, err := manager.Stage(t.Context(), "ghcr.io/corium-os/corium:0.2")
+	_, err := manager.Stage(t.Context(), "ghcr.io/corium-os/corium:0.2", nil)
 	if !errors.Is(err, ErrNothingStaged) {
 		t.Fatalf("Stage() = %v, want %v", err, ErrNothingStaged)
+	}
+}
+
+func TestRunStreamingForwardsLinesAsTheyArrive(t *testing.T) {
+	// The real staging path, which the stubbed Runner never exercises: bootc's
+	// output is streamed line by line rather than collected. Stood in for by a
+	// shell, since a real bootc is not something a unit test has.
+	var lines []string
+
+	err := runStreaming(t.Context(), func(line string) { lines = append(lines, line) },
+		"sh", "-c", "echo pulling; echo 'layer 1/3' 1>&2; echo done")
+	if err != nil {
+		t.Fatalf("runStreaming() = %v", err)
+	}
+
+	// Both streams are forwarded: bootc writes progress to stdout and stderr
+	// both, and an operator wants all of it.
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"pulling", "layer 1/3", "done"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("lines = %v, missing %q", lines, want)
+		}
+	}
+}
+
+func TestRunStreamingFailsWithTheLastLineItSaw(t *testing.T) {
+	// On failure the last line bootc printed is the error, because that is where
+	// bootc says what went wrong. A bare "exit status 1" would throw that away.
+	err := runStreaming(t.Context(), nil,
+		"sh", "-c", "echo working; echo 'error: manifest unknown'; exit 1")
+	if err == nil || !strings.Contains(err.Error(), "manifest unknown") {
+		t.Fatalf("runStreaming() = %v, want the last line as the error", err)
 	}
 }
 
