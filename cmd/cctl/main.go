@@ -60,6 +60,7 @@ Commands:
   access ssh    Add, list or revoke the SSH keys the API trusts for a user
   ca rotate     Hand nodes to a different operator CA
   kubeconfig    Fetch the cluster's administrator kubeconfig from a node
+  worker-config Mint a join token on a controller and print a worker's corium: block
   health        Check a node answers, and what it authenticated you as
   version       Print version information
 
@@ -118,6 +119,8 @@ func run() error {
 		return caCommand(ctx, args)
 	case "kubeconfig":
 		return kubeconfigCommand(ctx, args)
+	case "worker-config":
+		return workerConfigCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
 	case "version":
@@ -1041,6 +1044,85 @@ func kubeconfigCommand(ctx context.Context, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Wrote %s -- these are cluster administrator credentials for %s.\n",
 		*output, address)
+
+	return nil
+}
+
+// labelFlag collects repeated --label key=value pairs into a map, so a worker
+// can be given more than one label without a comma-quoting convention.
+type labelFlag map[string]string
+
+func (l labelFlag) String() string {
+	pairs := make([]string, 0, len(l))
+	for key, value := range l {
+		pairs = append(pairs, key+"="+value)
+	}
+
+	return strings.Join(pairs, ",")
+}
+
+func (l labelFlag) Set(value string) error {
+	key, val, ok := strings.Cut(value, "=")
+	if !ok || key == "" {
+		return fmt.Errorf("label %q must be key=value", value)
+	}
+
+	l[key] = val
+
+	return nil
+}
+
+// workerConfigCommand mints a worker join token on a controller and prints the
+// corium: block a new worker needs to join, ready to paste into a cloud-config.
+//
+// The token is minted fresh on every run and embedded inline in the clear:
+// that is the point. It is a secret, so the block goes to standard output alone
+// -- `cctl worker-config ctl > worker.yaml` writes only YAML -- and the note
+// about it goes to standard error.
+func workerConfigCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl worker-config", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+		expiry      = flags.String("expiry", "1h", "how long the minted join token stays valid")
+		name        = flags.String("name", "", "node.name for the generated worker")
+	)
+
+	labels := labelFlag{}
+	flags.Var(labels, "label", "a node label, key=value; repeat the flag for more than one")
+
+	client, address, err := target(flags, args,
+		"cctl worker-config <controller-address> [--name <name>] [--label k=v] [--expiry 1h]",
+		dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	// Fail on a bad expiry before the round trip, with the same message the node
+	// would return, so the mistake is caught where it was made.
+	if d, err := time.ParseDuration(*expiry); err != nil || d <= 0 {
+		return fmt.Errorf("expiry: %q is not a positive duration; use a form like 1h", *expiry)
+	}
+
+	joinToken, err := client.JoinToken(ctx, "worker", *expiry)
+	if err != nil {
+		return err
+	}
+
+	document, err := cctl.RenderWorkerConfig(joinToken, *name, labels)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stdout.Write(document); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr,
+		"Minted a worker join token on %s, valid %s. It is inline in the block "+
+			"above -- treat the output as a secret, and mint a fresh one once it expires.\n",
+		address, *expiry)
 
 	return nil
 }

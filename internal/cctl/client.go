@@ -721,6 +721,34 @@ func (c *Client) Kubeconfig(ctx context.Context, server string) ([]byte, error) 
 	return c.raw(ctx, path)
 }
 
+// JoinToken mints a k0s join token on a controller.
+//
+// role is "worker" or "controller"; both may be empty to take the node's
+// defaults (a worker token, valid for the server's default expiry). The token
+// is a secret and is returned verbatim, to be embedded in a node's join.token.
+func (c *Client) JoinToken(ctx context.Context, role, expiry string) (string, error) {
+	values := url.Values{}
+	if role != "" {
+		values.Set("role", role)
+	}
+
+	if expiry != "" {
+		values.Set("expiry", expiry)
+	}
+
+	path := "/v1/join-token"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	raw, err := c.raw(ctx, path)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(raw)), nil
+}
+
 // raw performs a GET and returns the body untouched.
 func (c *Client) raw(ctx context.Context, path string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+c.address+path, nil)

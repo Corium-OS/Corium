@@ -448,6 +448,40 @@ Only a controller can answer: a worker holds kubelet credentials, which are not
 an administrator's, and it says so rather than handing over something that
 looks right and is not.
 
+### Generating a worker's configuration
+
+```console
+$ cctl worker-config 192.168.1.51 --name w-1 --label corium.dev/pool=general > worker.yaml
+Minted a worker join token on 192.168.1.51:7443, valid 1h. It is inline in the
+block above -- treat the output as a secret, and mint a fresh one once it expires.
+```
+
+It asks a controller to mint a fresh worker join token — `k0s token create` on
+your behalf — and prints the `corium:` block for a new worker to standard
+output:
+
+```yaml
+corium:
+  role: worker
+  node:
+    name: w-1
+    labels:
+      corium.dev/pool: general
+  join:
+    token: <a freshly minted worker token, inline>
+```
+
+The block is the worker's alone to paste into a cloud-config; its users, SSH
+keys and anything else stay yours to add. `--expiry` sets how long the token
+lives (default `1h`); `--name` and repeated `--label key=value` fill in the node.
+
+The token is inline in the clear — that is the point — so the block is a secret.
+It goes to standard output alone, so `> worker.yaml` writes only YAML, and the
+reminder above goes to standard error.
+
+**This is `admin`, and only a controller can answer**: the token is minted by
+k0s, which a worker does not run. A worker says so rather than failing obscurely.
+
 ### Handing a node to somebody else
 
 ```console
@@ -514,7 +548,7 @@ every call. Every route names the lowest role that may use it.
 |---|---|
 | `corium:readonly` | `health`, `status`, `services`, `logs`, `access ssh list` |
 | `corium:operator` | …and `restart`, `cordon`, `drain`, and an upgrade's *staging* |
-| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `access ssh add`/`revoke` |
+| `corium:admin` | …and `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `worker-config`, `access ssh add`/`revoke` |
 
 `cctl upgrade` spans both: pulling an image changes nothing else and is
 operator work, while applying it takes the node out of service. So an operator
