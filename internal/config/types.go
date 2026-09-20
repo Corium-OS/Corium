@@ -585,17 +585,16 @@ type API struct {
 	// AwaitConfig holds the bootstrap until an operator sends a configuration,
 	// as well as until they claim the node.
 	//
-	// It is what makes a fleet describable by one identical cloud-config: three
-	// lines that carry no secrets, turn the API on and say "wait to be told
-	// what to be". Everything machine-specific then arrives over the API, from
-	// `cctl enroll --config` or `cctl apply`.
+	// It is the explicit spelling of a wait a document usually asks for by
+	// saying less: one that names no role already holds, because there is
+	// nothing in it to build. This is for the document that names a role and
+	// should wait anyway -- a fleet-wide cloud-config that says `role: worker`
+	// and expects everything machine-specific to arrive over the API.
 	//
-	// Without it a node claimed in maintenance mode bootstraps immediately
-	// with whatever document it booted with, which for a machine that was
-	// never described is a single-node cluster nobody asked for. It is opt-in
-	// rather than inferred from an empty document, because a node that waits
-	// forever must do so because somebody said so, not because a heuristic read
-	// their YAML a certain way.
+	// Without it, a node whose document names a role builds that role the
+	// moment it is claimed. That is mode C of ADR 4 working as designed rather
+	// than a trap, but it is irreversible without `cctl reset`, which is why
+	// cctl says so plainly before it claims anything.
 	AwaitConfig bool `yaml:"awaitConfig,omitempty" json:"awaitConfig,omitempty"`
 
 	// Insecure drops the pairing code from maintenance mode: the first client
@@ -681,6 +680,20 @@ func (r Role) IsController() bool {
 // IsWorker reports whether the role runs workloads.
 func (r Role) IsWorker() bool {
 	return r == RoleSingle || r == RoleControllerWorker || r == RoleWorker
+}
+
+// HoldsForConfiguration reports whether the bootstrap must wait for an operator
+// to say what this node is before it builds anything.
+//
+// Two documents ask for that wait, and they ask for it in different tones. One
+// says so outright with `api.awaitConfig`. The other simply names no role,
+// which is the same statement made by omission -- and it is not a guess: a
+// document with no role describes no node, so there is nothing the bootstrap
+// could build from it even if it tried. Validation guarantees an empty role
+// only reaches here alongside a running API, so the answer this waits for can
+// always arrive.
+func (c *Config) HoldsForConfiguration() bool {
+	return c.API.AwaitConfig || c.Role == ""
 }
 
 // WireGuardNodeAddress returns the bare overlay address this node should register

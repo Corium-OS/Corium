@@ -303,7 +303,7 @@ referred to indirectly in the journal.
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `role` | enum | yes | — | The only required field (§3.2) |
+| `role` | enum | conditional | — | Required unless the API is on and the node is waiting to be told (§3.2) |
 | `cluster` | object | no | — | Identity and reachability (§3.3) |
 | `network` | object | no | — | Addressing and CNI (§3.4) |
 | `storage` | object | no | — | Datastore (§3.5) |
@@ -339,6 +339,30 @@ trap. Add the taint back through `node.taints` if you want it.
 changed by reprovisioning a node; a single-node cluster has to be rebuilt to
 become anything else. Use `controller+worker` if you might ever add a machine —
 it costs nothing today and keeps the door open.
+
+#### Leaving it out
+
+A document may omit `role` entirely, and that is how a node says it is waiting
+to be told what it is:
+
+```yaml
+corium:
+  api:
+    enabled: true
+```
+
+The bootstrap holds until an operator sends a document — `cctl enroll --config`
+or `cctl apply` — and that document has to name a role, because it is the one
+that finishes the wait. A node released with no role still fails, with
+`the configuration this node was given does not name a role`.
+
+It is refused when the API is off, for the same reason `awaitConfig` is: the
+answer could never reach the node, so it would wait for ever with nothing on
+the console to explain why.
+
+A document that *does* name a role builds it. If the API is in maintenance mode
+it builds it the moment the node is claimed, which is why `cctl enroll` asks
+before claiming such a node — see [cctl](/docs/reference/cli/#claiming-a-node-that-already-knows-what-it-is).
 
 `single` also turns off more than storage: k0s disables konnectivity and
 refuses control plane load balancing outright in this mode. Corium rejects
@@ -728,25 +752,29 @@ full by [ADR 4](/docs/decisions/adr-0004-management-api/).
 | `operatorCA` | string | no | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | no | — | Resolve it at first boot instead (§3.16) |
 | `insecure` | bool | no | `false` | Drop the pairing code. Maintenance mode only |
-| `awaitConfig` | bool | no | `false` | Hold the bootstrap until an operator sends a configuration |
+| `awaitConfig` | bool | no | `false` | Hold the bootstrap until an operator sends a configuration. Implied by a document with no `role` (§3.2) |
 
 Set at most one of `operatorCA` and `operatorCAFrom`.
 
-`awaitConfig` is what lets a whole fleet be provisioned from one identical
-cloud-config that carries no secrets and says nothing machine-specific:
+A whole fleet is provisioned from one identical cloud-config that carries no
+secrets and says nothing machine-specific by **leaving the role out**:
 
 ```yaml
 corium:
   api:
     enabled: true
-    awaitConfig: true
 ```
 
 A node booted with that waits for an operator to claim it *and* to say what it
 is, then bootstraps with the document they sent — `cctl enroll --config` in one
-step, or `cctl apply` afterwards. Without it, a claimed node bootstraps
-immediately with whatever it booted with, which for a machine that was never
-described is a single-node cluster nobody asked for.
+step, or `cctl apply` afterwards. It waits because there is nothing in the
+document to build, not because of a flag (§3.2).
+
+`awaitConfig` says the same thing explicitly, and is the only way to say it in
+a document that *does* name a role — a fleet-wide `role: worker` that still
+expects the rest per machine. Without it, a document naming a role builds that
+role: at once if the API is off or already owns the node, and on being claimed
+in maintenance mode.
 
 It is refused when the API is off, because the configuration it would be
 waiting for could never arrive.

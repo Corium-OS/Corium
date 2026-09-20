@@ -261,7 +261,7 @@ func TestEnrolAgainstARealNode(t *testing.T) {
 	// First contact: no fingerprint known, which is what reading the console
 	// is for. The client records what it saw.
 	probe := Dial(address, "")
-	if _, err := probe.Enrol(ctx, code, operatorCA, nil); err != nil {
+	if _, err := probe.Enrol(ctx, code, operatorCA, nil, false); err != nil {
 		t.Fatalf("Enrol() error = %v", err)
 	}
 
@@ -315,7 +315,7 @@ func TestPinningRefusesAnImpostor(t *testing.T) {
 	// the wrong machine, or something speaking for it. Nothing is sent.
 	wrong := "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
-	_, err = Dial(address, wrong).Enrol(t.Context(), code, operatorCA, nil)
+	_, err = Dial(address, wrong).Enrol(t.Context(), code, operatorCA, nil, false)
 	if err == nil {
 		t.Fatal("Enrol() against a mismatched fingerprint = nil, want a refusal")
 	}

@@ -142,10 +142,44 @@ configuration describes.
 | `--code` | — | The pairing code printed on the node's console. A node with `api.insecure` set asks for none |
 | `--fingerprint` | — | The fingerprint printed beside it. Without this you are asked to confirm what answered |
 | `--config` | — | A `corium:` document to give the node as part of claiming it; it bootstraps with this instead of what it booted with |
+| `--yes` | off | Claim a node that will bootstrap the moment it is claimed, without being asked to confirm it |
 
 Leaving `--fingerprint` out shows what answered and asks you to confirm it
 against the console. It is refused when there is nobody there to ask: a script
 that confirms whatever answers has checked nothing while appearing to.
+
+### Claiming a node that already knows what it is
+
+Claiming is what releases a held bootstrap. So a node whose own cloud-init
+names a `role` does not sit and wait once you have claimed it — it starts
+becoming that node, and getting back out means `cctl reset`, a drain and a
+reboot.
+
+The node says so rather than doing it on your behalf:
+
+```console
+$ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
+
+claiming this node releases its bootstrap, and the document it booted with
+names a role: it becomes a single node named "ks-stor" in cluster "corium"
+immediately, which cannot be undone without cctl reset. Send the configuration
+it should build instead, or claim it again saying you meant this.
+
+Claim it anyway? [y/N]
+```
+
+Answering `y` claims it. `--config` is the other answer: send the document it
+should build instead, and the question does not arise, because you have said
+what you want. Nothing is claimed while the question is open and the pairing
+code is not spent, so either answer is free.
+
+**A node waiting to be told what it is — one whose document names no role — is
+claimed without any of this**, because claiming it builds nothing. That is the
+fleet pattern (see [configuration §3.2](reference.md#32-role)), and a prompt on
+the recommended path would only teach people to dismiss it.
+
+In a script, pass `--yes`. Without a terminal the refusal is returned rather
+than asked, and it names the flag.
 
 A node whose configuration already names an operator CA never needs this — it
 claimed itself at boot. Give `cctl` its fingerprint once, from the journal or
@@ -165,11 +199,11 @@ datasource is nothing at all.
 until it arrives:
 
 ```yaml
-# The whole cloud-config, identical on every machine in the fleet.
+# The whole cloud-config, identical on every machine in the fleet. It names no
+# role, which is how a node says it is waiting to be told what it is.
 corium:
   api:
     enabled: true
-    awaitConfig: true
 ```
 
 ```console

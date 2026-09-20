@@ -162,9 +162,25 @@ users:
       - ssh-ed25519 AAAA... you@example.com
 
 corium:
-  role: single
+  api:
+    enabled: true
 EOF
 ```
+
+That `corium:` block names no role on purpose. A dedicated server is exactly
+the machine you have not decided about yet — its disks, its name and often its
+role are things you settle once you can see it — and a document with no role
+holds the bootstrap until you send one:
+
+```bash
+cctl enroll <address>:7443 --code <code> --config node-01.yaml
+```
+
+Write `role: single` here instead and the node builds a single-node cluster the
+moment you claim it, with a name derived from the machine ID and no array under
+it. That is a legitimate thing to want, and `cctl` asks before it does it — but
+undoing it is `cctl reset` and a second install's worth of waiting. See
+[configuration §3.2](../reference.md#32-role).
 
 The extra groups are this page's only departure from the `users:` block the
 other install pages use — `adm` and `systemd-journal` so the account can read

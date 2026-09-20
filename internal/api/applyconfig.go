@@ -155,6 +155,83 @@ func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg 
 	})
 }
 
+// beforeClaim builds the step that runs once the pairing code has been accepted
+// and before the claim is recorded -- the last moment at which anything can
+// still be made true of a node that has not been released.
+//
+// It is one of two things. A claim carrying a document applies it, so the node
+// bootstraps with what the operator sent. A claim carrying none has to reckon
+// with what the node already holds: if that document names a role, recording
+// the claim builds it, and saying so beats doing it on an assumption.
+func (s *Server) beforeClaim(r *http.Request, request enrolRequest) func() error {
+	if request.Document != "" {
+		return s.applyDocumentDuringEnrolment(r, request.Document)
+	}
+
+	return s.refuseUnacknowledgedBootstrap(r, request.Acknowledge)
+}
+
+// wouldBootstrapError reports an enrolment that would release a node into
+// building something the operator never restated.
+//
+// The node is not protecting itself here -- the caller proved they hold the
+// pairing code, and they are entitled to do this. It is protecting the one
+// thing about enrolment that surprises people: the claim is what releases the
+// bootstrap, so "just claim it and decide later" is not a thing a node can
+// offer. Deciding later means cctl reset.
+type wouldBootstrapError struct {
+	role    config.Role
+	name    string
+	cluster string
+}
+
+func (e *wouldBootstrapError) Error() string {
+	node := ""
+	if e.name != "" {
+		node = fmt.Sprintf(" named %q", e.name)
+	}
+
+	cluster := ""
+	if e.cluster != "" {
+		cluster = fmt.Sprintf(" in cluster %q", e.cluster)
+	}
+
+	return fmt.Sprintf(
+		"claiming this node releases its bootstrap, and the document it booted with "+
+			"names a role: it becomes a %s node%s%s immediately, which cannot be "+
+			"undone without cctl reset. Send the configuration it should build "+
+			"instead, or claim it again saying you meant this",
+		e.role, node, cluster)
+}
+
+// refuseUnacknowledgedBootstrap declines a claim that would build a node
+// nobody described twice, unless the caller says they meant it.
+//
+// It returns nil -- no step at all -- in every case where claiming builds
+// nothing, which is most of them: an acknowledged claim, a node that found no
+// configuration, and the whole of the fleet pattern where the document holds
+// for one to arrive. The refusal is reserved for the case where it is true.
+func (s *Server) refuseUnacknowledgedBootstrap(r *http.Request, acknowledged bool) func() error {
+	if acknowledged || s.booted == nil || s.booted.HoldsForConfiguration() {
+		return nil
+	}
+
+	return func() error {
+		// A node that has already bootstrapped is not about to do it again,
+		// and its marker is what says so. Claiming it changes its owner and
+		// nothing else, which is not a thing to stop anybody doing.
+		if s.inspector.Collect(r.Context()).Bootstrapped {
+			return nil
+		}
+
+		return &wouldBootstrapError{
+			role:    s.booted.Role,
+			name:    s.booted.Node.Name,
+			cluster: s.booted.Cluster.Name,
+		}
+	}
+}
+
 // applyDocumentDuringEnrolment turns a document sent with an enrolment into
 // the step that runs just before the node is claimed.
 //

@@ -135,12 +135,13 @@ type EnrolResult struct {
 // separately a moment later is a race against a machine that has already
 // started becoming something.
 func (c *Client) Enrol(
-	ctx context.Context, code string, operatorCA, document []byte,
+	ctx context.Context, code string, operatorCA, document []byte, acknowledge bool,
 ) (*EnrolResult, error) {
-	body, err := json.Marshal(map[string]string{
-		"code":       code,
-		"operatorCA": string(operatorCA),
-		"document":   string(document),
+	body, err := json.Marshal(map[string]any{
+		"code":        code,
+		"operatorCA":  string(operatorCA),
+		"document":    string(document),
+		"acknowledge": acknowledge,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encoding the request: %w", err)
@@ -346,15 +347,42 @@ func (c *Client) failure(response *http.Response) error {
 // and rewording it here would only lose detail.
 func (c *Client) explain(status string, body []byte) error {
 	var failure struct {
-		Error string `json:"error"`
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
 	}
 
 	if err := json.Unmarshal(body, &failure); err == nil && failure.Error != "" {
+		if failure.Reason != "" {
+			return &Refusal{Status: status, Reason: failure.Reason, Message: failure.Error}
+		}
+
 		return fmt.Errorf("%s: %s", status, failure.Error)
 	}
 
 	return fmt.Errorf("%s from %s", status, c.address)
 }
+
+// Refusal is a node declining to do something it is otherwise able and
+// authorised to do, carrying a reason a caller can act on rather than only
+// print.
+//
+// Most refusals do not need this: they are final, and the prose is the whole
+// answer. This shape exists for the one a caller answers by asking a person
+// and coming back, because deciding that from the wording of a sentence would
+// make control flow hostage to an edit of the sentence.
+type Refusal struct {
+	// Status is the HTTP status line, kept so the error reads like every other
+	// one when nobody is matching on it.
+	Status string
+
+	// Reason is the stable identifier. See api.ReasonWouldBootstrap.
+	Reason string
+
+	// Message is what the node said, and what a person should read.
+	Message string
+}
+
+func (r *Refusal) Error() string { return fmt.Sprintf("%s: %s", r.Status, r.Message) }
 
 // ClientCertificate loads the operator's own certificate, if it has one.
 //

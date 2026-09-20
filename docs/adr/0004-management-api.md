@@ -218,6 +218,81 @@ describes, and it is closer to Talos's than anything else here. It is offered,
 not preferred — modes A and B remain the unattended path, and a node that can
 be described in cloud-init should be.
 
+#### A document that names no role, and the question asked before a claim
+
+The third exception, and it reverses a paragraph three above this one.
+**`api.awaitConfig` is no longer the only way a document says it is waiting: a
+document that names no role says it by omission, and is valid wherever the API
+runs.**
+
+What was written above — that the wait is "opt-in rather than inferred from an
+empty document, because a node that waits for ever must do so because somebody
+said so" — reads well and is wrong, for a reason that is only visible from the
+other end. It assumes the alternative to waiting is something reasonable. It
+is not. `role` was required unless `awaitConfig` was set, so the two lines an
+operator actually writes first —
+
+```yaml
+corium:
+  api:
+    enabled: true
+```
+
+— were a validation error. Both units validate, so both fail: `corium-apid`
+exits non-zero into its restart limit and `corium-bootstrap` stops. The node
+that results has no API *and* no cluster, which is the worst of the states
+available to it, reached by the most natural thing anybody types.
+
+And "somebody said so" was already satisfied. Turning the API on and naming no
+role is not an ambiguous document a heuristic has to interpret: it turns on the
+one channel by which a node could be told what it is, and declines to say. A
+document with no role describes no node, so there is nothing the bootstrap
+could build from it even if it wanted to. The only two readings available are
+"wait" and "fail", and the second is not a reading, it is a refusal to have
+one.
+
+So: an empty role is accepted whenever `api.Mode()` is not `disabled`, and it
+holds the bootstrap exactly as `awaitConfig` does. With the API off it is still
+refused, and for the original reason — the answer could never arrive.
+`awaitConfig` keeps its meaning as the explicit spelling, and earns a second
+one it did not have: a document that names a role *and* should still wait.
+
+Nothing that was valid before changes meaning. The fleet cloud-init loses a
+line; every other document behaves as it did.
+
+**The claim is where the surprise was.** Recording an enrolment is what
+releases a held bootstrap, so a node whose document names a role starts
+becoming that node the instant somebody claims it. That is mode C working as
+designed. It is also the one consequence operators do not expect, because
+"claim it now, decide later" is not a thing this design can offer: deciding
+later means `cctl reset`, a drain and a reboot.
+
+The node now says so. A claim that carries no document, against a node whose
+own document names a role, is refused with the role, the name and the cluster
+it would build, and the claim is repeated with an acknowledgement or not at
+all. It costs nothing to answer: the refusal runs in `beforeClaim`, which
+abandons the enrolment without claiming the node and without spending an
+attempt, so the same pairing code works on the way back.
+
+Three things make this narrow enough to be worth doing:
+
+- **It is not a permission check.** Whoever holds the pairing code is entitled
+  to claim the node and build it. The refusal is about the assumption, not the
+  authority, and an acknowledgement is the only thing it asks for.
+- **It fires only where it is true.** A node holding for a configuration — the
+  whole fleet pattern — builds nothing on being claimed and is claimed without
+  a question. A guard that cried wolf on the recommended path would train
+  operators to dismiss it.
+- **It is enforced by the node.** `cctl` asks the person, but a client that
+  never asked would still be refused, which is the same stance every other
+  irreversible operation here takes.
+
+The cost, stated plainly: a script that enrols a node whose cloud-init names a
+role now needs `--yes`. It breaks loudly, on the first run, with the flag in
+the message. That is a real break for a real convenience, and it is accepted
+here because the failure it prevents is a reset and the failure it causes is a
+flag.
+
 ### Whether it runs at all
 
 The API is opt-in, and the default is off:
@@ -470,6 +545,12 @@ The whole resolution, in order:
 | `enabled: true`, neither set | Mode C: maintenance, and bootstrap is held |
 | `enabled: false` with either key set | Validation error |
 | both keys set | Validation error, matching `token` and `tokenFrom` |
+
+That table decides whether the daemon runs and who owns the node. `role`
+decides, orthogonally, what a released bootstrap builds — and whether there is
+anything to build at all: a document that names no role holds wherever the API
+runs, and is refused where it does not. See "A document that names no role"
+above.
 
 Enrolment is recorded in `/var/lib/corium/api/`, and `/var` survives upgrades
 and reboots. A node that has been enrolled — by any of the three modes — does

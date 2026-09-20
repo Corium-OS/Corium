@@ -309,3 +309,56 @@ func TestAwaitConfigIsAcceptedWhereverTheAPIRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestARolelessDocumentIsHowANodeSaysItIsWaiting(t *testing.T) {
+	// A document that names no role describes no node, so there is nothing to
+	// build from it. That is a legitimate thing to boot with -- it is the whole
+	// fleet-wide cloud-config -- provided somebody can still answer, which
+	// means the API has to be running.
+	for name, api := range map[string]API{
+		"in maintenance mode":  {Enabled: enabled(true)},
+		"with an inline CA":    {OperatorCA: operatorCA(t)},
+		"saying so explicitly": {Enabled: enabled(true), AwaitConfig: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := Config{API: api}
+			cfg.ApplyDefaults()
+
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+
+			if !cfg.HoldsForConfiguration() {
+				t.Error("HoldsForConfiguration() = false, want true: there is no role to build")
+			}
+		})
+	}
+}
+
+func TestARolelessDocumentWithNoAPIIsRefused(t *testing.T) {
+	// Nobody could ever tell this node what it is, so it would wait for ever
+	// with nothing on the console to explain why. Refusing at validation is the
+	// one moment somebody is still watching.
+	cfg := Config{}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "role: required") {
+		t.Errorf("Validate() = %v, want a complaint that role is required", err)
+	}
+}
+
+func TestADocumentThatNamesARoleDoesNotHold(t *testing.T) {
+	// The other half of the rule: a document that says what the node is gets
+	// built, and maintenance mode only decides when.
+	cfg := Config{Role: RoleSingle, API: API{Enabled: enabled(true)}}
+	cfg.ApplyDefaults()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+
+	if cfg.HoldsForConfiguration() {
+		t.Error("HoldsForConfiguration() = true, want false: this document names a role")
+	}
+}

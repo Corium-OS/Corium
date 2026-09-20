@@ -14,6 +14,18 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **A configuration may leave `role` out, and that is how a node says it is
+  waiting to be told what it is.** Two lines — `api.enabled: true` and nothing
+  else — are now a valid document: the node runs its API, holds its bootstrap,
+  and builds nothing until an operator sends a document with `cctl enroll
+  --config` or `cctl apply`. It was previously a validation error, which failed
+  both `corium-apid` and `corium-bootstrap` and left a machine with no API and
+  no cluster. `api.awaitConfig` still works and is still the way to ask for the
+  wait in a document that *does* name a role; it is no longer needed in one
+  that does not. A document with no role is still refused when the API is off,
+  because the answer could never arrive. See
+  [ADR 4](docs/adr/0004-management-api.md).
+
 - **`cctl apply` can change the safe part of a running node's configuration,
   without a reset.** A node that has already bootstrapped used to refuse every
   apply and send you to `cctl reset`; it now re-applies the add-on set in place —
@@ -56,6 +68,23 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   (`privateKeyFrom`), is written `0600`, and is never logged; `wireguard-tools`
   now ships in the image, present but inert until an interface is declared. See
   [ADR 6](docs/adr/0006-host-wireguard-overlay.md).
+
+### Changed
+
+- **`cctl enroll` asks before claiming a node that would bootstrap
+  immediately.** Claiming is what releases a held bootstrap, so a node whose
+  own cloud-init names a `role` starts building that node the instant it is
+  claimed — and undoing it is `cctl reset`. The node now refuses such a claim
+  and names the role, node name and cluster it would build; `cctl` shows that
+  and asks. Nothing is claimed while the question is open and the pairing code
+  is not spent, so answering costs nothing. A node waiting to be told what it
+  is — one whose document names no role — is claimed without a question,
+  because claiming it builds nothing.
+
+  **This breaks scripted enrolment of nodes whose configuration names a role:
+  pass `--yes`.** Without a terminal the refusal is returned rather than asked,
+  and the message names the flag.
+
 
 ### Fixed
 

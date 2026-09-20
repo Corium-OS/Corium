@@ -118,11 +118,19 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 	// is over, so how it would have been claimed no longer applies.
 	how := api.RequirePairingCode
 
+	// The document this node booted with. It is kept because the enrolment has
+	// exactly one question to ask of it: would claiming this node release it
+	// into building something? Nil on a node that found no configuration, and
+	// on one already claimed, where the question no longer arises.
+	var booted *config.Config
+
 	if !enrolled {
 		mode, cfg, err := claimFromConfiguration(ctx, store, configPath)
 		if err != nil {
 			return err
 		}
+
+		booted = cfg
 
 		if mode == config.APIModeDisabled {
 			slog.Info("management API is disabled, exiting")
@@ -144,6 +152,7 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 		return err
 	}
 
+	server.BootedConfig(booted)
 	server.Lifecycle(&lifecycle.Manager{Dir: stateDir})
 
 	// The keys the API trusts live beside the rest of Corium's state, under the

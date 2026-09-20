@@ -93,8 +93,10 @@ users:
       - ssh-ed25519 AAAA... you@example.com
 ```
 
-`role` is the only required field. Everything else has a default, and the
-document stays an ordinary cloud-config — `write_files`, `runcmd` and the rest
+`role` is the only required field — and a node that means to be told what it is
+over the API may leave even that out, which is how a fleet shares one
+cloud-config ([§3.2](/docs/reference/configuration/#32-role)). Everything else has a default, and
+the document stays an ordinary cloud-config — `write_files`, `runcmd` and the rest
 keep working.
 
 If you have the repository checked out, validate it before you boot anything:
