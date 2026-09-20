@@ -99,6 +99,33 @@ their repository and key to `/etc/containers/policy.json`, and their image
 becomes acceptable because they said so rather than because it claimed to be
 Corium.
 
+*Amended, once the first real node was upgraded.* Staging streams. `cctl` opens
+`POST /v1/upgrade/stage` and reads newline-delimited JSON until the pull ends: a
+`progress` line for each line bootc prints, then one terminal record — `staged`
+with what is now waiting, or `error` with what went wrong. It falls back to a
+single JSON object and a status code only for the refusals that happen before
+the pull starts, a malformed reference or an image the policy rejects, because
+nothing has been written yet and a `400` or `403` is still the node's to send.
+
+Two facts forced this, and both are worth recording because the first cut got
+them wrong. A pull is hundreds of megabytes over whatever link a node has, so it
+is minutes, not the "answers immediately or not at all" the client's timeout
+assumed — and a 30-second client deadline did not merely cut a working upgrade
+off, it *cancelled* it, because the abandoned request cancelled the context the
+pull ran under, so the node's own 30-minute `pullTimeout` was never reachable.
+And an operator watching a silent terminal for those minutes cannot tell a slow
+pull from a stuck one. Streaming answers both: the node's `pullTimeout` is the
+only clock, and the operator sees where the pull has got to. This is the same
+`http.Flusher` and newline-delimited JSON the followed-journal route already
+uses; it adds no dependency, which is the test this record sets for the daemon.
+
+The same mismatch was latent in `drain` and `reset`, whose work is also minutes
+— a drain waits on pod disruption budgets. They keep a single response, but the
+client now gives them a deadline that matches the node's rather than the 30
+seconds meant for the calls that answer at once. `apply` is untouched: it starts
+a systemd unit and returns, and the drain and reboot happen in that unit, off
+the request entirely.
+
 **Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
 destructive and are marked as such in the schema.
 
