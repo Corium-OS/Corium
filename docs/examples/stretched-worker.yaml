@@ -1,0 +1,31 @@
+#cloud-config
+#
+# Stretched cluster -- worker node.
+#
+# The CNI is a cluster-wide decision made by the controller, so a worker needs
+# nothing about networking: only its role, a name, a location label and a join
+# token. The token already embeds the API server address, so nothing here has
+# to know the controller's IP.
+#
+# Give the second-site worker `corium.dev/location: home` instead, and use a
+# `tokenFrom` secret source rather than an inline token outside a lab -- an
+# unexpired worker token lets a machine join the cluster.
+#
+# See docs/install/stretched-cluster-wireguard.md for the full walkthrough.
+corium:
+  role: worker
+  node:
+    name: corium-wg-w-ovh
+    labels:
+      topology.kubernetes.io/zone: ovh
+      corium.dev/location: ovh
+  join:
+    token: REPLACE_WITH_WORKER_JOIN_TOKEN
+users:
+  - name: core
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: wheel
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com
+ssh_pwauth: false

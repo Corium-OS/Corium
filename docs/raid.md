@@ -43,7 +43,7 @@ At first boot the node builds `/dev/md/data`, formats it, mounts it, writes an
 `/etc/fstab` entry so later boots mount it too, and records the array in
 `/etc/mdadm.conf` so it reassembles.
 
-Every field is in the [configuration reference](reference.md#310-raid).
+Every field is in the [configuration reference](reference.md#311-raid).
 
 ### Use `/dev/disk/by-id`
 
@@ -73,7 +73,7 @@ afterwards.
 Re-running bootstrap on a node whose array already exists **adopts** it. It is
 not rebuilt, and a filesystem already on it is not reformatted.
 
-### Why this is not just cloud-init
+### How this differs from `runcmd` + `mdadm`
 
 cloud-init has no RAID support. Its `disk_setup` module does partitions and
 filesystems, and its documentation has said for years that mdadm support is
@@ -103,8 +103,9 @@ running without its storage.
 **It refuses to destroy data**, as above. A hand-written `mdadm --create` does
 not ask.
 
-**It is idempotent.** Bootstrapping twice adopts the array rather than rebuilding
-it, and rewrites its own fstab line rather than appending a second one.
+**It is idempotent.** Bootstrapping twice adopts the array rather than
+rebuilding it, and rewrites its own fstab line rather than appending a second
+one.
 
 ### Checking an array
 
@@ -141,19 +142,27 @@ manual repair.
 
 ## Root filesystem on RAID
 
+> **Root-on-RAID needs three manual steps Anaconda will not do for you; skip
+> one and the machine will not survive losing its first disk.** What Anaconda
+> gives you on its own is a mirrored filesystem, not a redundant boot. The
+> procedure below is tested rather than inferred — it was verified end to end
+> on a two-disk machine, including pulling the first disk and booting from the
+> second. It is not something Corium models in the `corium:` block, because by
+> the time that block is read the root filesystem is already mounted.
+
 This is an install-time decision, taken from the ISO. It is not available on the
 qcow2 or cloud-image paths, because those ship a disk layout that is already
 decided.
 
-> **This works. It was verified end to end on a two-disk machine, including
-> pulling the first disk and booting from the second.** It is not something
-> Corium models in the `corium:` block, because by the time that block is read
-> the root filesystem is already mounted — but the procedure below is tested,
-> not inferred.
->
-> Anaconda will not give you a redundant boot on its own. Three manual steps
-> below are what make the difference between a mirrored filesystem and a
-> machine that survives losing a disk.
+### Worth weighing first
+
+A cluster that tolerates losing a node does not need each node to tolerate
+losing a disk. The cheaper answer to a dead disk is usually to reprovision the
+node — which is the model the rest of Corium is built around, and which the
+image-based upgrade path makes fast.
+
+Root-on-RAID buys a surviving root filesystem. It does not, today, reliably buy
+an uninterrupted boot.
 
 ### What is already in place
 
@@ -172,12 +181,19 @@ metadata `0.90`, `1.0` or `1.2`. Members must be partitions rather than whole
 disks. `GRUB2.install()` then loops over the array's members and installs to
 every backing disk, so a mirrored `/boot` really is bootable from either.
 
-### The ESP is where it comes apart
+### Do not put `/boot/efi` on RAID
 
-Anaconda *permits* `/boot/efi` on RAID1 — `platform.py` lists `mdarray` with
+**Use one independent, non-RAID ESP per disk.** That is the model `bootupd` is
+built around: it walks from `/boot` to the physical disks and finds the ESP
+colocated with each, and a RAID1 `/boot` hands it both disks for free.
+
+<details>
+<summary>Why, given that Anaconda accepts an ESP on RAID1</summary>
+
+Anaconda *permits* it — `platform.py` lists `mdarray` with
 `PLATFORM_RAID_LEVELS: [RAID1]` and `PLATFORM_RAID_METADATA: ["1.0"]`, and
 blivet forces metadata 1.0 for that mount point specifically, because firmware
-cannot read 1.1 or 1.2. So the obvious layout is not rejected at install time.
+cannot read 1.1 or 1.2. So the layout is not rejected at install time.
 
 It fails later, on bootc specifically. `bootupd` works out which partition the
 ESP is by reading `/sys/class/block/<name>/partition`; an md device has no such
@@ -189,17 +205,21 @@ Updating EFI firmware variables: Adding new EFI boot entry:
 Failed to read /sys/class/block/md125/partition: No such file or directory
 ```
 
-The recommended shape is therefore **one independent, non-RAID ESP per disk**,
-which is the model `bootupd` is built around: it walks from `/boot` to the
-physical disks and finds the ESP colocated with each. A RAID1 `/boot` hands it
-both disks for free.
+</details>
 
 ### Kickstart
 
 `bootc-image-builder` embeds a kickstart into an `anaconda-iso` build. It adds
 the `ostreecontainer` line itself, and **nothing else** — partitioning, network,
-locale and users are all yours to supply. A `[customizations.installer.kickstart]`
-block cannot be combined with other installer customizations.
+locale and users are all yours to supply. A
+`[customizations.installer.kickstart]` block cannot be combined with other
+installer customizations.
+
+> **Warning.** This kickstart is not sufficient on its own. An install from it
+> boots, and then does not survive losing its first disk. Three manual steps go
+> with it, all of them needed, and all three are below: build a second ESP in
+> `%post`, keep everything that is not disk-level work out of `%post`, and add
+> `nofail` to `/boot/efi` in `/etc/fstab`.
 
 ```toml
 # config.toml
@@ -278,10 +298,10 @@ efibootmgr --create --disk /dev/sdb --part 3 \
 does, which is why the block above is only `sgdisk`, `mkfs` and `efibootmgr`. A
 `sudoers` drop-in and a log file written the same way both vanished silently.
 
-**3. Add `nofail` to `/boot/efi` in `/etc/fstab`.** This is the step that is easy
-to miss, because the machine boots perfectly until the day the first disk dies —
-and then lands in emergency mode with healthy, mounted, mirrored filesystems.
-The reason:
+**3. Add `nofail` to `/boot/efi` in `/etc/fstab`.** This is the step that is
+easy to miss, because the machine boots perfectly until the day the first disk
+dies — and then lands in emergency mode with healthy, mounted, mirrored
+filesystems. The reason:
 
 ```
 $ systemctl show boot-efi.mount -p RequiredBy -p WantedBy
@@ -329,14 +349,16 @@ and serving, which is what a mirror is for.
   not have: `cat: /sys/class/block/md126/partition: No such file or
   directory`. Not fatal — the unit fails, the system reports `degraded`, and
   everything else works — but it is the same assumption that breaks `bootupd`
-  when the ESP itself is on RAID ([bootc#947](https://github.com/bootc-dev/bootc/discussions/947)).
-  Size the root array explicitly rather than relying on it to grow.
+  when the ESP itself is on RAID
+  ([bootc#947](https://github.com/bootc-dev/bootc/discussions/947)). Size the
+  root array explicitly rather than relying on it to grow.
 - **After a failure, `/boot/efi` is not mounted.** The surviving ESP is there
   and the machine boots from it, but fstab still names the dead one. Repoint it
   before the next `bootc upgrade`, or bootloader updates have nowhere to go.
 - **ESP synchronisation on update was not tested here.** `bootupd` v0.2.28+
-  updates every ESP it finds ([bootupd#855](https://github.com/coreos/bootupd/pull/855),
-  and this image carries v0.2.35), but
+  updates every ESP it finds
+  ([bootupd#855](https://github.com/coreos/bootupd/pull/855), and this image
+  carries v0.2.35), but
   [bootupd#1076](https://github.com/coreos/bootupd/issues/1076) — secondary
   ESPs not receiving `grub.cfg` — is open. Re-verify by pulling a disk after
   your first upgrade, not just after the install.
@@ -357,16 +379,6 @@ Fedora CoreOS solves this declaratively with Ignition's `boot_device.mirror`,
 which builds the array in the initramfs and replicates `/boot` per disk. bootc
 has no equivalent. That gap, rather than anything in this repository, is why
 `raid[]` covers spare disks only.
-
-### Worth weighing first
-
-A cluster that tolerates losing a node does not need each node to tolerate
-losing a disk. The cheaper answer to a dead disk is usually to reprovision the
-node — which is the model the rest of Corium is built around, and which the
-image-based upgrade path makes fast.
-
-Root-on-RAID buys a surviving root filesystem. It does not, today, reliably buy
-an uninterrupted boot.
 
 ---
 
@@ -390,7 +402,9 @@ mid-job.
 
 ## See also
 
-- [Configuration reference §3.10](reference.md#310-raid)
+- [Configuration reference §3.11](reference.md#311-raid)
 - [Feature support](features.md)
 - [mdadm(8)](https://man7.org/linux/man-pages/man8/mdadm.8.html)
-- [Anaconda Kickstart reference](https://pykickstart.readthedocs.io/en/latest/kickstart-docs.html)
+- [Anaconda Kickstart reference][kickstart]
+
+[kickstart]: https://pykickstart.readthedocs.io/en/latest/kickstart-docs.html

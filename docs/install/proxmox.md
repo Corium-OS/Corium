@@ -9,12 +9,35 @@ interface.
 
 ## Before you start
 
-- A Proxmox host you can reach over SSH as `root`.
+- A Proxmox host you can reach over SSH as `root`. Every command below runs
+  there.
 - A storage that accepts snippets — `local` does by default. Check with
   `pvesm status --content snippets`; if nothing is listed, add `snippets` to a
   directory storage's content types in **Datacenter → Storage**.
 - A free VMID. `qm list` shows what is taken.
 - About 6 GB of RAM and 32 GB of disk free.
+- The scripts from [`deploy/proxmox/`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox)
+  on that host. Step 4 runs `create-vm.sh`, and Proxmox does not ship it.
+- `corium-agent` on that host, if you want the check in step 3. No release
+  attaches it, so it comes from a checkout. The check is optional; nothing
+  else on this page needs the binary.
+
+Both come from the same clone:
+
+```bash
+git clone https://github.com/Corium-OS/Corium.git /root/Corium
+cd /root/Corium
+mise run build          # writes bin/corium-agent, for step 3
+```
+
+The paths below assume that clone. `mise run build` wants Go on the host — if
+you would rather not have it on a hypervisor, skip it, skip step 3's check, and
+fetch the one script on its own:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v0.2.0/deploy/proxmox/create-vm.sh
+chmod +x create-vm.sh
+```
 
 ## 1. Fetch the qcow2
 
@@ -22,7 +45,7 @@ On the Proxmox host, so the bytes land where they are needed:
 
 ```bash
 cd /var/lib/vz/template
-curl -fLO https://corium.b-cdn.net/corium-0.1.0-x86_64.qcow2
+curl -fLO https://corium.b-cdn.net/corium-0.2.0-x86_64.qcow2
 ```
 
 The exact URL for a release is in [its notes](https://github.com/Corium-OS/Corium/releases/latest),
@@ -32,14 +55,13 @@ along with the two other ways to fetch it. A real run took 15 seconds for
 ## 2. Check what you downloaded
 
 ```bash
-sha256sum corium-0.1.0-x86_64.qcow2
+sha256sum /var/lib/vz/template/corium-0.2.0-x86_64.qcow2
 ```
 
-Compare it with the hash in the release notes. That hash is the digest of the
-artefact's layer in the registry, and that digest is named inside the manifest
-`cosign` signed — so matching it means you hold the bytes the project
-published, not merely a file that downloaded without error. [Downloads](downloads.md)
-explains the chain.
+Compare it with the hash in the release notes. Matching it means you hold the
+bytes the project published, not merely a file that downloaded without error.
+[Downloads](downloads.md#checking-what-you-downloaded) sets out the chain that
+makes that true.
 
 ## 3. Describe the node
 
@@ -59,21 +81,32 @@ users:
 ssh_pwauth: false
 ```
 
-Save it as `/root/corium-node.yaml`. Check it before booting anything:
+Save it as `/root/corium-node.yaml`. That `users:` block is the one the other
+install pages point back at, and
+[`examples/single-node.yaml`](../examples/single-node.yaml) is the same
+document as a file you can copy.
+
+Check it before booting anything:
 
 ```bash
-corium-agent validate corium-node.yaml
-corium-node.yaml: valid (role single, cluster homelab)
+corium-agent validate /root/corium-node.yaml
+/root/corium-node.yaml: valid (role single, cluster homelab)
 ```
 
 ## 4. Create the VM
 
+> **Warning.** If you set a static address, set `NAMESERVER` too. Proxmox's
+> `ipconfig0` carries an address and a gateway and nothing else, so a static
+> node comes up with no resolver — and the failure is confusing, because the
+> node pings, SSH works, and Kubernetes hangs pulling images with
+> `lookup quay.io: Try again`. The script warns, but only if you let it.
+
 ```bash
 VMID=900 VM_NAME=corium \
-  DISK_IMAGE=/var/lib/vz/template/corium-0.1.0-x86_64.qcow2 \
+  DISK_IMAGE=/var/lib/vz/template/corium-0.2.0-x86_64.qcow2 \
   CLOUD_CONFIG=/root/corium-node.yaml \
   MEMORY=6144 CORES=2 \
-  ./create-vm.sh
+  /root/Corium/deploy/proxmox/create-vm.sh
 ```
 
 It imports the disk, resizes it, attaches the cloud-config as a custom
@@ -95,12 +128,6 @@ generated user-data wholesale rather than merging with it.
 The defaults are `STORAGE=local-lvm`, `SNIPPET_STORAGE=local`, `BRIDGE=vmbr0`,
 `CORES=4`, `MEMORY=8192`, `DISK_SIZE=32G`, and DHCP.
 
-**If you set a static address**, set `NAMESERVER` too. Proxmox's `ipconfig0`
-carries an address and a gateway and nothing else, so a static node comes up
-with no resolver — and the failure is confusing, because the node pings, SSH
-works, and Kubernetes hangs pulling images with `lookup quay.io: Try again`.
-The script warns, but only if you let it.
-
 ## 5. Start it and find it
 
 ```bash
@@ -118,7 +145,7 @@ ssh core@<address>
 
 ```console
 $ corium-agent version
-corium-agent 0.1.0 (d5a8f78)
+corium-agent 0.2.0 (d5a8f78)
 
 $ systemctl is-active corium-bootstrap k0scontroller
 active

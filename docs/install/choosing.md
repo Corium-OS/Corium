@@ -1,0 +1,58 @@
+# Which install guide
+
+Corium ships one image. Where it runs decides how you get it there and how the
+node is told what it is. Pick the row that matches your target.
+
+| Your target | Guide | How configuration reaches the node |
+|---|---|---|
+| Proxmox, KVM or libvirt | [Proxmox](proxmox.md) | cloud-init, from a snippet on the host |
+| An OpenStack cloud | [OpenStack](openstack.md) | cloud-init, through the metadata service |
+| A dedicated server you reach over a provider's rescue system | [Rescue mode](rescue.md) | A seed you write to the disk before first boot |
+| Any other cloud or hypervisor | [Quick start](../quickstart.md) | cloud-init user-data |
+| Bare metal with no seed device, or PXE | [Quick start](../quickstart.md#without-cloud-init) | `/etc/corium/config.yaml` or the kernel command line |
+
+Once one node works, these build on it:
+
+| What you want | Guide |
+|---|---|
+| Three controllers that survive losing one | [HA cluster](ha-cluster.md) |
+| A cluster split across two sites or providers | [Stretched cluster](stretched-cluster-wireguard.md) |
+| Your own image, with your agents or drivers in it | [Building your own image](../derived-images.md) |
+
+---
+
+## Before any of them
+
+**Get the artefacts.** [Downloads](downloads.md) covers where the installer ISO
+and the qcow2 are published, why nothing is attached to the GitHub release
+itself, and how to check that what you received is what was published. Every
+guide below assumes you have done this.
+
+**Know which artefact you need:**
+
+| Artefact | Use it for |
+|---|---|
+| qcow2 disk | Proxmox, KVM, libvirt, and most clouds' import paths |
+| Installer ISO | Bare metal. Installs unattended, with no kickstart to write |
+| The OCI image | `bootc install to-disk` from a rescue system, and derived images |
+
+**Understand the model, or do not.** [Concepts](../concepts.md) explains the
+filesystem contract and what happens on first boot. Reading it first makes every
+guide shorter; skipping it costs you nothing until something surprises you.
+
+---
+
+## What every guide assumes
+
+- **A node configuration.** `role` is the only required field. See
+  [examples](../examples.md) for complete documents, and the
+  [configuration reference](../reference.md) for every field.
+- **A way in.** The login user is created by cloud-init. A node that boots with
+  no configuration has no account to log into — it is a host, not a Kubernetes
+  node, and that is a supported outcome rather than a failure.
+- **Roughly a minute** from power-on to a `Ready` single node.
+
+## When it does not work
+
+[Troubleshooting](../troubleshooting.md) indexes the failures by symptom across
+every install path.

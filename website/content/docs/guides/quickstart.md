@@ -15,7 +15,7 @@ managing it without SSH.
 The short version, if you are in a hurry:
 
 ```bash
-oras pull ghcr.io/corium-os/corium-qcow2:0.1.0   # download a ready-made disk
+oras pull ghcr.io/corium-os/corium-qcow2:0.2.0   # download a ready-made disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -40,7 +40,7 @@ no build host at all. You only need two things:
 
 You do **not** need `podman`, a Linux host, or 20 GB of build space unless you
 mean to change the image and rebuild it yourself — that path is covered in
-[build your own image](#build-your-own-image) at the end.
+[build from source](#build-from-source) at the end.
 
 ---
 
@@ -50,8 +50,8 @@ Pull the artefact that matches where the node will run:
 
 | Artefact | Pull it with | Use it for |
 |---|---|---|
-| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.1.0` | Proxmox, KVM, libvirt |
-| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.1.0` | Bare metal. Installs unattended |
+| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.2.0` | Proxmox, KVM, libvirt |
+| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.2.0` | Bare metal. Installs unattended |
 
 The tag above is only an example. **The exact coordinates for a given version,
 with their digests, are on that version's
@@ -59,12 +59,12 @@ with their digests, are on that version's
 change every release, so they are published with it rather than written down
 here.
 
-No `oras`? A plain `curl` or a browser download works just as well. See
+No `oras`? A plain `curl` or a browser download works too. See
 [downloads](/docs/install/downloads/), which also covers how to check that what you
 received is what was published:
 
 ```bash
-cosign verify ghcr.io/corium-os/corium-qcow2:0.1.0 \
+cosign verify ghcr.io/corium-os/corium-qcow2:0.2.0 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -73,7 +73,7 @@ The ISO is **unattended**: it deploys the image embedded in it with no prompts
 and no kickstart to write.
 
 Changed the image and need your own disk instead? Build a qcow2, a raw disk or an
-ISO from it — see [build your own image](#build-your-own-image).
+ISO from it — see [build from source](#build-from-source).
 
 ---
 
@@ -115,7 +115,7 @@ The four roles:
 | `controller+worker` | Control plane that also accepts workloads |
 | `worker` | Workloads only; joins an existing cluster with a token |
 
-See [`examples/`](https://github.com/Corium-OS/Corium/blob/main/docs/examples) for workers, add-ons, a custom CNI, and HA.
+See [examples](/docs/reference/examples/) for workers, add-ons, a custom CNI, and HA.
 
 ---
 
@@ -216,11 +216,16 @@ client called `cctl`.
 It is **off unless you ask for it**. A node with no `api:` block runs no daemon
 and binds no port, which is what the four steps above produced.
 
-`cctl` has no release artefact yet, so build it from a checkout:
+Install `cctl` on your own machine. Archives are attached to each release, for
+linux and macOS on amd64 and arm64:
 
 ```bash
-mise run build          # produces bin/cctl
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.2.0'
 ```
+
+The quotes and the version are both required. See
+[downloads](/docs/install/downloads/#installing-cctl) for why, and for installing it
+by hand.
 
 Make the operator CA. Its certificate is what nodes are told to trust; the key
 beside it stays on your machine and is never sent anywhere:
@@ -300,6 +305,10 @@ Drain the node first if it carries workloads you care about.
 
 ## Troubleshooting
 
+The failures below are the ones that cost the most time on this path.
+[Troubleshooting](/docs/guides/troubleshooting/) indexes every symptom across every
+install path.
+
 **The node boots and does nothing.** Read the journal:
 `journalctl -u corium-bootstrap`, or `cctl logs <node> --unit corium-bootstrap`
 if you did step 5. A node with no Corium configuration says so and stops, which
@@ -337,10 +346,14 @@ on the clone, or set `node.name` explicitly.
 
 ---
 
-## Build your own image
+## Build from source
 
 Everything above uses a published image. You only need this section when you have
 changed the image and want a disk built from your own version.
+
+To add your own agents, certificates or drivers on top of a published image
+instead, you do not need a source checkout — see
+[building your own image](/docs/guides/derived-images/).
 
 This is the one part that needs a **Linux host** with `podman` and about 20 GB of
 free disk, plus [mise](https://mise.jdx.dev), which runs every command below and
@@ -379,7 +392,7 @@ survive an upgrade.
 To publish it:
 
 ```bash
-REGISTRY=ghcr.io/you IMAGE_TAG=v0.1.0 mise run push
+REGISTRY=ghcr.io/you IMAGE_TAG=0.2.0-1 mise run push
 ```
 
 ### Turn it into a disk

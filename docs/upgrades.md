@@ -3,8 +3,11 @@
 Kubernetes ships with the operating system, so upgrading either means booting a
 new image. One version axis, one mechanism, one rollback path.
 
-Everything on this page was run on a three-controller cluster rather than
-inferred; the numbers are measured.
+This page covers moving one node to a new image, rolling a whole cluster one
+node at a time, rolling back when an image turns out to be wrong, choosing
+which tag a node follows, and verifying what you are about to boot. It applies
+to every Corium node whatever the install path — ISO, qcow2, cloud image, or an
+image you derived yourself.
 
 ---
 
@@ -32,9 +35,18 @@ was still in place, the node kept its name, and `corium-bootstrap.service` did
 not run — the marker in `/var/lib/corium` survived, so the node did not try to
 bootstrap itself a second time.
 
+Everything below was measured on a three-controller cluster, not inferred.
+
 ---
 
 ## Upgrading a node
+
+### Before you start
+
+- A node you can run `sudo` on, locally or over SSH.
+- An image tag — see [choosing what to track](#choosing-what-to-track).
+- For the `cctl` path only: the [management API](cli.md) enabled on that node,
+  and a client certificate for it.
 
 ```bash
 # See what is running and what, if anything, is staged.
@@ -44,7 +56,7 @@ sudo bootc status
 sudo bootc upgrade
 
 # Or move it to a different image or tag.
-sudo bootc switch ghcr.io/corium-os/corium:0.1
+sudo bootc switch ghcr.io/corium-os/corium:0.2
 ```
 
 From your workstation, `cctl upgrade <node> --image ...` does the same thing
@@ -54,8 +66,8 @@ Neither reboots by default. They stage a deployment for the next boot, which is
 what makes the maintenance window yours to choose:
 
 ```
-Queued for next boot: ghcr.io/corium-os/corium:0.1
-  Version: 0.1.0
+Queued for next boot: ghcr.io/corium-os/corium:0.2
+  Version: 0.2.0
   Digest: sha256:38c2194904b1de400a6f2366760c85dae5e45bb7f5f500612bb428817e850bb6
 ```
 
@@ -86,16 +98,26 @@ Nodes are cattle, but the control plane still has a quorum to respect.
 With the [management API](cli.md) enabled, one command does the whole sequence
 for a list of nodes:
 
+> **Warning.** `cctl upgrade` refuses an image the node's own signing policy
+> would accept unsigned. That is what stops a typo rebasing a Kubernetes node
+> onto a desktop image, and it is the first thing people hit when they derive
+> an image of their own: your repository falls under the policy's permissive
+> default, so it is refused until you sign it and say so — see
+> [building your own image](derived-images.md). `bootc switch`, run by hand,
+> does not ask.
+
 ```bash
 cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:<tag>
 ```
 
-It takes them in order and **stops at the first that does not come back on the
-digest it was sent to** — a rollout that carries on past a broken machine turns
-one outage into a cluster-wide one — and says how many were done, because a
-half-upgraded cluster is a decision somebody has to make. Each node is checked
-fit to lose before it goes down: bootstrapped, k0s running, and the last boot
-not judged bad by greenboot.
+It takes the nodes in order, and checks each one fit to lose before taking it
+down: bootstrapped, k0s running, and the last boot not judged bad by greenboot.
+It **stops at the first node that does not come back on the digest it was sent
+to**, and says how many were done.
+
+Both of those are deliberate. A rollout that carries on past a broken machine
+turns one outage into a cluster-wide one, and a half-upgraded cluster is a
+decision somebody has to make rather than a number to bury.
 
 Without the API, the same sequence by hand:
 
@@ -116,15 +138,6 @@ A node that has been drained and rebooted comes back in about 45 seconds and
 rejoins on its own. It does not re-bootstrap: the marker in `/var/lib/corium`
 is what stops it.
 
-One difference worth knowing: `cctl upgrade` refuses an image the node's own
-signing policy would accept unsigned, which is what stops a typo rebasing a
-Kubernetes node onto a desktop image. `bootc switch` by hand does not ask.
-
-That check applies to images you build too, and it is the first thing people hit
-when they derive one: your repository falls under the policy's permissive
-default, so it is refused until you sign it and say so. See
-[building your own image](derived-images.md).
-
 ### Controllers
 
 With three controllers you can lose one and keep etcd quorum, so upgrade them
@@ -134,7 +147,7 @@ together — that is quorum lost and an API server that stops accepting writes.
 With five, two at a time is survivable. With two, there is no quorum to lose
 gracefully and the cluster will be unavailable during each reboot.
 
-If you use [HA](reference.md#38-ha), rebooting the controller holding the
+If you use [HA](reference.md#39-ha), rebooting the controller holding the
 virtual IP moves it to another controller. Clients pointed at the VIP reconnect
 on their own; the failover was verified by hard-stopping the holder.
 
@@ -142,56 +155,39 @@ on their own; the failover was verified by hard-stopping the holder.
 
 ## A node that breaks rolls itself back
 
-Staging an upgrade and rebooting is only safe if something notices when the new
-image does not work. Nodes run [greenboot](https://github.com/fedora-iot/greenboot)
-health checks at boot; if a check fails and there is a previous deployment to
-return to, the node rolls back on its own.
+Nodes run [greenboot](https://github.com/fedora-iot/greenboot) health checks at
+boot. If a check fails and there is a previous deployment to return to, the
+node rolls back on its own, which is what makes staging an image and rebooting
+safe to do unattended.
 
-Corium ships one check: is k0s running and answering?
+Measured by pushing an image whose health check always fails:
 
-```
-corium: k0scontroller.service is running and answering
-greenboot health-check passed.
-Set grubenv: boot_success=1
-```
+| Boot | Check | What greenboot does |
+|---|---|---|
+| 1 | fails | First failure; sets the boot counter to 3 |
+| 2 | fails | Counter at 2, reboots to try again |
+| 3 | fails | Counter at 1, reboots to try again |
+| 4 | fails | Counter exhausted; initiates rollback, which succeeds |
+| 5 | healthy | `greenboot health-check passed`, `boot_success=1` |
 
-**What it deliberately does not check is the interesting part.** It does not
-require the node to be `Ready` in Kubernetes. A node can be legitimately
-NotReady for reasons that have nothing to do with the image — no CNI installed
-yet, a control plane still coming back, a cluster-wide problem — and rolling
-back the OS would fix none of them while taking a healthy machine out of
-service at the worst possible moment. A health check that is too strict is
-worse than none.
-
-The check also allows five minutes for k0s to start, since unpacking its
-supervised binaries and bringing up etcd is not instant, and passes trivially
-on a node that was never bootstrapped.
-
-A node only rolls back if an upgrade actually staged something. greenboot
-records the deployment it expects to boot, and the rollback path is gated on
-that record existing — so a health check that fails on a node nobody upgraded
-gets you a warning and manual intervention, not a surprise trip to an older
-image.
-
-Verified end to end, by pushing an image whose health check always fails and
-letting the node take it:
-
-```
-boot 1   check fails   First health check failure, setting boot counter to 3
-boot 2   check fails   Boot counter is 2, rebooting to try again
-boot 3   check fails   Boot counter is 1, rebooting to try again
-boot 4   check fails   Boot counter exhausted ... initiating rollback
-                       Rollback successful
-boot 5   healthy       greenboot health-check passed.  Set grubenv: boot_success=1
-```
-
-Four attempts on the broken image, then back to the previous one, which came up
-and stayed up. `GREENBOOT_MAX_BOOT_ATTEMPTS` in `/etc/greenboot/greenboot.conf`
-sets the count. Once rolled back, the image that failed is the one that gets
-replaced, so the node does not oscillate.
+`GREENBOOT_MAX_BOOT_ATTEMPTS` in `/etc/greenboot/greenboot.conf` sets the
+count. Once rolled back, the image that failed is the one that gets replaced,
+so the node does not oscillate. Rollback is also gated on an upgrade having
+staged something, so a check that fails on a node nobody upgraded gets you a
+warning and manual intervention rather than a surprise trip to an older image.
 
 Add your own checks by dropping executables in
 `/etc/greenboot/check/required.d/`. A non-zero exit fails the boot.
+
+Corium ships one check: is k0s running and answering? It deliberately does not
+require the node to be `Ready` in Kubernetes, because a node can be NotReady
+for reasons the image cannot fix — no CNI installed yet, a control plane still
+coming back, a cluster-wide problem — and rolling the OS back would take a
+healthy machine out of service at the worst possible moment while fixing none
+of them. A health check that is too strict is worse than none. It allows five
+minutes for k0s to start, since unpacking its supervised binaries and bringing
+up etcd is not instant, and passes trivially on a node that was never
+bootstrapped.
 
 ## Rolling back
 
@@ -239,34 +235,23 @@ accepts.
 | Tag | Moves | You get |
 |---|---|---|
 | `corium@sha256:...` | Never | Exactly one image. The strongest pin |
-| `corium:0.1.0` | Never | One release |
-| `corium:0.1` | On patch releases | Fixes, no new behaviour |
+| `corium:0.2.0` | Never | One release |
+| `corium:0.2` | On patch releases | Fixes, no new behaviour |
 | `corium:latest` | On every release | Whatever is newest |
 | `corium:main` | On every push to `main` | Development builds, unreleased |
 
-**Track `0.1`.** It moves only on patch releases, which do not change
-behaviour, so it picks up fixes without you deciding anything. Pin `0.1.0`
-exactly if you would rather choose the moment yourself. Read the changelog
-before moving to `0.2`: a minor release may require a configuration change,
-and it will say which.
+**Track `0.2`.** It moves only on patch releases, which do not change
+behaviour, so it picks up fixes without you deciding anything. Pin `0.2.0`
+exactly if you would rather choose the moment yourself, and read the changelog
+before moving to `0.3`: a minor release may require a configuration change, and
+it will say which.
 
-**Below 1.0 there is no major rung.** Semantic versioning reserves `0.y.z` for
-initial development and lets a minor release break things, so a `0` tag
-meaning "new features, no breaking changes" would promise exactly what the
-version number withholds. It is not published. When Corium reaches 1.0, a `1`
-rung joins the ladder with that meaning, and it will be true:
-
-| Tag | Moves | You get |
-|---|---|---|
-| `corium:1.4` | On patch releases | Fixes, no new behaviour |
-| `corium:1` | On minor releases | New features, no breaking changes |
-
-`latest` is a claim about recency, not about compatibility. It crosses minor
-releases below 1.0 and major ones above, which is where breaking changes live
-by definition. It exists so that `podman pull ghcr.io/corium-os/corium`
-returns something; it is not a tag to run a cluster on.
-
-Prereleases publish only their exact tag: `0.2.0-rc.1` never becomes `0.2` or
+Three things the ladder does not offer. There is no major rung below 1.0,
+because semantic versioning lets a `0.y` minor release break things and a `0`
+tag would promise what the version number withholds. `latest` is a claim about
+recency rather than compatibility — it crosses the releases where breaking
+changes live by definition, so it is not a tag to run a cluster on. And
+prereleases publish only their exact tag: `0.3.0-rc.1` never becomes `0.3` or
 `latest`, so a node following a stable tag will not pick up a release
 candidate.
 
@@ -321,7 +306,8 @@ Two behaviours worth knowing, because both are deliberate:
   power cut halfway through the drain — comes back up on the image the node was
   already running, rather than half-applying an upgrade nobody scheduled.
 
-`schedule` takes any [systemd OnCalendar](https://www.freedesktop.org/software/systemd/man/systemd.time.html)
+`schedule` takes any systemd
+[OnCalendar](https://www.freedesktop.org/software/systemd/man/systemd.time.html)
 expression. A randomised delay of up to an hour is applied on top, so a fleet
 does not arrive at the registry in lockstep, and missed checks are caught up
 after a node has been off rather than waiting for the next window.
@@ -337,14 +323,14 @@ systemctl list-timers 'corium-upgrade-*' 'bootc-*'
 
 ## Verifying what you are about to boot
 
-Every image Corium publishes -- from a release tag and from `main` alike --
-is signed with [cosign](https://docs.sigstore.dev/), keyless: there is no
-private key, and the signing identity is the GitHub Actions workflow itself. The signature is
-attached to the image digest rather than to a tag, because tags move and a
-signature on a moving tag says nothing about what it points at now.
+Every image Corium publishes — from a release tag and from `main` alike — is
+signed with [cosign](https://docs.sigstore.dev/), keyless: there is no private
+key, and the signing identity is the GitHub Actions workflow itself. The
+signature is attached to the image digest rather than to a tag, because tags
+move and a signature on a moving tag says nothing about what it points at now.
 
 ```bash
-cosign verify ghcr.io/corium-os/corium:0.1 \
+cosign verify ghcr.io/corium-os/corium:0.2 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -352,7 +338,7 @@ cosign verify ghcr.io/corium-os/corium:0.1 \
 Verified output looks like this:
 
 ```
-Verification for ghcr.io/corium-os/corium:0.1 --
+Verification for ghcr.io/corium-os/corium:0.2 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -366,7 +352,7 @@ Running it with an empty `DOCKER_CONFIG` is a quick way to tell:
 
 ```bash
 mkdir -p /tmp/emptycfg && echo '{}' > /tmp/emptycfg/config.json
-DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:0.1 \
+DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:0.2 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -397,7 +383,7 @@ break the cluster rather than secure it.
 Verify it against a node yourself:
 
 ```bash
-cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:0.1
+cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:0.2
 ```
 
 **Why two signatures rather than one.** A node cannot enforce the keyless one:

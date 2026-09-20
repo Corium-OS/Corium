@@ -15,6 +15,19 @@ version's release page:
 coordinates change every release, so they are published with the release
 rather than written down here.
 
+## Before you start
+
+Each route below wants a different handful of tools, and no route wants all of
+them:
+
+- `curl` and `tar`, for anything fetched by hand.
+- `sha256sum`, to check what you got. macOS has no such command; `shasum -a
+  256` stands in for it everywhere below.
+- [mise](https://mise.jdx.dev), for the one-line `cctl` install.
+- [`cosign`](https://github.com/sigstore/cosign), to verify a signature.
+- [`oras`](https://oras.land) for the registry route, or `jq` for the same
+  bytes with `curl` alone.
+
 ## Installing `cctl`
 
 The client runs on your machine and never on a node. Archives are attached to
@@ -28,7 +41,7 @@ mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.2.0'
 ```
 
 Both the quotes and the version are load-bearing, and leaving either out fails
-in a way that does not obviously point at them.
+in a way whose error message does not point at either.
 
 The quotes are for your shell: zsh treats `[...]` as a glob, so an unquoted
 command never reaches mise at all — it reports `no matches found` before
@@ -44,17 +57,20 @@ By hand, checking what you downloaded:
 
 ```bash
 version=0.2.0
+os=linux          # darwin on macOS
+arch=amd64        # arm64 on Apple silicon, and on 64-bit Arm linux
 base=https://github.com/Corium-OS/Corium/releases/download/v${version}
 
-curl -fsSLO "${base}/cctl_${version}_linux_amd64.tar.gz"
+curl -fsSLO "${base}/cctl_${version}_${os}_${arch}.tar.gz"
 curl -fsSLO "${base}/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf "cctl_${version}_linux_amd64.tar.gz"
+tar -xzf "cctl_${version}_${os}_${arch}.tar.gz"
 ```
 
 `--ignore-missing` because `SHA256SUMS` lists every platform and you downloaded
 one. Without it the check fails on the three archives you do not have, which
-looks exactly like the failure that would matter.
+looks exactly like the failure that would matter. On macOS the same check is
+`shasum -a 256 --check --ignore-missing SHA256SUMS`.
 
 The checksum file is signed with the same key as the OS image, so verifying it
 verifies every binary underneath:
@@ -84,16 +100,16 @@ See [cctl](../cli.md) for what it does.
 
 ```bash
 # 1. With oras. One command, and it names the file for you.
-oras pull ghcr.io/corium-os/corium-iso:0.1.0
+oras pull ghcr.io/corium-os/corium-iso:0.2.0
 
 # 2. Without oras. The registry issues pull tokens anonymously for public
 #    packages, so curl is enough.
 token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pull" | jq -r .token)
-curl -L -H "Authorization: Bearer ${token}" -o corium-0.1.0-x86_64.iso \
+curl -L -H "Authorization: Bearer ${token}" -o corium-0.2.0-x86_64.iso \
   https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<the digest from the release notes>
 
 # 3. From a browser, no tooling at all. The release notes carry the link.
-https://<cdn>/corium-0.1.0-x86_64.iso
+https://<cdn>/corium-0.2.0-x86_64.iso
 ```
 
 The third is a CDN copy. There is no index to browse, so the link for a given
@@ -114,9 +130,9 @@ a file*.
 
 `cctl` is attached, because the same reasoning points the other way for it. It
 is three megabytes, it is fetched by a person setting up a workstation rather
-than by a machine, and the installers people already use — `mise use
-github:Corium-OS/Corium[exe=cctl]@0.2.0'` — read release assets and not
-registries.
+than by a machine, and the installers people already use —
+`mise use 'github:Corium-OS/Corium[exe=cctl]@0.2.0'` — read release assets and
+not registries.
 Signing it as a blob rather than as an OCI artefact costs one extra file and
 keeps it reachable by the tools that would actually go looking.
 
@@ -161,7 +177,7 @@ commit and which tag, recorded in a public transparency log.
 the SHA-256 of each artefact in its notes:
 
 ```bash
-sha256sum corium-0.1.0-x86_64.iso
+sha256sum corium-0.2.0-x86_64.iso
 # must equal the hash printed in the release notes
 ```
 

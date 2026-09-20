@@ -11,13 +11,25 @@ toc: true
 
 Corium's published image is a base. Deriving your own is how you add the things
 a `corium:` block was never going to cover — a monitoring agent, your
-organisation's CA bundle, a driver, a backup client. It is three lines of
-`Containerfile` for the simple cases.
+organisation's CA bundle, a driver, a backup client. The mechanism is an
+ordinary `Containerfile` — a `FROM`, whatever you are adding, and a lint — and
+the worked example below is about thirty lines of it. Signing and the order you
+roll it out in are the parts that take thought.
 
 It is also the supported way to do it. Installing an agent on a running node
 with `dnf` does not work, because `/usr` is read-only; installing it into `/var`
 with a `runcmd` works exactly until the next upgrade, when nothing puts it back.
 An agent that is part of the image is an agent that survives.
+
+## Before you start
+
+- `podman` on the machine you build from, and
+  [`cosign`](https://docs.sigstore.dev/) to sign what it produces.
+- A registry you can push to, and that your nodes can pull from.
+- An answer to one question: **do you already have nodes running Corium, or
+  only machines you have yet to install?** An existing fleet needs the signing
+  policy shipped one image ahead of the agents that rely on it; new machines do
+  not. See [3. Build it, and sign it](#3-build-it-and-sign-it).
 
 ---
 
@@ -112,10 +124,24 @@ d /var/lib/node-exporter 0750 root root -
 
 ## 3. Build it, and sign it
 
+> **Warning.** A node enforces the policy it is currently running, not the one
+> in the image it is moving to. The entry that makes your repository acceptable
+> has to reach a node *before* the upgrade that needs it. Getting this
+> backwards leaves nodes that refuse every image you build, and the way back is
+> the console. If you already have a fleet, use the two-stage rollout below
+> rather than putting the policy and your agents in the same image.
+
 ```bash
 podman build --tag ghcr.io/you/corium:0.2.0-1 --file Containerfile .
 podman push ghcr.io/you/corium:0.2.0-1
 ```
+
+The build ends on the lint. A clean one prints nothing from that step and
+commits the image; a failing one names what it found and stops, because
+`--fatal-warnings` turns a warning into a non-zero exit rather than something
+that scrolls past. Content written under `/var` is the warning to expect, and it
+matters: `/var` is seeded at install and never updated, so anything you put
+there never reaches a node that upgrades into the image.
 
 **Then sign it. This is not optional hardening — an unsigned image cannot be
 upgraded onto a node.**
@@ -157,14 +183,16 @@ The node accepts your image because **you** said so, not because it claims to be
 Corium. That is the whole design of the signing policy, and it is why deriving
 an image does not mean giving up the guarantee.
 
-Two things about the order of events:
+### Rolling it out to a fleet that already exists
 
-**A node enforces the policy it is currently running, not the one in the image
-it is moving to.** So the entry above has to reach a node *before* the upgrade
-that needs it. In practice that means one upgrade to a derived image that adds
-only the policy and the key — signed, so the nodes accept it — and your agents
-from the next one onwards. Getting this backwards leaves nodes that refuse every
-image you build, and the way back is the console.
+The policy entry has to be on the nodes before the image that relies on it, so
+it takes two rollouts:
+
+1. **Ship the policy first.** Build a derived image that adds only the policy
+   entry and the public key, sign it, and upgrade the fleet onto that. It is
+   signed, so the nodes accept it.
+2. **Then ship everything else.** Your agents, CA bundle and drivers go in the
+   next image, which the nodes now hold a policy for.
 
 **Installing is not upgrading.** A machine installed from an ISO or a disk built
 from your image never runs that check, because there is no previous node to

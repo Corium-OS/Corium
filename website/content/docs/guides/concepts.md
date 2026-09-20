@@ -115,7 +115,7 @@ field.
 
 Everything the schema does not model stays reachable through `k0s.patch`,
 applied verbatim. The rule the project holds itself to: **no k0s feature is
-unreachable, some simply have no shorter name.** See
+unreachable; some have no shorter name.** See
 [feature support](/docs/reference/feature-support/).
 
 There *is* a management API, and it does not contradict that heading, because
@@ -126,7 +126,7 @@ upgrade it, take it out of service. It cannot write a `corium:` block, and a
 node that needs different configuration is reprovisioned rather than edited.
 
 It is off unless a node's configuration asks for it. See [cctl](/docs/reference/cli/), and
-[ADR 4](/docs/reference/adr-0004-management-api/) for why it is shaped that way.
+[ADR 4](/docs/decisions/adr-0004-management-api/) for why it is shaped that way.
 
 ## Kubernetes ships with the OS
 
@@ -150,3 +150,12 @@ that reconciles. Upgrading a cluster is a `cctl` loop over addresses you
 supplied, running on your machine — the sequencing lives with the operator
 rather than on any node. The reasoning for each is in
 [feature support](/docs/reference/feature-support/#out-of-scope).
+
+---
+
+## Next
+
+- [Quick start](/docs/guides/quickstart/) — put this into practice on a real node
+- [Examples](/docs/reference/examples/) — a complete document for each common node shape
+- [Configuration reference](/docs/reference/configuration/) — every field, and what Corium does with it
+- [Comparison](/docs/reference/comparison/) — how this model differs from Talos, Kairos and the rest

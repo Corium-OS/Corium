@@ -1,0 +1,46 @@
+#cloud-config
+#
+# Stretched cluster -- control-plane node.
+#
+# One controller, kept in a single location so the etcd quorum never straddles
+# the WAN between sites. Calico is the cluster CNI, and node-to-node WireGuard
+# encryption is turned on through the k0s escape hatch: `cni: calico` is
+# modelled, and `spec.network.calico.wireguard` is reached verbatim with
+# `k0s.patch`.
+#
+# The MTU is lowered on purpose. The 1500 B underlay has to carry Calico's
+# VXLAN (50 B) and WireGuard (60 B) headers, so the pod-facing MTU is set to
+# 1350 to leave room for both. Getting this wrong does not fail loudly -- it
+# black-holes large packets while small ones work, which is miserable to
+# diagnose.
+#
+# See docs/install/stretched-cluster-wireguard.md for the full walkthrough.
+corium:
+  role: controller
+  cluster:
+    name: stretched
+  network:
+    cni: calico
+  storage:
+    type: etcd
+  node:
+    name: corium-wg-ctl
+    labels:
+      topology.kubernetes.io/zone: ovh
+      corium.dev/location: ovh
+  k0s:
+    patch:
+      spec:
+        network:
+          calico:
+            mode: vxlan
+            wireguard: true
+            mtu: 1350
+users:
+  - name: core
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: wheel
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME you@example.com
+ssh_pwauth: false
