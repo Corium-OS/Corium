@@ -4,8 +4,14 @@
 # mechanism, and a policy requiring a signature fails with
 # "A signature was required, but no signature exists" while the signature sits
 # in the registry, correctly attached and simply never consulted.
+#
+# corium-zfs is the signed ZFS variant (deploy/zfs/, published by the image
+# workflow). It carries the same requirement in ../policy.json and needs the
+# same attachment lookup enabled here, or a node cannot upgrade onto it.
 docker:
   ghcr.io/corium-os/corium:
+    use-sigstore-attachments: true
+  ghcr.io/corium-os/corium-zfs:
     use-sigstore-attachments: true
 
 # A note on the matching policy in ../policy.json:
