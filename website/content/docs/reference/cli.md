@@ -178,12 +178,18 @@ own, and `--file -` reads standard input. It is validated on your machine
 before it is sent and again by the node before it is written, so a document
 that would fail at boot is refused while somebody is still watching.
 
-**It only works before the node has bootstrapped.** A machine already running
-Kubernetes answers `409` and tells you to use `cctl reset`: rewriting the role
-or cluster of a node in service would leave its configuration and its behaviour
+**On a node that has already bootstrapped, `cctl apply` re-applies only the
+safe part of the document.** Today that is the add-on set: the node regenerates
+its k0s configuration and cycles the control plane to install or remove a chart,
+reports `reconciled`, and an apply that matches what it is already running
+reports `unchanged` and does nothing. Every field that defines what the node
+*is* — its role, cluster, name, network, disks, and the rest — still answers
+`409` and points you at `cctl reset`, naming the field it refused: rewriting one
+of those on a node in service would leave its configuration and its behaviour
 saying two different things, which is the thing Corium's provisioning model
 exists to prevent. This is enforced by the node, not by `cctl`, and not by your
-role — an `admin` certificate does not get past it either.
+role — an `admin` certificate does not get past it either. See
+[ADR 8](/docs/reference/adr-0008-day-two-reconcile/); the safe set is expected to grow.
 
 One thing to watch: the document is the node's entire configuration, not a
 patch. Leaving `api:` out of it turns the management API off at the next boot,

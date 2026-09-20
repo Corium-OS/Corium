@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/access"
+	"github.com/Corium-OS/Corium/internal/k0s"
 	"github.com/Corium-OS/Corium/internal/kubeconfig"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
@@ -100,6 +101,16 @@ type Server struct {
 	// applying one works.
 	configPath string
 
+	// appliedPath is where the node records the configuration it last acted on,
+	// the baseline a day-two apply diffs against. A field for the same reason as
+	// configPath. See ADR 8.
+	appliedPath string
+
+	// k0sConfigPath is where the rendered k0s.yaml is written when a day-two
+	// apply changes the add-on set. A field so a test can point it somewhere it
+	// is allowed to write.
+	k0sConfigPath string
+
 	// sessionDir is where the per-boot state lives: the enrolment session, and
 	// the marker that tells a held bootstrap its operator has answered.
 	sessionDir SessionDir
@@ -147,19 +158,21 @@ func (s *Server) Access(manager *access.Manager) { s.access = manager }
 // nobody could reason about.
 func NewServer(store *Store, address string, how Enrolment, session SessionDir) (*Server, error) {
 	server := &Server{
-		store:      store,
-		address:    address,
-		restart:    make(chan struct{}),
-		ready:      make(chan struct{}),
-		inspector:  &nodeinfo.Inspector{},
-		systemd:    &systemd.Manager{},
-		upgrades:   &upgrade.Manager{},
-		lifecycle:  &lifecycle.Manager{},
-		kubeconfig: &kubeconfig.Manager{},
-		token:      &token.Manager{},
-		access:     &access.Manager{},
-		configPath: ConfigPath,
-		sessionDir: session,
+		store:         store,
+		address:       address,
+		restart:       make(chan struct{}),
+		ready:         make(chan struct{}),
+		inspector:     &nodeinfo.Inspector{},
+		systemd:       &systemd.Manager{},
+		upgrades:      &upgrade.Manager{},
+		lifecycle:     &lifecycle.Manager{},
+		kubeconfig:    &kubeconfig.Manager{},
+		token:         &token.Manager{},
+		access:        &access.Manager{},
+		configPath:    ConfigPath,
+		appliedPath:   nodeinfo.AppliedConfigFile,
+		k0sConfigPath: k0s.ConfigPath,
+		sessionDir:    session,
 	}
 
 	enrolled, err := store.Enrolled()

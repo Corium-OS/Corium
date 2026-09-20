@@ -295,7 +295,21 @@ func recordState(cfg *config.Config) error {
 		return fmt.Errorf("creating %s: %w", StateDir, err)
 	}
 
-	return writeFile(nodeinfo.StateFile, encoded, 0o644)
+	if err := writeFile(nodeinfo.StateFile, encoded, 0o644); err != nil {
+		return err
+	}
+
+	// The baseline a day-two apply diffs against. Recorded here, from the
+	// configuration the node was actually built with, so that the first apply on
+	// a node has something true to compare a proposal to. 0600, because the
+	// document can carry secret references and inline escape-hatch values, the
+	// same care writeConfigDocument takes. See ADR 8.
+	document, err := cfg.Document()
+	if err != nil {
+		return fmt.Errorf("recording applied configuration: %w", err)
+	}
+
+	return writeFile(nodeinfo.AppliedConfigFile, document, 0o600)
 }
 
 // clusterEndpoint is the address clients should use to reach this cluster.

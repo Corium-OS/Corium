@@ -1,0 +1,191 @@
+# 8. Re-applying the safe subset of a node's configuration, day two
+
+Status: accepted
+
+## Context
+
+Corium reads a node's configuration once, at first boot, and then stops. Decision
+11 makes that a stance rather than an accident — Corium provisions nodes and does
+not manage them — and ADR 4 states the rule it rests on: a node's configuration is
+a question it answers *before* it is a node. `cctl apply`, and the
+`POST /v1/config` behind it, writes `/etc/corium/config.yaml` (first in the source
+chain, decision 6) and is refused the moment a node has bootstrapped:
+
+    this node has already bootstrapped, so its configuration is no longer a
+    question it can answer; use cctl reset to return it to maintenance mode
+
+The same one-way door stands in front of a bare edit: `corium-bootstrap.service`
+carries `ConditionPathExists=!/var/lib/corium/bootstrapped`, so once the marker is
+written the unit is skipped on every subsequent boot, and the agent exits early
+even if it runs. Editing `config.yaml` on a running node — and rebooting, and
+rebooting again — changes nothing, silently. To an operator who bumped a Helm
+chart version and expected it to take, that reads as a bug, not a policy.
+
+That refusal is correct for the fields it was written to guard. Rewriting the
+role, the cluster, or the name of a machine already running Kubernetes would make
+its configuration and its behaviour two different facts — the exact incoherence
+decisions 6 and 7 exist to prevent, and the reason `cctl reset` throws a node out
+of its cluster before it will change any of them.
+
+But the refusal covers the whole document, and the document is not all of one
+kind. An operator who adds a `cert-manager` add-on, or flips `upgrades.automatic`,
+is not redefining what the node *is*; they are asking for a chart to be present,
+or a timer to run. Those are day-two acts against a node whose identity is
+unchanged, and today the only route to them is `cctl reset` — destroying a
+single-node cluster to install a chart — or reaching under Corium by hand and
+leaving the node's configuration and its behaviour disagreeing anyway.
+
+The fields divide cleanly:
+
+- **Identity, cluster and disk.** `role`, `cluster`, `join`, `node.name`,
+  `network`, `storage`, `raid`, `wireguard` and `ha` define what the machine is,
+  which cluster it belongs to, and what data lives on it. k0s registers a node
+  under the name and address it reads at startup; a CNI or a datastore is a
+  cluster-creation choice; an array holds data. None of these can change under a
+  running node without lying about it or losing something.
+- **Declared cluster content and node policy.** `addons` are Helm charts;
+  `upgrades` is a timer and a policy. Their real reconciler is something Corium
+  already delegates to — k0s for the charts, systemd for the timer — not
+  something Corium would have to become.
+
+## Decision
+
+`cctl apply`, on a node that has already bootstrapped, stops being a flat refusal
+and becomes a **gated re-application of the safe subset**.
+
+The node diffs the incoming document against the one it was bootstrapped with
+(recorded for this purpose; see below) and classifies every field that changed:
+
+- **If any identity, cluster or disk field differs, the whole apply is refused** —
+  the same message and the same pointer to `cctl reset` as today. Nothing is
+  applied partially: an operator does not get half of an intent, and does not get
+  the safe half of a document whose unsafe half was rejected.
+- **Otherwise the safe subset is re-applied.** In the first cut that is `addons`
+  and `upgrades`, because those are the two fields whose effect Corium can hand
+  back to a reconciler it already trusts:
+  - `addons` render to k0s Helm extensions (`internal/k0s/render.go`).
+    Re-applying them means regenerating `/etc/k0s/k0s.yaml` — which the bootstrap
+    already renders deterministically (AGENTS §7) — and letting k0s reconcile its
+    chart set to match. This node runs k0s from a static config file
+    (`k0s controller --config /etc/k0s/k0s.yaml`, no dynamic config), so that in
+    turn means restarting `k0scontroller`; on a single-node control plane that is
+    a brief control-plane interruption, and the kubelet and its running pods are
+    untouched by it.
+  - `upgrades` is a systemd timer and a policy string. Re-applying it enables,
+    disables or reschedules a timer. Nothing about the cluster moves.
+
+The apply is **explicit and operator-triggered**. There is no reconcile loop, no
+drift detection, nothing that acts on the node between one `cctl apply` and the
+next. That is the line that keeps decision 11 intact: this is "re-apply the safe
+delta, now, because I asked", not "watch the node and correct it toward a file".
+Corium still does not manage the fleet; it re-answers a bounded question when the
+operator poses it again.
+
+To diff against something true rather than against whatever the running config
+file happens to say, the node records the document it last applied — extending the
+`node.json` that already records what a node was made into. A second identical
+apply is then a no-op, as AGENTS §7 requires, and the diff is against the intent
+the node is actually running.
+
+`k0s.patch` — the escape hatch — is deliberately **not** in the safe subset. A
+patch can rewrite any part of the k0s configuration, including parts as
+load-bearing as `cluster`, and Corium cannot tell a safe patch from a
+cluster-redefining one by inspecting it. For the gate it is treated as an
+immutable field: a node whose `k0s.patch` changed is sent to `cctl reset`, or its
+operator edits k0s by hand and owns the result. A later revision may carve out
+provably-safe corners of it.
+
+`api` is left out of the first cut for a specific reason, not an omission:
+`api.enabled: false` applied over the API would ask the node to shut down the very
+surface the request arrived on, and getting the ordering of that wrong is how an
+operator locks themselves out of a node that is otherwise healthy. It is a
+candidate for a later revision, behind a guard that keeps the door open long
+enough to confirm the caller meant it.
+
+## Consequences
+
+This is a second deliberate crack in "provision, don't manage", after ADR 5's
+crack in "the API has no shell", and it is worth naming as one rather than
+pretending the line held whole. It is a narrow crack: the node re-applies only
+fields whose reconciler is k0s or systemd, only when asked, and never anything
+that changes what the node is.
+
+The control-plane restart is real and must be stated plainly. Applying an add-on
+change bounces `k0scontroller`; on a single node the API server is briefly
+unavailable, and on an HA control plane it is one controller at a time with the
+VIP covering the gap. This is cheaper than `cctl reset` by every measure, but it
+is not free, and `cctl apply` names what it is about to restart before it does it,
+the way `cctl reset` names what it is about to erase.
+
+The recorded last-applied document is new state under `/var/lib/corium`. It is not
+a secret in itself, but a document can carry `secretFrom`-style references, so it
+is written with the same care as the rest of that directory and never logged. Like
+the rest of `/var`, it is seeded once and survives an OS upgrade, which is what
+lets a node upgraded into this feature still diff against what it was built with.
+
+Removing an add-on needs its behaviour pinned down before this ships, not assumed.
+The gate treats a dropped chart as a change to apply, which asks k0s to bring its
+chart set back in line — but whether k0s *uninstalls* a chart removed from its
+extension list, or merely stops managing it and leaves it running, is a property
+of the pinned k0s version (AGENTS §11). The difference is a `cert-manager` that
+either leaves cleanly or lingers with its CRDs and webhooks, so it is verified on
+a machine, against `build/k0s.lock`, as a condition of accepting this ADR.
+
+The apply path shares the bootstrap's renderer and validator, so a document the
+node would refuse at boot is a document it refuses to apply, and the same input
+produces the same `/etc/k0s/k0s.yaml` whether it was rendered at first boot or on
+the tenth apply. No second code path for configuration means no second place for
+the two to drift.
+
+## Alternatives considered
+
+**Per-capability day-two verbs, instead of re-applying the document.** Model each
+safe day-two action as its own explicit API surface and `cctl` verb —
+`cctl addon add/remove/list`, `cctl upgrades set` — exactly as ADR 5 models SSH
+keys with `cctl access ssh` rather than through the config schema. The
+configuration document would stay purely a provisioning record: written once, read
+once, never re-applied. This is the more conservative shape and has real merit. It
+is honest that these are separate day-two operations rather than implying the
+whole document is live; it needs no last-applied state to diff against, because
+each verb carries exactly the change it makes; and it follows the precedent ADR 5
+set for precisely this class of "day two needs to change one narrow thing"
+problem, where the answer was a dedicated surface and *not* the config endpoint.
+
+It is offered here as the alternative, and not chosen as the primary design, on
+two counts. It multiplies surface: every safe field becomes its own endpoint, its
+own role check, its own command and its own documentation, where the gated apply
+reuses the one surface, schema and validator the node already has. And it splits
+the source of truth: after `cctl addon add`, the running node and its
+`/etc/corium/config.yaml` describe different nodes, and there is no longer one
+document that says what this machine is — which is the property the whole
+`corium:` block exists to provide, and the property `cctl reset` and the config
+endpoint were built to protect. The gated apply keeps the document authoritative
+and adds a verb's worth of behaviour to a surface that already exists.
+
+The two are not mutually exclusive, and the boundary between them is the reason to
+record both. If the diff-and-classify machinery proves more fragile than the
+surface it saves — if telling a safe change from an unsafe one turns out to be a
+judgement Corium keeps getting wrong — the capability verbs are the fallback,
+because they never have to make that judgement: a verb that only adds an add-on
+cannot be tricked into changing a cluster.
+
+**A broad reconcile: re-apply the whole document, immutable fields included.**
+Rejected outright. This is the incoherence ADR 4 is built to prevent, dressed as a
+feature — a node whose role or cluster can be rewritten under a running kubelet is
+a node whose configuration and behaviour are two different facts, and no care in
+the apply path makes that safe.
+
+**A background reconcile loop that watches `config.yaml` and corrects drift.**
+Rejected because it is the fleet-management posture decision 11 declines, reached
+from the other direction. A node that steers itself toward a document is a node
+being managed, and it brings back the class of surprise — a change landing at
+3 a.m. because a file was edited — that "explicit, operator-triggered" exists to
+keep out. Corium re-applies when asked; it does not watch.
+
+**Status quo: `cctl reset` remains the only way to change anything.** Rejected as
+the general answer, because the proportion is wrong: the 409 sends an operator who
+wants a chart version bumped to a command that destroys their cluster to do it,
+and on a single node there is no gentler reading of `reset`. But it is kept, and
+kept correct, for the immutable fields: reset stays the *only* way to change what a
+node is, and this ADR narrows what "everything" meant, it does not open the door
+reset guards.

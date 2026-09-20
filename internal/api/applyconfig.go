@@ -63,15 +63,6 @@ func (s *Server) handleApplyConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Asked of the node itself rather than of the store, so that a node
-	// bootstrapped by a release that predates node.json is still recognised --
-	// the same signal cctl upgrade's health gate leans on.
-	if s.inspector.Collect(r.Context()).Bootstrapped {
-		writeError(w, http.StatusConflict, ErrAlreadyBootstrapped.Error())
-
-		return
-	}
-
 	cfg, err := config.Parse([]byte(request.Document))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("that document is not usable: %v", err))
@@ -85,6 +76,19 @@ func (s *Server) handleApplyConfig(w http.ResponseWriter, r *http.Request) {
 	// failure.
 	if err := cfg.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+
+		return
+	}
+
+	// Asked of the node itself rather than of the store, so that a node
+	// bootstrapped by a release that predates node.json is still recognised --
+	// the same signal cctl upgrade's health gate leans on.
+	//
+	// A bootstrapped node no longer refuses outright: it re-applies the safe
+	// subset of the document and refuses only the fields that define what it is.
+	// See ADR 8.
+	if s.inspector.Collect(r.Context()).Bootstrapped {
+		s.applyToRunningNode(w, r, cfg, []byte(request.Document))
 
 		return
 	}
@@ -107,6 +111,47 @@ func (s *Server) handleApplyConfig(w http.ResponseWriter, r *http.Request) {
 		"path":   s.configPath,
 		"role":   string(cfg.Role),
 		"api":    cfg.API.Mode() != config.APIModeDisabled,
+	})
+}
+
+// applyToRunningNode reconciles the safe subset of a document into a node that
+// has already bootstrapped, and turns the outcome into a response.
+//
+// A change the node cannot make day-two -- an identity, cluster or disk field,
+// or a node with nothing recorded to diff against -- is a 409: nothing is wrong
+// with the request, the node's state simply does not allow it without a reset,
+// which is the same answer this endpoint has always given here, now with the
+// reason and the field.
+func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg *config.Config, document []byte) {
+	result, err := s.reconcile(r.Context(), cfg, document)
+	if err != nil {
+		var immutable *immutableChangeError
+
+		switch {
+		case errors.As(err, &immutable), errors.Is(err, errNoBaseline):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+
+		return
+	}
+
+	// "reconciled" when something in the safe subset was re-applied, "unchanged"
+	// when the document matched what the node was already running: a second
+	// identical apply is a no-op, not an error.
+	status := "reconciled"
+	if len(result.changed) == 0 {
+		status = "unchanged"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     status,
+		"path":       s.configPath,
+		"role":       string(cfg.Role),
+		"api":        cfg.API.Mode() != config.APIModeDisabled,
+		"reconciled": result.changed,
+		"restarted":  result.restarted,
 	})
 }
 

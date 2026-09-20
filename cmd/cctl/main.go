@@ -906,21 +906,51 @@ func applyCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Applied to %s.\n\n", address)
-	fmt.Printf("  written to  %s\n", result.Path)
-	fmt.Printf("  role        %s\n\n", result.Role)
+	switch result.Status {
+	case "reconciled":
+		// The node had already bootstrapped and re-applied the safe subset in
+		// place. See ADR 8.
+		fmt.Printf("Reconciled %s.\n\n", address)
+		fmt.Printf("  written to  %s\n", result.Path)
+		fmt.Printf("  role        %s\n", result.Role)
 
-	if !result.API {
-		// Worth saying loudly. The document is the node's whole configuration,
-		// not a patch, so leaving api: out of it is how an operator takes away
-		// the only way they have of reaching the machine.
-		fmt.Print("Warning: that document does not ask for the management API, so this\n" +
-			"node will stop serving it once it has bootstrapped. You would then\n" +
-			"need console or SSH access to reach it.\n\n")
+		if len(result.Reconciled) > 0 {
+			fmt.Printf("  re-applied  %s\n", strings.Join(result.Reconciled, ", "))
+		}
+
+		if result.Restarted != "" {
+			fmt.Printf("  restarted   %s\n", result.Restarted)
+		}
+
+		fmt.Print("\nThe change is live now, not deferred to the next boot.\n")
+
+	case "unchanged":
+		// A second identical apply, or a document that matches what the node is
+		// already running: a no-op, said plainly rather than dressed as an
+		// action.
+		fmt.Printf("No change on %s.\n\n", address)
+		fmt.Printf("  role        %s\n\n", result.Role)
+		fmt.Print("The document matches what this node is already running.\n")
+
+	default:
+		// "applied": the node has not bootstrapped yet, so the document is what
+		// it will bootstrap with.
+		fmt.Printf("Applied to %s.\n\n", address)
+		fmt.Printf("  written to  %s\n", result.Path)
+		fmt.Printf("  role        %s\n\n", result.Role)
+
+		if !result.API {
+			// Worth saying loudly. The document is the node's whole
+			// configuration, not a patch, so leaving api: out of it is how an
+			// operator takes away the only way they have of reaching the machine.
+			fmt.Print("Warning: that document does not ask for the management API, so this\n" +
+				"node will stop serving it once it has bootstrapped. You would then\n" +
+				"need console or SSH access to reach it.\n\n")
+		}
+
+		fmt.Print("The node bootstraps with this the next time its bootstrap runs --\n" +
+			"now, if it was holding for one.\n")
 	}
-
-	fmt.Print("The node bootstraps with this the next time its bootstrap runs --\n" +
-		"now, if it was holding for one.\n")
 
 	return nil
 }

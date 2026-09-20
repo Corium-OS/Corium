@@ -179,6 +179,16 @@ type ConfigResult struct {
 	// bootstrapped with that document. A false here means the next boot takes
 	// the management API away.
 	API bool `json:"api"`
+
+	// Reconciled names the safe fields a day-two apply re-applied to a node that
+	// had already bootstrapped. Empty on a pre-bootstrap apply, and on a day-two
+	// apply whose document matched what the node was already running.
+	Reconciled []string `json:"reconciled,omitempty"`
+
+	// Restarted is the unit the node bounced to pick a reconciled change up, if
+	// any. A control-plane restart is brief but real, so it is reported rather
+	// than done silently.
+	Restarted string `json:"restarted,omitempty"`
 }
 
 // ApplyConfig sends a node the corium: document it should bootstrap with.
