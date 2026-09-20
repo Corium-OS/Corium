@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
+	"github.com/Corium-OS/Corium/internal/systemd"
 )
 
 // aDocument is the smallest configuration a node will accept.
@@ -41,9 +43,11 @@ func nodeThatHasBootstrapped(t *testing.T, server *Server) {
 	server.inspector = &nodeinfo.Inspector{Root: root}
 }
 
-// configurable starts a claimed node whose applied configuration lands
-// somewhere a test may look at it.
-func configurable(t *testing.T, ca *authority, bootstrapped bool) (string, *Store, string) {
+// configurableServer builds a claimed node whose configuration paths land in a
+// test's own directories, without serving it yet -- so a test can seed a
+// baseline or stub systemd before the first request. configPath and appliedPath
+// are returned for exactly that.
+func configurableServer(t *testing.T, ca *authority, bootstrapped bool) (*Server, *Store, string, string) {
 	t.Helper()
 
 	store := newTestStore(t)
@@ -61,8 +65,15 @@ func configurable(t *testing.T, ca *authority, bootstrapped bool) (string, *Stor
 		t.Fatalf("NewServer() error = %v", err)
 	}
 
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	server.configPath = path
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	appliedPath := filepath.Join(dir, "applied.yaml")
+
+	// Pointed at the test's own paths, never the real /etc or /var, so a run
+	// neither reads the machine's configuration nor writes over it.
+	server.configPath = configPath
+	server.appliedPath = appliedPath
+	server.k0sConfigPath = filepath.Join(dir, "k0s.yaml")
 
 	if bootstrapped {
 		nodeThatHasBootstrapped(t, server)
@@ -70,7 +81,17 @@ func configurable(t *testing.T, ca *authority, bootstrapped bool) (string, *Stor
 		nodeThatHasNotBootstrapped(t, server)
 	}
 
-	return serveOn(t, server), store, path
+	return server, store, configPath, appliedPath
+}
+
+// configurable starts a claimed node whose applied configuration lands
+// somewhere a test may look at it.
+func configurable(t *testing.T, ca *authority, bootstrapped bool) (string, *Store, string) {
+	t.Helper()
+
+	server, store, configPath, _ := configurableServer(t, ca, bootstrapped)
+
+	return serveOn(t, server), store, configPath
 }
 
 func configBody(t *testing.T, document string) string {
@@ -121,10 +142,10 @@ func TestApplyWritesTheDocumentBeforeBootstrap(t *testing.T) {
 	}
 }
 
-func TestApplyIsRefusedOnceTheNodeHasBootstrapped(t *testing.T) {
-	// The rule the whole endpoint rests on. A node whose role or cluster can be
-	// rewritten under a running Kubernetes is a node whose configuration and
-	// behaviour are two different facts.
+func TestApplyIsRefusedWithoutARecordedBaseline(t *testing.T) {
+	// A bootstrapped node with nothing recorded to diff against cannot tell a
+	// safe change from an unsafe one, so it refuses rather than guessing -- and
+	// says the same thing it always did: reset.
 	ca := newAuthority(t)
 	address, store, path := configurable(t, ca, true)
 
@@ -141,6 +162,140 @@ func TestApplyIsRefusedOnceTheNodeHasBootstrapped(t *testing.T) {
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("a refused apply wrote the document anyway")
+	}
+}
+
+func TestApplyRefusesAnImmutableChangeOnARunningNode(t *testing.T) {
+	// The rule the whole endpoint rests on. A node whose role, cluster or name
+	// can be rewritten under a running Kubernetes is a node whose configuration
+	// and behaviour are two different facts. The refusal names the field.
+	ca := newAuthority(t)
+	server, store, configPath, appliedPath := configurableServer(t, ca, true)
+
+	// The node is running a single-node cluster; the operator tries to rename it.
+	if err := os.WriteFile(appliedPath, []byte("role: single\n"), 0o600); err != nil {
+		t.Fatalf("seeding the baseline: %v", err)
+	}
+
+	address := serveOn(t, server)
+	admin := client(t, store, ca.issue(t, RoleAdmin))
+
+	status, body := postRaw(t, admin, "https://"+address+"/v1/config",
+		configBody(t, "corium:\n  role: single\n  node:\n    name: renamed\n"))
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%v)", status, body)
+	}
+
+	message, _ := body["error"].(string)
+	if !strings.Contains(message, "node") || !strings.Contains(message, "cctl reset") {
+		t.Errorf("error = %q, want it to name the field and point at cctl reset", message)
+	}
+
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Error("a refused apply wrote the document anyway")
+	}
+}
+
+func TestApplyReconcilesAddonsOnARunningNode(t *testing.T) {
+	// The safe subset: an operator adds a chart to a node already in service,
+	// and the node re-renders k0s and cycles the control plane to pick it up,
+	// rather than sending them to reset. See ADR 8.
+	ca := newAuthority(t)
+	server, store, configPath, appliedPath := configurableServer(t, ca, true)
+
+	if err := os.WriteFile(appliedPath, []byte("role: single\n"), 0o600); err != nil {
+		t.Fatalf("seeding the baseline: %v", err)
+	}
+
+	var restarted string
+	server.Supervise(&systemd.Manager{
+		Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "restart" {
+				restarted = args[1]
+			}
+
+			return nil, nil
+		},
+	})
+
+	address := serveOn(t, server)
+	admin := client(t, store, ca.issue(t, RoleAdmin))
+
+	document := "corium:\n" +
+		"  role: single\n" +
+		"  addons:\n" +
+		"    - name: cert-manager\n" +
+		"      chart: jetstack/cert-manager\n" +
+		"      namespace: cert-manager\n" +
+		"      repository: {name: jetstack, url: 'https://charts.jetstack.io'}\n"
+
+	status, body := postRaw(t, admin, "https://"+address+"/v1/config", configBody(t, document))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%v)", status, body)
+	}
+
+	if got, _ := body["status"].(string); got != "reconciled" {
+		t.Errorf("status = %q, want reconciled", got)
+	}
+
+	if restarted != "k0scontroller.service" {
+		t.Errorf("restarted %q, want k0scontroller.service", restarted)
+	}
+
+	rendered, err := os.ReadFile(server.k0sConfigPath)
+	if err != nil {
+		t.Fatalf("the reconcile did not write a k0s configuration: %v", err)
+	}
+
+	if !strings.Contains(string(rendered), "cert-manager") {
+		t.Errorf("k0s.yaml does not carry the new chart:\n%s", rendered)
+	}
+
+	written, err := os.ReadFile(configPath)
+	if err != nil || string(written) != document {
+		t.Errorf("the reconciled document was not recorded: %v\n%s", err, written)
+	}
+}
+
+func TestApplyOnARunningNodeIsANoOpWhenUnchanged(t *testing.T) {
+	// A document that matches what the node is running does nothing: no restart,
+	// no rewrite of the rendered k0s configuration.
+	ca := newAuthority(t)
+	server, store, _, appliedPath := configurableServer(t, ca, true)
+
+	if err := os.WriteFile(appliedPath, []byte("role: single\n"), 0o600); err != nil {
+		t.Fatalf("seeding the baseline: %v", err)
+	}
+
+	restarted := false
+	server.Supervise(&systemd.Manager{
+		Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if len(args) >= 1 && args[0] == "restart" {
+				restarted = true
+			}
+
+			return nil, nil
+		},
+	})
+
+	address := serveOn(t, server)
+	admin := client(t, store, ca.issue(t, RoleAdmin))
+
+	status, body := postRaw(t, admin, "https://"+address+"/v1/config", configBody(t, aDocument))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%v)", status, body)
+	}
+
+	if got, _ := body["status"].(string); got != "unchanged" {
+		t.Errorf("status = %q, want unchanged", got)
+	}
+
+	if restarted {
+		t.Error("an unchanged apply restarted the control plane")
+	}
+
+	if _, err := os.Stat(server.k0sConfigPath); !os.IsNotExist(err) {
+		t.Error("an unchanged apply rewrote the k0s configuration")
 	}
 }
 

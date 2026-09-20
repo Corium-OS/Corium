@@ -27,6 +27,16 @@ import (
 // node whose cloud-config has been edited since, only one of those is true.
 const StateFile = "/var/lib/corium/node.json"
 
+// AppliedConfigFile records the configuration document a node last applied:
+// what it was bootstrapped with, updated by each day-two apply that succeeds.
+//
+// It is the baseline a day-two `cctl apply` diffs against, kept separate from
+// /etc/corium/config.yaml for the same reason StateFile is kept separate from
+// the cloud-config: the file in /etc says what somebody wrote, and this says
+// what the node actually acted on. On a node where the two disagree, only this
+// one is a safe thing to reason a change from. See ADR 8.
+const AppliedConfigFile = "/var/lib/corium/applied.yaml"
+
 // MarkerFile is what corium-agent has written on a successful bootstrap since
 // before StateFile existed.
 //
