@@ -86,13 +86,23 @@ FROM ${BASE}
 
 # The compiled RPMs, installed and then removed: the module lands under
 # /usr/lib/modules/<kver>/extra, part of the read-only image and replaced
-# wholesale on upgrade alongside the kernel it matches. The kmod %post runs
-# depmod, so the module is resolvable at boot.
+# wholesale on upgrade alongside the kernel it matches.
 COPY --from=zfs-builder /rpms /tmp/zfs-rpms
 COPY files/usr /usr
 
+# Install the kmod and userspace, then run depmod explicitly.
+#
+# The kmod %post already runs depmod, but its result did not survive into the
+# shipped image: modules.dep carried no extra/zfs entry, so on the node
+# `modprobe zfs` failed with "Module zfs not found" while zfs.ko sat right there
+# under extra/zfs/, and the pool never imported. Running depmod as the final
+# thing in this layer regenerates modules.dep against the installed module and
+# commits it into the image, so the module is resolvable by name at boot.
+# kver is the image's own kernel, the one the module was built for.
 RUN set -eu; \
 	dnf install -y --setopt=install_weak_deps=False /tmp/zfs-rpms/*.rpm; \
+	kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel | tail -1)"; \
+	depmod "${kver}"; \
 	rm -rf /tmp/zfs-rpms /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
 
 # Import by scanning the attached disks rather than from a cached device list:

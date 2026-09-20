@@ -325,16 +325,21 @@ jobs:
         run: |
           # The module cannot be loaded here -- a CI runner is not running this
           # image's kernel -- so `zfs version`, which auto-loads the kmod, would
-          # fail with "the ZFS modules cannot be auto-loaded". Check the parts are
-          # baked in instead, without touching the kernel: the userspace tools and
-          # the compiled module for the image's own kernel. The kmod RPM installs
-          # it under extra/zfs/, so find it rather than guessing the exact path.
+          # fail with "the ZFS modules cannot be auto-loaded". Verify the parts
+          # are baked in without touching the kernel: the userspace tools, and
+          # that modprobe can *resolve* zfs for the image's own kernel.
+          #
+          # modprobe -S <kver> --show-depends reads that kernel's modules.dep and
+          # prints the insmod chain (or fails) without loading anything. It is a
+          # stronger check than finding zfs.ko on disk: a 0.3.2 image shipped the
+          # .ko but no modules.dep entry, so the file was present yet `modprobe
+          # zfs` failed on the node and the pool never imported. This catches that.
           podman run --rm localhost/corium-zfs:ci sh -c '
             set -eu
             command -v zpool
             command -v zfs
-            found="$(find /usr/lib/modules -name "zfs.ko*" -print -quit)"
-            test -n "$found" && echo "kmod: $found"
+            kver="$(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}" kernel | tail -1)"
+            modprobe -S "$kver" --show-depends zfs
           '
           # It is still a bootable Corium image with the same k0s underneath.
           podman run --rm localhost/corium-zfs:ci k0s version
