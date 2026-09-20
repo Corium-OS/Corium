@@ -17,10 +17,12 @@
 ARG BASE=ghcr.io/corium-os/corium:latest
 
 # The OpenZFS release to build. Override it to match the base image's kernel:
-# a release only supports kernels up to the one current when it shipped, and
-# Fedora's kernel moves faster than OpenZFS. If the build fails in configure
-# with a message about an unsupported kernel, this is the knob.
-ARG ZFS_VERSION=2.3.4
+# a release only supports kernels up to the one current when it shipped (see the
+# Linux-Maximum field in the release's META file), and Fedora's kernel moves
+# faster than OpenZFS. If the build fails in configure with a message about an
+# unsupported kernel, this is the knob. The default tracks the newest kernel the
+# current base image ships; bump it whenever that kernel outgrows this release.
+ARG ZFS_VERSION=2.3.9
 
 # ---------------------------------------------------------------------------
 # Stage 1 -- compile OpenZFS into kmod and userspace RPMs.
@@ -43,6 +45,7 @@ RUN set -eu; \
 		"kernel-devel-${kver}" \
 		gcc make autoconf automake libtool rpm-build \
 		libblkid-devel libuuid-devel libudev-devel openssl-devel \
+		libtirpc-devel \
 		zlib-ng-compat-devel libaio-devel libattr-devel elfutils-libelf-devel \
 		libffi-devel libcurl-devel ncompress \
 		python3 python3-devel python3-setuptools python3-cffi \
