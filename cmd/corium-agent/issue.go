@@ -33,6 +33,7 @@ const (
 // when they cannot reach the node any other way.
 func issueCommand(ctx context.Context, _ []string) error {
 	node := (&nodeinfo.Inspector{}).Collect(ctx)
+	banner := issue.Render(node)
 
 	// A shared drop-in directory: 0755 and the public convention /etc/issue.d
 	// sets. Unlike the pairing code, the banner holds a role and a cluster name
@@ -42,7 +43,20 @@ func issueCommand(ctx context.Context, _ []string) error {
 	}
 
 	path := filepath.Join(issueDir, issueName)
-	if err := os.WriteFile(path, []byte(issue.Render(node)), 0o644); err != nil { //nolint:gosec // G306: a login banner is not a secret
+
+	// Do nothing unless the banner actually changed. agetty --reload reprints
+	// the whole issue and login prompt rather than redrawing them in place, so
+	// reloading on every timer tick marches a fresh copy down the screen each
+	// time it fires. Gating on a real change means the console reprints only
+	// when the node's state does -- k0s coming up, greenboot passing, an image
+	// staged -- and then falls quiet. It is also why the banner carries no
+	// uptime: a field that ticks every render would defeat this and never let
+	// the console settle.
+	if current, err := os.ReadFile(path); err == nil && string(current) == banner { //nolint:gosec // G304: path is issueDir/issueName, both constants
+		return nil
+	}
+
+	if err := os.WriteFile(path, []byte(banner), 0o644); err != nil { //nolint:gosec // G306: a login banner is not a secret
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
