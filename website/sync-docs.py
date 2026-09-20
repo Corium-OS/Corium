@@ -34,12 +34,18 @@ PAGES = [
     ("quickstart.md", "guides", "quickstart", "Quick start", 110,
      "From a published image to a working Kubernetes node in four steps, with "
      "the mistakes that cost the most time."),
+    ("install/choosing.md", "install", "choosing", "Which install guide", 299,
+     "Pick the install path that matches your target, what every guide assumes, "
+     "and which artefact you need."),
     ("install/downloads.md", "install", "downloads", "Downloads", 300,
      "Where the installer ISO, the qcow2 and the image are published, why "
      "nothing is attached to the release, and how to check what you got."),
     ("upgrades.md", "guides", "upgrades", "Upgrades", 120,
      "How a Corium node moves to a new image, how to roll one back, and how to "
      "upgrade a cluster without losing quorum."),
+    ("troubleshooting.md", "guides", "troubleshooting", "Troubleshooting", 145,
+     "Failures indexed by what you observe rather than by what causes them, "
+     "across every install path, with what to check first."),
     ("cilium.md", "guides", "cilium", "Cilium", 125,
      "Replacing kube-router with Cilium from the node's own cloud-config: "
      "what k0s stops doing, what installs the chart, and the kube-proxy-free "
@@ -52,15 +58,19 @@ PAGES = [
      "where things have to live, how to sign it so nodes accept it, and the "
      "mistakes that only show up after an upgrade."),
     ("wireguard-overlay.md", "guides", "wireguard-overlay", "WireGuard overlay", 140,
-     "Joining hosts across sites or providers over an encrypted overlay from "
-     "cloud-init: the escape-hatch recipe, why the tools have to be in the "
-     "image, and the three things it cannot do."),
+     "Joining hosts across sites or providers over an encrypted overlay with "
+     "the wireguard: field: keys, peers, and making the overlay the address "
+     "the kubelet registers."),
     ("comparison.md", "reference", "comparison", "Comparison", 201,
      "How Corium compares to Talos, Kairos, Flatcar, Bottlerocket and running "
      "k0s on an ordinary distribution -- and when not to use it."),
     ("features.md", "reference", "feature-support", "Feature support", 205,
      "What Corium models, what it passes through to k0s, and what it "
      "deliberately does not do."),
+    ("examples.md", "reference", "examples", "Examples", 208,
+     "Annotated cloud-config documents for the common shapes a node takes: "
+     "single node, worker, HA control plane, RAID, overlay and the escape "
+     "hatches."),
     ("reference.md", "reference", "configuration", "Configuration", 210,
      "Every field of the corium: schema, where the configuration comes from, "
      "and what Corium does with it."),
@@ -80,34 +90,39 @@ PAGES = [
      "Installing onto a dedicated server from a provider's rescue system: "
      "bootc install to-disk, the qcow2 fallback when the rescue runs from a "
      "ramfs, and the OVH specifics."),
-    ("adr/0001-base-image.md", "reference", "adr-0001-base-image",
+    ("install/stretched-cluster-wireguard.md", "install",
+     "stretched-cluster-wireguard", "Stretched cluster", 305,
+     "A cluster split across two locations with its inter-node pod traffic "
+     "encrypted by Calico WireGuard: why not Kilo, the MTU that bites, and a "
+     "tcpdump proof that nothing crosses the wire in the clear."),
+    ("adr/0001-base-image.md", "decisions", "adr-0001-base-image",
      "ADR 1 — Base image", 910,
      "Why the operating system is based on fedora-bootc rather than Fedora "
      "CoreOS, and what that trades away."),
-    ("adr/0002-root-filesystem.md", "reference", "adr-0002-root-filesystem",
+    ("adr/0002-root-filesystem.md", "decisions", "adr-0002-root-filesystem",
      "ADR 2 — Root filesystem", 920,
      "Why the root filesystem is ext4 rather than xfs, and why the reason is "
      "about who can build the image."),
-    ("adr/0003-software-raid-scope.md", "reference", "adr-0003-software-raid-scope",
+    ("adr/0003-software-raid-scope.md", "decisions", "adr-0003-software-raid-scope",
      "ADR 3 — Software RAID scope", 930,
      "Why software RAID covers a node's spare disks and not its root "
      "filesystem, and what upstream would have to change."),
-    ("adr/0004-management-api.md", "reference", "adr-0004-management-api",
+    ("adr/0004-management-api.md", "decisions", "adr-0004-management-api",
      "ADR 4 — Management API", 940,
      "What a node-local management API is allowed to do, why there is no exec, "
      "and the three ways an operator CA reaches a node — including a "
      "maintenance mode that puts nothing in cloud-init."),
-    ("adr/0005-ssh-access-over-the-api.md", "reference", "adr-0005-ssh-access-over-the-api",
+    ("adr/0005-ssh-access-over-the-api.md", "decisions", "adr-0005-ssh-access-over-the-api",
      "ADR 5 — SSH access over the API", 950,
      "Why the management API can add, list and revoke SSH keys for a user that "
      "already exists, how it stays out of cloud-init's authority over accounts, "
      "and why it is admin-only."),
-    ("adr/0006-host-wireguard-overlay.md", "reference", "adr-0006-host-wireguard-overlay",
+    ("adr/0006-host-wireguard-overlay.md", "decisions", "adr-0006-host-wireguard-overlay",
      "ADR 6 — Host WireGuard overlay", 960,
      "Why a host WireGuard interface declared from the corium: block earns its "
-     "place over a cloud-init recipe, with the schema sketch and validation "
-     "rules it needs."),
-    ("adr/0008-day-two-reconcile.md", "reference", "adr-0008-day-two-reconcile",
+     "place over a cloud-init recipe, with the schema and validation rules it "
+     "needs."),
+    ("adr/0008-day-two-reconcile.md", "decisions", "adr-0008-day-two-reconcile",
      "ADR 8 — Day-two reconcile", 980,
      "Why cctl apply re-applies the safe subset of a running node's "
      "configuration -- the add-on set -- while refusing every field that "
@@ -180,6 +195,31 @@ def sync_logo() -> None:
         print("docs/assets/logo.png -> assets/favicon.png")
 
 
+def prune(generated: "set[pathlib.Path]") -> int:
+    """Delete generated pages this run did not produce.
+
+    Dropping a page from PAGES used to leave its rendered copy behind for ever,
+    still published and still in the sidebar. One such ghost survived long
+    enough to collide with another page's weight, so the sync now owns the
+    whole tree: anything under TARGET that is not a section index and was not
+    just written is stale by definition.
+    """
+    if not TARGET.is_dir():
+        return 0
+
+    removed = 0
+
+    for path in sorted(TARGET.rglob("*.md")):
+        if path.name == "_index.md" or path in generated:
+            continue
+
+        path.unlink()
+        print(f"removed stale {path.relative_to(TARGET.parent.parent)}")
+        removed += 1
+
+    return removed
+
+
 def main() -> int:
     if not SOURCE.is_dir():
         print(f"no docs directory at {SOURCE}", file=sys.stderr)
@@ -188,6 +228,7 @@ def main() -> int:
     sync_logo()
 
     written = 0
+    generated: set[pathlib.Path] = set()
 
     for source, section, slug, title, weight, description in PAGES:
         path = SOURCE / source
@@ -215,9 +256,12 @@ def main() -> int:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(front_matter + body, encoding="utf-8")
         print(f"{source} -> content/docs/{section}/{slug}.md")
+        generated.add(destination)
         written += 1
 
-    print(f"{written} pages generated")
+    removed = prune(generated)
+
+    print(f"{written} pages generated, {removed} stale pages removed")
     return 0
 
 

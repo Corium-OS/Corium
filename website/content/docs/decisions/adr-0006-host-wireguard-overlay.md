@@ -1,6 +1,6 @@
 ---
 title: "ADR 6 — Host WireGuard overlay"
-description: "Why a host WireGuard interface declared from the corium: block earns its place over a cloud-init recipe, with the schema sketch and validation rules it needs."
+description: "Why a host WireGuard interface declared from the corium: block earns its place over a cloud-init recipe, with the schema and validation rules it needs."
 slug: "adr-0006-host-wireguard-overlay"
 draft: false
 weight: 960

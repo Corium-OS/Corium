@@ -14,15 +14,61 @@ when you ask for one. It is the usual way onto a dedicated server that has no
 remote console worth using, and it is enough to install Corium: the image
 installs itself, and the rescue only has to run it.
 
-There are two routes below. The first is the one to try, and it is three
-commands. The second exists because some rescue systems cannot run a container
-at all, and OVH's is one of them.
+There are two routes below, and the rescue system decides which one you get,
+not you. Route A is three commands. Route B exists because some rescue systems
+cannot run a container at all, and OVH's is one of them.
 
-## 1. Install with podman
+## Before you start
+
+- The machine booted into its rescue system from the provider's panel, and a
+  shell on it.
+- The target disk identified. Both routes overwrite one whole disk.
+- A public SSH key, and the configuration you want the node to have. A
+  dedicated server has no metadata service, so both routes seed those by hand.
+- For route B, the Corium qcow2 on the rescue system, and `qemu-img`, `sgdisk`,
+  `growpart`, `resize2fs` and `setfattr` available there. See
+  [downloads](/docs/install/downloads/) for the qcow2 and how to check what you got.
+
+## Which route
+
+One command decides it:
+
+```bash
+findmnt -n /
+```
+
+`rootfs rootfs` means the rescue runs entirely from a ramfs, and route A cannot
+work there. No podman flag works around it: `pivot_root` is refused when the
+current root is the initial rootfs, so every container fails with
+
+```
+Error: OCI runtime error: crun: pivot_root: Invalid argument
+```
+
+Take route B in that case. A real filesystem — `tmpfs`, `ext4`, `overlay` —
+means containers will run, so take route A, and any failure you hit there is
+something else.
+
+OVH's rescue is ramfs, which makes the case this page is most often read for a
+route B case.
+
+## Route A — install with podman
 
 `bootc install to-disk` runs from inside the Corium image and writes a complete
 disk: partition table, ESP, bootloader, and the ostree deployment. Nothing has
 to be converted or resized afterwards.
+
+### 1. Write the disk
+
+> **Warning.** `--wipe` destroys everything on the target disk, and it is not
+> recoverable. Confirm which disk you mean first: a rescue system numbers disks
+> in its own order and not necessarily the one the installed system will use,
+> and a machine delivered with several disks usually has the OS on the small
+> NVMe and the data on the large ones.
+
+```bash
+lsblk -o NAME,SIZE,TYPE,MODEL
+```
 
 ```bash
 podman run --rm --privileged --pid=host \
@@ -32,22 +78,17 @@ podman run --rm --privileged --pid=host \
   bootc install to-disk --wipe /dev/nvme0n1
 ```
 
-`--wipe` destroys everything on the target. Check `lsblk` first; a rescue
-system numbers disks in its own order and not necessarily the one the installed
-system will use.
+### 2. Seed a configuration and a user
 
-Then disable rescue mode in your provider's panel and reboot.
+Do this before the reboot. A dedicated server has no metadata service and no
+seed device, so cloud-init finds nothing and the node comes up unconfigured —
+`no corium configuration found, leaving node unconfigured` in the agent's
+journal. Worse, **the login user is created by cloud-init too**, so a node that
+boots without configuration has no account to SSH into. Corium ships no root
+account, and its sshd drop-in sets `PermitRootLogin no`.
 
-### Configuration, when there is no cloud-init datasource
-
-A dedicated server has no metadata service and no seed device, so cloud-init
-finds nothing and the node comes up unconfigured — `no corium configuration
-found, leaving node unconfigured` in the agent's journal. Worse, **the login
-user is created by cloud-init too**, so a node that boots without configuration
-has no account to SSH into. Corium ships no root account, and its sshd drop-in
-sets `PermitRootLogin no`.
-
-The cheapest fix is a kernel argument, which `bootc install` will write for you:
+The cheapest fix is a kernel argument, which `bootc install` will write for
+you — so it goes into step 1 rather than after it:
 
 ```bash
   bootc install to-disk --wipe \
@@ -58,32 +99,33 @@ The cheapest fix is a kernel argument, which `bootc install` will write for you:
 That covers Corium's own configuration but not the user. To get both, drop a
 NoCloud seed onto the installed system instead — cloud-init looks for one in
 `/var/lib/cloud/seed/nocloud` before it gives up, and `ds-identify` finds it
-without any extra configuration. That is the route the OVH section below
-takes, because there it is needed anyway.
+without any extra configuration.
+[Route B writes one](#2-write-the-nocloud-seed), SELinux labels and all; mount
+the root filesystem `bootc install` created and do the same there.
 
-## 2. When the rescue cannot run a container
+### 3. Reboot out of rescue
 
-Some rescue systems run entirely from a ramfs. That breaks containers in a way
-no podman flag works around: `pivot_root` is refused when the current root is
-the initial rootfs, so every container fails with
+Disable rescue mode in your provider's panel and reboot. Leaving rescue enabled
+boots the rescue again, and the installed system never runs.
 
-```
-Error: OCI runtime error: crun: pivot_root: Invalid argument
-```
-
-Check before assuming anything else is at fault:
-
-```bash
-findmnt -n /
-```
-
-`rootfs rootfs` means ramfs and means route 1 is out. A real filesystem —
-`tmpfs`, `ext4`, `overlay` — means containers will run, and any failure you
-hit is something else.
+## Route B — when the rescue cannot run a container
 
 The way through is the published qcow2, which is the same installed system
 `bootc install` would have produced, laid out for a 10 GiB disk. Write it, then
 grow the root partition to the disk you actually have.
+
+### 1. Write the qcow2 and grow the root
+
+> **Warning.** `qemu-img convert` writes straight to the raw device: it
+> destroys everything on the target disk, and it is not recoverable. Confirm
+> which disk you mean first: a rescue system numbers disks in its own order and
+> not necessarily the one the installed system will use, and a machine
+> delivered with several disks usually has the OS on the small NVMe and the
+> data on the large ones.
+
+```bash
+lsblk -o NAME,SIZE,TYPE,MODEL
+```
 
 ```bash
 apt-get install -y qemu-utils        # or the distribution's equivalent
@@ -101,13 +143,11 @@ Partition 4 is the root filesystem; `lsblk -o NAME,SIZE,FSTYPE,LABEL` confirms
 it by its `root` label. The resize preserves the filesystem UUID, so the
 bootloader entries written into the image keep pointing at the right place.
 
-See [downloads](/docs/install/downloads/) for where the qcow2 lives and how to check what
-you downloaded.
+### 2. Write the NoCloud seed
 
-### Seeding configuration and a user
-
-Mount the root filesystem and write a NoCloud seed into the deployment's
-`/var`, which in an ostree system lives at
+This is what gives the node a configuration and an account to log in with, and
+it has to be in place before the reboot. Mount the root filesystem and write
+the seed into the deployment's `/var`, which in an ostree system lives at
 `ostree/deploy/default/var`:
 
 ```bash
@@ -135,9 +175,18 @@ corium:
 EOF
 ```
 
-**SELinux is the trap here.** Corium runs enforcing, and files created from a
-rescue system that does not know about SELinux carry no label at all, which
-cloud-init is not allowed to read. Label them by hand:
+The extra groups are this page's only departure from the `users:` block the
+other install pages use — `adm` and `systemd-journal` so the account can read
+the journals on a machine you may have no other way into. See
+[Proxmox step 3](/docs/install/proxmox/#3-describe-the-node) for the plainer version.
+
+> **Warning.** SELinux is the trap here. Corium runs enforcing, and files
+> created from a rescue system that does not know about SELinux carry no label
+> at all, which cloud-init is not allowed to read. A node that boots with an
+> unlabelled seed behaves exactly like a node with no seed at all, which makes
+> this the failure most likely to cost an afternoon.
+
+Label them by hand:
 
 ```bash
 for p in ../seed . meta-data user-data; do
@@ -146,15 +195,19 @@ done
 ```
 
 `getfattr -n security.selinux --only-values user-data` should print
-`system_u:object_r:cloud_var_lib_t:s0`. A node that boots with an unlabelled
-seed behaves exactly like a node with no seed at all, which makes this the
-failure most likely to cost an afternoon.
+`system_u:object_r:cloud_var_lib_t:s0`.
+
+### 3. Leave rescue mode
+
+Unmount everything, **disable rescue mode in the provider's panel**, and
+reboot. Leaving rescue enabled boots the rescue again, and the installed system
+never runs.
 
 ---
 
 ## OVH dedicated servers
 
-OVH's rescue (`rescue12-customer`) runs from a ramfs, so route 2 is the one
+OVH's rescue (`rescue12-customer`) runs from a ramfs, so route B is the one
 that works. It also has no overlayfs and no `pids` cgroup controller, which
 produce their own errors first and send you looking in the wrong direction:
 
@@ -166,35 +219,20 @@ produce their own errors first and send you looking in the wrong direction:
 
 Those first two are worth chasing only far enough to reach the third.
 
-### Before you start
-
-Boot the server into rescue mode from the OVH panel, then check what you are
-working with:
-
-```bash
-lsblk                                      # which disk, and what is already on it
-[ -d /sys/firmware/efi ] && echo UEFI      # recent hardware is UEFI
-findmnt -n /                               # rootfs rootfs — confirms route 2
-```
-
-A server delivered with several disks usually has the OS on the small NVMe and
-data on the large ones. Installing onto the wrong one is not recoverable, and
-`lsblk` before `--wipe` is the only thing standing in the way.
-
-### After writing the image
+### The UEFI boot entry
 
 The qcow2 carries both the removable path `EFI/BOOT/BOOTX64.EFI` and
 `EFI/fedora/shimx64.efi`, so a UEFI firmware finds a bootloader without help.
-Adding an explicit entry costs nothing and removes the question:
+Adding an explicit entry costs nothing and removes the question. Do it after
+route B's step 1 and before you leave rescue mode:
 
 ```bash
 apt-get install -y efibootmgr
 efibootmgr -c -d /dev/nvme0n1 -p 2 -L "Corium" -l '\EFI\fedora\shimx64.efi'
 ```
 
-Then unmount everything, **disable rescue mode in the OVH panel**, and reboot.
-Leaving rescue enabled boots the rescue again, and the installed system never
-runs.
+Recent hardware is UEFI, and `[ -d /sys/firmware/efi ] && echo UEFI` from the
+rescue says so for the machine in front of you.
 
 ### Networking
 

@@ -625,3 +625,55 @@ node-local, four surfaces, no exec, mTLS anchored in an operator CA, three ways
 for that CA to arrive of which one requires nothing in cloud-init at all — and
 the rule that holds the last of them together, that a node nobody has claimed
 is a node in no cluster.
+
+## Implementation notes: confinement
+
+Recorded here rather than in the configuration reference, which specifies the
+schema and not the daemon's hardening. These are findings from a real node, not
+intentions.
+
+`corium-apid` runs as `unconfined_service_t`, like `corium-agent` and every
+other service on the image. There is no confined domain for it, and no policy
+module ships.
+
+A types-only module was tried and withdrawn. `semodule` writes the whole policy
+store into `/var/lib/selinux`, and `/var` on a bootc image is seeded at install
+and never updated afterwards — so the module would never reach a node that
+upgraded into it, and `bootc container lint` refuses the image for putting 1279
+files in `/var`. The same build passed in CI and failed on a real host, which is
+worth knowing before trusting either.
+
+What the unit enforces was checked on a node rather than reasoned about.
+`ProtectSystem=strict` had to go: it mounts everything read-only including
+`/run`, and bootc writes `/run/bootc/storage` while staging an image.
+`RestrictAddressFamilies` had to gain `AF_NETLINK`, which `k0s reset` needs to
+clean up a node's links. Everything else — `NoNewPrivileges`, `ProtectHome`,
+`PrivateTmp`, `RestrictNamespaces`, `MemoryDenyWriteExecute`, `LockPersonality`
+— survived a real `bootc switch` and a real `k0s reset`.
+
+What the daemon touches, which is what a confined domain has to allow:
+
+| Access | What for |
+|---|---|
+| bind `7443/tcp` | the listener |
+| read/write `/var/lib/corium/api/**` | the operator CA, the serving key, the claim record |
+| read/remove `/var/lib/corium/{bootstrapped,node.json,cordoned-by-corium}` | reporting the node's role, and resetting it |
+| write `/var/lib/corium/cordoned-by-corium` | cordon |
+| read `/etc/machine-id`, `/etc/os-release`, `/proc/uptime`, `/proc/sys/kernel/osrelease` | `cctl status` |
+| read `/etc/containers/policy.json` | refusing an image the node would take unsigned |
+| read `/var/lib/cloud/**` | finding the `corium:` block on first start |
+| write `/dev/console` | the pairing code, for somebody who cannot log in yet |
+| execute `bootc`, `k0s`, `systemctl`, `journalctl` | every surface |
+
+Writing the domain wants a machine, not a desk. Boot a node, put it in
+permissive mode, exercise every command, and build the module from what was
+actually denied:
+
+```console
+$ sudo semanage permissive -a corium_apid_t     # once the domain exists
+$ cctl status … && cctl logs … && cctl upgrade … && cctl reset …
+$ sudo ausearch -m AVC -ts recent | audit2allow -M corium-apid
+```
+
+Rules derived from real denials rather than guessed at is the difference between
+a policy that confines the daemon and one that stops it answering on a fleet.

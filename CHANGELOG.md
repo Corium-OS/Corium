@@ -57,6 +57,21 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   now ships in the image, present but inert until an interface is declared. See
   [ADR 6](docs/adr/0006-host-wireguard-overlay.md).
 
+### Fixed
+
+- **The WireGuard guide described the feature as unbuilt.** It opened by saying
+  Corium had no native field for a host interface and spent the page on a
+  cloud-init workaround, in the same tree that added `wireguard:`, documented
+  it in the reference and shipped an example using it. It now documents the
+  field, and keeps the cloud-init route as the escape hatch it is.
+- **Documentation pointed at 0.1.0.** The quick start and the install guides
+  told you to pull artefacts two releases old, and the quick start and
+  configuration reference both still said `cctl` had no published binary.
+- **Two copy-and-paste failures.** The HA guide shipped a join token through a
+  `$TOKEN` that nothing assigned, writing an empty file while the controllers
+  waited in silence; Downloads printed the `mise use` command with an unbalanced
+  quote, on the page that explains why the quotes matter.
+
 ## [0.2.0] - 2026-09-19
 
 ### Added

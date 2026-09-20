@@ -1,0 +1,153 @@
+# Troubleshooting
+
+Failures indexed by what you observe, not by what causes them. Each entry says
+what to check first and links to the page that covers it in full.
+
+## Read the journal first
+
+Almost every first-boot question is answered here:
+
+```bash
+journalctl -u corium-bootstrap
+```
+
+With the management API enabled, from your workstation instead:
+
+```bash
+cctl logs <node> --unit corium-bootstrap
+```
+
+The agent validates the whole configuration before changing anything and reports
+every problem at once, so one read usually shows the entire list.
+
+---
+
+## The node boots but no cluster appears
+
+**The journal says there is no Corium configuration.** The node found no
+configuration in any of the four sources, so it booted as an ordinary machine and
+said so. That is a supported outcome, not an error. Check that your platform
+delivered the user-data, and that a standalone document has no `corium:` wrapper.
+See [where configuration comes from](reference.md).
+
+**The node has no account to log into.** The login user is created by cloud-init.
+A node that boots without configuration has no user, and no password. Reprovision
+it with a configuration that declares one.
+
+**`cctl` says the node is not enrolled.** It is waiting to be claimed:
+`api.enabled: true` with no CA is maintenance mode, and such a node holds its
+bootstrap until somebody runs `cctl enroll` with the pairing code from its
+console. To have it come up on its own, give it `api.operatorCA` instead. See
+[cctl](cli.md).
+
+**Two nodes have the same name.** Corium derives a stable name from the machine
+ID. If you cloned a disk *after* its first boot, the machine ID came with it.
+Clear `/etc/machine-id` on the clone, or set `node.name` explicitly.
+
+---
+
+## The node is `NotReady` and stays there
+
+**You set `cni: custom`.** Expected: nothing has installed a network yet and the
+cluster is waiting for you. See [Cilium](cilium.md) for a worked example.
+
+**Otherwise**, check the CNI DaemonSet:
+
+```bash
+sudo k0s kubectl -n kube-system describe pod
+```
+
+---
+
+## Networking
+
+**Images will not pull, everything else works.** Almost always DNS. A static
+address configured through a hypervisor usually carries no resolver — Proxmox's
+`ipconfig0` has no field for one — so set a nameserver. The symptom misleads: the
+node pings, SSH works, the API answers, and Kubernetes hangs with
+`lookup quay.io: Try again`. See [Proxmox](install/proxmox.md).
+
+**A node is `Ready` but logs, exec and port-forward fail across an overlay.** The
+kubelet registered the physical NIC's address instead of the overlay's. Set
+`nodeAddress: true` on the overlay interface. It is settled at bootstrap, so the
+node needs reprovisioning. See [WireGuard overlay](wireguard-overlay.md).
+
+**Large payloads fail while small ones work.** An MTU problem, usually under an
+overlay. See [WireGuard overlay](wireguard-overlay.md).
+
+**A WireGuard peer never handshakes.** The endpoint is unreachable or the UDP port
+is closed. WireGuard answers nothing to a peer it cannot authenticate, so there is
+no error to read — only an absent handshake.
+
+---
+
+## Joining a cluster
+
+**Joining controllers wait forever.** Usually an empty or expired token. A
+controller token is a cluster-admin credential with a short expiry; check the
+file the joiner reads is not zero bytes. See [HA cluster](install/ha-cluster.md).
+
+**A node joined the wrong cluster.** A configuration source that fails for any
+reason other than being absent stops the search, precisely to prevent this — so
+this means a source answered with the wrong content rather than failing. Check
+the precedence order in the [configuration reference](reference.md).
+
+---
+
+## Installing
+
+**Installing from the ISO loops forever.** The boot order must be **disk first,
+ISO second**. An empty disk has no UEFI boot entry, so the firmware falls through
+to the ISO and installs; afterwards the disk has an entry and wins. With the ISO
+first, the node reinstalls itself on every reboot.
+
+**An interrupted install leaves nothing bootable.** Anaconda wipes the disk early.
+Do not stop the VM during an install.
+
+**`crun: pivot_root: Invalid argument` in a rescue system.** The rescue runs from
+a ramfs, so `bootc install to-disk` through podman cannot work. Write the qcow2
+to the disk instead. See [Rescue mode](install/rescue.md).
+
+**The machine does not survive losing its first disk.** A RAID root needs manual
+steps Anaconda will not do. See [Software RAID](raid.md).
+
+---
+
+## Upgrades and images
+
+**An upgrade is refused as unsigned.** `cctl upgrade` refuses an image the node's
+signing policy would accept unsigned. A registry you push to yourself falls under
+the policy's permissive default until you sign the image and say so. See
+[Building your own image](derived-images.md).
+
+**Nodes refuse every image you build.** A node enforces the policy it is currently
+running, not the one in the image it is moving to. Roll the policy out first, then
+the images that need it. See [Building your own image](derived-images.md).
+
+**A node came up broken and went back on its own.** That is greenboot doing its
+job. See [Upgrades](upgrades.md).
+
+**Content written to `/var` vanished after an upgrade.** `/var` is seeded once at
+install and never again. Declare state directories in `tmpfiles.d` instead. See
+[Concepts](concepts.md).
+
+**An edit in `/etc` stopped tracking the image.** OSTree three-way merges `/etc`:
+a file you have edited by hand keeps your version. That is the contract, not a
+bug. See [Concepts](concepts.md).
+
+---
+
+## Reading an API refusal
+
+`cctl` surfaces the node's HTTP status. [cctl](cli.md) maps each code to what to
+look at, and explains why a node signs its own certificate and what a fingerprint
+mismatch means.
+
+---
+
+## Still stuck
+
+- [Concepts](concepts.md) — the model underneath, if the behaviour seems arbitrary
+- [Feature support](features.md) — whether the thing you are attempting is in scope
+- [Changelog](https://github.com/Corium-OS/Corium/blob/main/CHANGELOG.md) — what
+  each release changed, and what is known to be broken

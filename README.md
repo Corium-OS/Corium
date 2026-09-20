@@ -54,7 +54,7 @@ corium:
 ```
 
 That is the whole interface for the common case. Everything else has a default, and every
-default is overridable. See [`docs/examples/`](docs/examples/) for the full surface,
+default is overridable. See [examples](docs/examples.md) for the full surface,
 including the escape hatches.
 
 ---
@@ -137,21 +137,39 @@ attached to the release itself, and how to check what you got.
 
 ## Documentation
 
-- [**Comparison**](docs/comparison.md) — Talos, Kairos, Flatcar, and when not to use Corium
+**Start here**
+
 - [**Concepts**](docs/concepts.md) — how it works and why it is shaped this way
-- [**Quick start**](docs/quickstart.md) — build an image, boot a node, get a cluster
+- [**Quick start**](docs/quickstart.md) — from a published image to a working node in four steps
+- [**Which install guide**](docs/install/choosing.md) — pick the path that matches your target
+- [**Troubleshooting**](docs/troubleshooting.md) — failures indexed by what you observe
+
+**Installing**
+
 - [**Downloads**](docs/install/downloads.md) — where the ISO and the qcow2 are published, and how to verify them
 - [**Proxmox**](docs/install/proxmox.md) — a node on a Proxmox host, start to finish
-- [**HA cluster**](docs/install/ha-cluster.md) — building a three-controller control plane by hand
 - [**OpenStack**](docs/install/openstack.md) — a node on an OpenStack cloud, UEFI image included
+- [**Rescue mode**](docs/install/rescue.md) — a dedicated server, installed from a provider's rescue system
+- [**HA cluster**](docs/install/ha-cluster.md) — building a three-controller control plane by hand
+- [**Stretched cluster**](docs/install/stretched-cluster-wireguard.md) — one cluster across two locations
+
+**Operating**
+
 - [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
-- [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
-- [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
-- [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
 - [**cctl**](docs/cli.md) — every command of the management CLI, what each role reaches, and how to read a refusal
+- [**Building your own image**](docs/derived-images.md) — deriving an image, signing it so nodes accept it
+- [**Cilium**](docs/cilium.md) — replacing kube-router, including the kube-proxy-free variant
+- [**Software RAID**](docs/raid.md) — mdadm arrays on a node's spare disks, and where a RAID root stands
+- [**WireGuard overlay**](docs/wireguard-overlay.md) — joining hosts across sites over an encrypted overlay
+
+**Reference**
+
+- [**Configuration reference**](docs/reference.md) — every field, and what Corium does with it
+- [**Examples**](docs/examples.md) — annotated documents for each common node shape
+- [**Feature support**](docs/features.md) — what is modelled, what passes through to k0s, what is out of scope
+- [**Comparison**](docs/comparison.md) — Talos, Kairos, Flatcar, and when not to use Corium
 - [**Changelog**](CHANGELOG.md) — what each release changed, and what is known to be broken
 - [`AGENTS.md`](AGENTS.md) — contributor and agent guidelines, architectural decisions
-- [`docs/examples/`](docs/examples/) — annotated configuration examples
 - [`docs/adr/`](docs/adr/) — architecture decision records
 
 ## Licence

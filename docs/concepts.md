@@ -106,7 +106,7 @@ field.
 
 Everything the schema does not model stays reachable through `k0s.patch`,
 applied verbatim. The rule the project holds itself to: **no k0s feature is
-unreachable, some simply have no shorter name.** See
+unreachable; some have no shorter name.** See
 [feature support](features.md).
 
 There *is* a management API, and it does not contradict that heading, because
@@ -141,3 +141,12 @@ that reconciles. Upgrading a cluster is a `cctl` loop over addresses you
 supplied, running on your machine — the sequencing lives with the operator
 rather than on any node. The reasoning for each is in
 [feature support](features.md#out-of-scope).
+
+---
+
+## Next
+
+- [Quick start](quickstart.md) — put this into practice on a real node
+- [Examples](examples.md) — a complete document for each common node shape
+- [Configuration reference](reference.md) — every field, and what Corium does with it
+- [Comparison](comparison.md) — how this model differs from Talos, Kairos and the rest

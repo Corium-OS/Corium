@@ -8,6 +8,22 @@ This page builds one by hand, because the interesting part is not the commands
 — it is why they happen in that order. There is a script at the end that does
 all of it on Proxmox, and it will make more sense once you have read this.
 
+## Before you start
+
+- Three machines on one broadcast domain, each booted from the Corium image
+  with one of the configurations below as its cloud-init user data — three VMs,
+  three cloud instances, or three physical machines. [Proxmox](proxmox.md) and
+  [OpenStack](openstack.md) each walk through creating one; the script at the
+  end of this page creates all three.
+- Five addresses on that segment: one per machine, and a spare for the virtual
+  IP. The four decisions in the next section are about those.
+- The Corium qcow2 or ISO for whichever platform you use — see
+  [downloads](downloads.md).
+- SSH to all three machines from wherever you run step 4, as the user in the
+  `users:` block.
+- `cctl`, for the last section only.
+  [Downloads](downloads.md#installing-cctl) installs it.
+
 ## The shape
 
 | | |
@@ -73,14 +89,13 @@ corium:
       - 192.168.0.203
   storage:
     type: etcd
-users:
-  - name: core
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: wheel
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - ssh-ed25519 AAAA... you@example.com
 ```
+
+Add the `users:` block from
+[Proxmox step 3](proxmox.md#3-describe-the-node) — it is the same one, and
+without it the machine boots with no account to SSH into.
+[`examples/ha-controller-first.yaml`](../examples/ha-controller-first.yaml) is
+the whole document in one commented file.
 
 `endpoint` is the virtual IP because it ends up in the API server's certificate.
 Point it at one controller's own address and the certificate stops matching the
@@ -99,33 +114,42 @@ The same file, plus a `join:` block, and `unicastPeers` listing the *other* two:
 
 `waitFor` is what lets them boot before the token exists. Without it a missing
 token is a hard failure and the node stops.
+[`examples/ha-controller-join.yaml`](../examples/ha-controller-join.yaml) shows
+the whole document.
 
-## 3. Start all three
+## 3. Create them and start all three
 
-Whatever your platform does — `qm start`, `openstack server create`, powering on
-hardware. Order does not matter. The first controller forms the cluster; the
-other two wait.
+Create each machine with its configuration as user data, then start it —
+`qm start`, `openstack server create`, powering on hardware. Order does not
+matter. The first controller forms the cluster; the other two wait.
 
 ## 4. Mint a token and deliver it
 
-Once the first controller is answering:
+> **Warning.** An unexpired controller token is a cluster-admin credential.
+> Whoever holds one can join a full control-plane member with read and write
+> access to etcd. Use a short expiry, and prefer a secret store over instance
+> metadata — `tokenFrom` also accepts a `url`, which is the better shape in
+> production.
+
+Once the first controller is answering, mint the token and keep it:
 
 ```bash
 ssh core@192.168.0.201 sudo k0s status          # wait for this to succeed
-ssh core@192.168.0.201 sudo k0s token create --role=controller --expiry=1h
+TOKEN=$(ssh core@192.168.0.201 sudo k0s token create --role=controller --expiry=1h)
 ```
 
-Write that token to `/etc/corium/join-token` on each of the other two, mode
+Then write it to `/etc/corium/join-token` on each of the other two, mode
 `0600`:
 
 ```bash
-ssh core@192.168.0.202 "sudo install -m600 /dev/stdin /etc/corium/join-token" <<< "$TOKEN"
+for ip in 192.168.0.202 192.168.0.203; do
+  ssh "core@${ip}" "sudo install -m600 /dev/stdin /etc/corium/join-token" <<< "$TOKEN"
+done
 ```
 
-**An unexpired controller token is a cluster-admin credential.** Whoever holds
-one can join a full control-plane member with read and write access to etcd.
-Use a short expiry, and prefer a secret store over instance metadata —
-`tokenFrom` also accepts a `url`, which is the better shape in production.
+Check `$TOKEN` is not empty before you ship it. An empty file is not an error
+to a waiting controller: it keeps waiting for the whole of `waitFor` and says
+nothing that points at the cause.
 
 Each waiting controller notices the file, joins, and k0s ships it the CA.
 
@@ -177,22 +201,24 @@ cluster carried on scheduling. Starting the controller again brought it back
 [`deploy/proxmox/create-ha-cluster.sh`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox)
 performs every step above: it writes the three configurations, generates a VRRP
 password at exactly eight characters, creates and starts the VMs, waits for the
-first controller, mints a token and delivers it to the other two.
+first controller, mints a token and delivers it to the other two. Get it onto
+the host the same way [Proxmox](proxmox.md#before-you-start) does, and run it
+from `deploy/proxmox/`.
+
+> **Warning.** Two things to know before you run it. `SSH_KEY` must be a key
+> **this Proxmox host** holds the private half of, because the script SSHes
+> from here to deliver the token — a key from your laptop fails at
+> `Permission denied` with three VMs already built. And unlike `create-vm.sh`,
+> it **destroys** any VM already holding one of those VMIDs.
 
 ```bash
-DISK_IMAGE=/var/lib/vz/template/corium-0.1.0-x86_64.qcow2 \
+DISK_IMAGE=/var/lib/vz/template/corium-0.2.0-x86_64.qcow2 \
 SSH_KEY="$(cat ~/.ssh/id_ed25519.pub)" \
 CLUSTER_NAME=homelab VIP=192.168.0.200 GATEWAY=192.168.0.1 \
 NODE_IPS="192.168.0.201 192.168.0.202 192.168.0.203" \
 VMIDS="142 143 144" \
   ./create-ha-cluster.sh
 ```
-
-Two things to know before you run it. `SSH_KEY` must be a key **this Proxmox
-host** holds the private half of, because the script SSHes from here to deliver
-the token — a key from your laptop fails at `Permission denied` with three VMs
-already built. And unlike `create-vm.sh`, it **destroys** any VM already holding
-one of those VMIDs.
 
 ## When you are done
 

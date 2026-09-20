@@ -6,21 +6,22 @@ Cloud; nothing below is specific to that provider beyond the network name.
 Corium boots UEFI only, so the image has to be registered as such. That is the
 one thing worth getting right before anything else.
 
-## What you need
+## Before you start
 
 - An OpenStack project and the `openstack` client.
 - A flavor whose disk is at least the image's virtual size — 10 GiB. The
   filesystem grows to the flavor's disk on first boot.
 - A network that gives the instance an address you can reach.
+- The Corium qcow2, downloaded and checked. [Downloads](downloads.md) has
+  where it lives and how to check what you got.
+- An SSH key pair. Step 2 registers the public half with the cloud, and step 3
+  puts the same key in the instance's configuration.
 
 ## 1. Register the image
 
-Download the qcow2 first — see [downloads](downloads.md) for where it lives and
-how to check it.
-
 ```bash
-openstack image create corium-0.1.0 \
-  --file corium-0.1.0-x86_64.qcow2 --disk-format qcow2 --container-format bare \
+openstack image create corium-0.2.0 \
+  --file corium-0.2.0-x86_64.qcow2 --disk-format qcow2 --container-format bare \
   --property hw_firmware_type=uefi \
   --property hw_machine_type=q35 \
   --property hw_disk_bus=virtio \
@@ -34,7 +35,7 @@ Glance can sometimes import straight from a URL, which saves uploading a
 gigabyte and a half from your laptop:
 
 ```bash
-openstack image create corium-0.1.0 --import \
+openstack image create corium-0.2.0 --import \
   --import-method web-download --uri https://<the URL from the release notes>
 ```
 
@@ -56,15 +57,8 @@ key.
 
 ## 3. Launch it
 
-```bash
-openstack server create corium \
-  --image corium-0.1.0 --flavor <a flavor with 4 GB or more> \
-  --key-name corium --security-group corium \
-  --network <your external network> \
-  --user-data corium.yaml --wait
-```
-
-with `corium.yaml`:
+The instance reads its configuration from the user data, so write that first.
+Save it as `corium.yaml` in the directory you run the next command from:
 
 ```yaml
 #cloud-config
@@ -72,22 +66,37 @@ corium:
   role: single
   cluster:
     name: homelab
-users:
-  - name: core
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: wheel
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - ssh-ed25519 AAAA... you@example.com
 ssh_pwauth: false
 ```
+
+Add the `users:` block from
+[Proxmox step 3](proxmox.md#3-describe-the-node), carrying the key you
+registered in step 2. It is the same block; OpenStack changes nothing about
+it. [`examples/single-node.yaml`](../examples/single-node.yaml) is a complete
+document if you would rather start from a file.
 
 **The `corium:` block arrives through the OpenStack metadata service**, not
 through a config drive. cloud-init reads it from `169.254.169.254`, and Corium
 picks it up from cloud-init like any other source. Nothing needs to be baked
 into the image.
 
+```bash
+openstack server create corium \
+  --image corium-0.2.0 --flavor <a flavor with 4 GB or more> \
+  --key-name corium --security-group corium \
+  --network <your external network> \
+  --user-data corium.yaml --wait
+```
+
 ## 4. Check it
+
+`--wait` returns once the instance is ACTIVE. Ask the cloud for its address,
+then log in as the user the configuration created:
+
+```bash
+openstack server show corium -f value -c addresses
+ssh core@<the address>
+```
 
 ```console
 $ sudo cloud-init query --format '{{ v1.platform }} / {{ v1.subplatform }}'
@@ -114,7 +123,7 @@ first boot, without being asked.
 
 ```bash
 openstack server delete corium --wait
-openstack image delete corium-0.1.0
+openstack image delete corium-0.2.0
 openstack security group delete corium
 openstack keypair delete corium
 ```
