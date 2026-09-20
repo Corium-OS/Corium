@@ -107,6 +107,11 @@ PAGES = [
      "Why a host WireGuard interface declared from the corium: block earns its "
      "place over a cloud-init recipe, with the schema sketch and validation "
      "rules it needs."),
+    ("adr/0008-day-two-reconcile.md", "reference", "adr-0008-day-two-reconcile",
+     "ADR 8 — Day-two reconcile", 980,
+     "Why cctl apply re-applies the safe subset of a running node's "
+     "configuration -- the add-on set -- while refusing every field that "
+     "defines what the node is, and why it stays explicit rather than a loop."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes

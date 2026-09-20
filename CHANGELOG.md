@@ -21,8 +21,8 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   and refuses only the fields that define what the node is (its role, cluster,
   name, network, disks and the like), naming the offending field when it does.
   An apply that matches what the node is already running is a no-op. Implements
-  the first cut of [ADR 8](docs/adr/0008-day-two-reconcile.md), which is still
-  proposed; the set of fields a running node will re-apply is expected to grow.
+  the first cut of [ADR 8](docs/adr/0008-day-two-reconcile.md); the set of
+  fields a running node will re-apply is expected to grow.
 
 - **The console says what the node is, above the login prompt.** A getty used to
   show the Fedora banner and nothing else; it now shows the node's role, its

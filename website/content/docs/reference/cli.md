@@ -189,7 +189,7 @@ of those on a node in service would leave its configuration and its behaviour
 saying two different things, which is the thing Corium's provisioning model
 exists to prevent. This is enforced by the node, not by `cctl`, and not by your
 role — an `admin` certificate does not get past it either. See
-[ADR 8](https://github.com/Corium-OS/Corium/blob/main/docs/adr/0008-day-two-reconcile.md); the safe set is expected to grow.
+[ADR 8](/docs/reference/adr-0008-day-two-reconcile/); the safe set is expected to grow.
 
 One thing to watch: the document is the node's entire configuration, not a
 patch. Leaving `api:` out of it turns the management API off at the next boot,
