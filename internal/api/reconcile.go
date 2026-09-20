@@ -12,16 +12,37 @@ import (
 	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
-// immutableChangeError reports a day-two apply that would change a field only a
-// reset may change. It names the offending fields so the operator sees which
-// part of their document is the problem, not just that there was one.
-type immutableChangeError struct{ fields []string }
+// refusedApplyError reports a day-two apply the node will not carry out: a
+// change to a field only a reset may change, or the removal of an add-on k0s
+// would not actually uninstall. It names the offending pieces so the operator
+// sees which part of their document is the problem, not just that there was one.
+type refusedApplyError struct {
+	fields        []string // immutable fields that changed
+	removedAddons []string // charts dropped, which k0s leaves running
+}
 
-func (e *immutableChangeError) Error() string {
-	return fmt.Sprintf(
-		"these fields cannot change on a node that has already bootstrapped: %s; "+
-			"use cctl reset to return it to maintenance mode and re-bootstrap",
-		strings.Join(e.fields, ", "))
+func (e *refusedApplyError) Error() string {
+	switch {
+	case len(e.fields) > 0 && len(e.removedAddons) > 0:
+		return fmt.Sprintf(
+			"cannot apply to a node in service: these fields need a reset to change (%s), "+
+				"and removing an add-on (%s) is not reconciled because k0s leaves the release "+
+				"running; use cctl reset, and delete a chart with "+
+				"`kubectl delete chart <name> -n kube-system`",
+			strings.Join(e.fields, ", "), strings.Join(e.removedAddons, ", "))
+	case len(e.removedAddons) > 0:
+		return fmt.Sprintf(
+			"removing an add-on is not reconciled on a node in service, because k0s leaves "+
+				"the release running when a chart is dropped from its configuration (%s); "+
+				"delete it with `kubectl delete chart <name> -n kube-system`, and it stays out "+
+				"at the next bootstrap",
+			strings.Join(e.removedAddons, ", "))
+	default:
+		return fmt.Sprintf(
+			"these fields cannot change on a node that has already bootstrapped: %s; "+
+				"use cctl reset to return it to maintenance mode and re-bootstrap",
+			strings.Join(e.fields, ", "))
+	}
 }
 
 // errNoBaseline reports a bootstrapped node with no recorded configuration to
@@ -57,7 +78,10 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 	plan := config.PlanReconcile(baseline, next)
 
 	if !plan.Reconcilable() {
-		return reconcileResult{}, &immutableChangeError{fields: plan.Immutable}
+		return reconcileResult{}, &refusedApplyError{
+			fields:        plan.Immutable,
+			removedAddons: plan.RemovedAddons,
+		}
 	}
 
 	// A document that matches what the node is already running is a no-op, not

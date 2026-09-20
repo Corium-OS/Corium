@@ -59,7 +59,9 @@ addons:
 	}
 }
 
-func TestPlanReconcileRemovingAnAddonIsSafe(t *testing.T) {
+func TestPlanReconcileRemovingAnAddonIsRefused(t *testing.T) {
+	// k0s installs a chart from its configuration but does not uninstall one
+	// dropped from it, so a removal cannot be reconciled without lying about it.
 	withAddon := `role: single
 addons:
   - name: cert-manager
@@ -71,8 +73,36 @@ addons:
 
 	plan := PlanReconcile(old, next)
 
-	if !plan.Addons || !plan.Reconcilable() {
-		t.Errorf("dropping an add-on must be a reconcilable add-on change, got %+v", plan)
+	if plan.Reconcilable() {
+		t.Errorf("dropping an add-on must not be reconcilable, got %+v", plan)
+	}
+
+	if !slices.Contains(plan.RemovedAddons, "cert-manager") {
+		t.Errorf("removedAddons = %v, want it to name cert-manager", plan.RemovedAddons)
+	}
+}
+
+func TestPlanReconcileChangingAnAddonIsSafe(t *testing.T) {
+	// Bumping a chart's version keeps the release, so it stays reconcilable --
+	// only dropping a chart is the problem.
+	oldVersion := `role: single
+addons:
+  - name: cert-manager
+    chart: jetstack/cert-manager
+    version: 1.16.1
+    namespace: cert-manager
+`
+	newVersion := `role: single
+addons:
+  - name: cert-manager
+    chart: jetstack/cert-manager
+    version: 1.16.2
+    namespace: cert-manager
+`
+	plan := PlanReconcile(parseForReconcile(t, oldVersion), parseForReconcile(t, newVersion))
+
+	if !plan.Addons || !plan.Reconcilable() || len(plan.RemovedAddons) != 0 {
+		t.Errorf("changing an add-on's version must be a reconcilable change, got %+v", plan)
 	}
 }
 

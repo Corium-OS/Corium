@@ -18,11 +18,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   without a reset.** A node that has already bootstrapped used to refuse every
   apply and send you to `cctl reset`; it now re-applies the add-on set in place —
   regenerating the k0s configuration and cycling the control plane to pick it up —
-  and refuses only the fields that define what the node is (its role, cluster,
-  name, network, disks and the like), naming the offending field when it does.
-  An apply that matches what the node is already running is a no-op. Implements
-  the first cut of [ADR 8](docs/adr/0008-day-two-reconcile.md); the set of
-  fields a running node will re-apply is expected to grow.
+  and refuses the fields that define what the node is (its role, cluster, name,
+  network, disks and the like), naming the offending field when it does.
+  Removing an add-on is refused too, because k0s leaves a dropped chart's release
+  running — take it off with `kubectl delete chart`. An apply that matches what
+  the node is already running is a no-op. Implements the first cut of
+  [ADR 8](docs/adr/0008-day-two-reconcile.md); the set of fields a running node
+  will re-apply is expected to grow.
 
 - **A controller can hand out a worker's configuration.** `cctl worker-config
   <controller>` asks a controller to mint a fresh worker join token and prints
