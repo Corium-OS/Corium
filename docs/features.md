@@ -102,7 +102,7 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | Unattended staging | `upgrades.automatic: download` | Stages a new image, never reboots on its own |
 | Unattended reboot | `upgrades.automatic: apply` | Drains the node, reboots, uncordons. A drain a PDB refuses cancels the upgrade |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
-| Version ladder | n/a | `0.2.0`, `0.2` and `latest` per release. No major rung below 1.0, because a 0.x minor may break. See [upgrades](upgrades.md#choosing-what-to-track) |
+| Version ladder | n/a | `0.3.0`, `0.3` and `latest` per release. No major rung below 1.0, because a 0.x minor may break. See [upgrades](upgrades.md#choosing-what-to-track) |
 | Automatic rollback on failure | n/a | greenboot health check; a node that cannot run k0s returns to its previous image |
 
 ### Disks

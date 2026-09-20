@@ -20,11 +20,11 @@ and costs you an MTU.
 
 ## Before you start
 
-- **An image newer than 0.2.0.** The `wireguard:` field and the
-  `wireguard-tools` package both land in the next release; on 0.2.0 neither is
-  present, and you need the escape hatch at the end of this page instead. From
-  then on the tools ship present but inert until an interface is declared, and
-  the kernel module is in-tree and loads on demand.
+- **An image of 0.3.0 or newer.** The `wireguard:` field and the
+  `wireguard-tools` package both landed in 0.3.0; on 0.2.0 neither is present,
+  and you need the escape hatch at the end of this page instead. From 0.3.0 on
+  the tools ship present but inert until an interface is declared, and the
+  kernel module is in-tree and loads on demand.
 - **One reachable endpoint.** At least one node needs a UDP port other nodes can
   dial. Nodes entirely behind NAT can join, but they must dial out to one that
   is not.
