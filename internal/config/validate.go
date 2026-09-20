@@ -33,6 +33,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
 	problems = append(problems, c.validateRAID()...)
+	problems = append(problems, c.validateZFS()...)
 	problems = append(problems, c.validateWireGuard()...)
 	problems = append(problems, c.validateAPI()...)
 
@@ -546,6 +547,165 @@ func validateRAIDFilesystem(field string, array RAIDArray) []error {
 	}
 
 	return problems
+}
+
+// zfsPoolNamePattern keeps a pool name usable: zpool wants a name that starts
+// with a letter, and Corium additionally keeps it to characters that will not
+// need quoting on a command line.
+var zfsPoolNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]*$`)
+
+// zfsDatasetNamePattern is the same idea for a dataset name relative to its
+// pool, where a slash is allowed because it builds the dataset hierarchy.
+var zfsDatasetNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]*$`)
+
+// zfsVdevMinimumDevices is the smallest number of devices each vdev type can be
+// built from. zpool refuses fewer, but it refuses at first boot on a machine
+// nobody is watching, so catch it here instead.
+var zfsVdevMinimumDevices = map[string]int{
+	ZFSVdevStripe: 1,
+	ZFSVdevMirror: 2,
+	ZFSVdevRAIDZ1: 2,
+	ZFSVdevRAIDZ2: 3,
+	ZFSVdevRAIDZ3: 4,
+}
+
+func (c *Config) validateZFS() []error {
+	var problems []error
+
+	seenNames := make(map[string]bool, len(c.ZFS))
+
+	// A device may belong to exactly one thing. Seed the map with everything
+	// RAID already claimed, so a disk listed in both a pool and an array is
+	// caught here rather than fought over at first boot, where whichever runs
+	// first wins and corrupts the other.
+	seenDevices := make(map[string]string)
+
+	for i, array := range c.RAID {
+		for _, device := range append(append([]string{}, array.Devices...), array.Spares...) {
+			seenDevices[device] = fmt.Sprintf("raid[%d]", i)
+		}
+	}
+
+	for i, pool := range c.ZFS {
+		field := fmt.Sprintf("zfs[%d]", i)
+
+		if pool.Name == "" {
+			problems = append(problems, fmt.Errorf("%s.name: required", field))
+		} else {
+			if !zfsPoolNamePattern.MatchString(pool.Name) {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q must start with a letter and use only letters, digits, or _.:-",
+					field, pool.Name))
+			}
+
+			if seenNames[pool.Name] {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q is used by more than one pool", field, pool.Name))
+			}
+
+			seenNames[pool.Name] = true
+		}
+
+		problems = append(problems, validateZFSVdevs(field, pool, seenDevices)...)
+		problems = append(problems, validateZFSMountPoint(field+".mountPoint", pool.MountPoint)...)
+		problems = append(problems, validateZFSDatasets(field, pool)...)
+	}
+
+	return problems
+}
+
+func validateZFSVdevs(field string, pool ZFSPool, seen map[string]string) []error {
+	var problems []error
+
+	if len(pool.Vdevs) == 0 {
+		problems = append(problems, fmt.Errorf("%s.vdevs: at least one vdev is required", field))
+	}
+
+	for j, vdev := range pool.Vdevs {
+		vfield := fmt.Sprintf("%s.vdevs[%d]", field, j)
+
+		vdevType := vdev.Type
+		if vdevType == "" {
+			vdevType = ZFSVdevStripe
+		}
+
+		if minimum, ok := zfsVdevMinimumDevices[vdevType]; !ok {
+			problems = append(problems, fmt.Errorf(
+				"%s.type: unknown value %q; use stripe, mirror, raidz, raidz2 or raidz3",
+				vfield, vdev.Type))
+		} else if len(vdev.Devices) < minimum {
+			problems = append(problems, fmt.Errorf(
+				"%s.devices: a %s vdev needs at least %d devices, got %d",
+				vfield, vdevType, minimum, len(vdev.Devices)))
+		}
+
+		for _, device := range vdev.Devices {
+			if !strings.HasPrefix(device, "/dev/") {
+				problems = append(problems, fmt.Errorf(
+					"%s.devices: %q must be an absolute device path under /dev", vfield, device))
+
+				continue
+			}
+
+			if owner, taken := seen[device]; taken {
+				problems = append(problems, fmt.Errorf(
+					"%s.devices: %q is already claimed by %s", vfield, device, owner))
+
+				continue
+			}
+
+			seen[device] = vfield
+		}
+	}
+
+	return problems
+}
+
+func validateZFSDatasets(field string, pool ZFSPool) []error {
+	var problems []error
+
+	seen := make(map[string]bool, len(pool.Datasets))
+
+	for k, dataset := range pool.Datasets {
+		dfield := fmt.Sprintf("%s.datasets[%d]", field, k)
+
+		if dataset.Name == "" {
+			problems = append(problems, fmt.Errorf("%s.name: required", dfield))
+		} else {
+			if !zfsDatasetNamePattern.MatchString(dataset.Name) {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q must be a dataset name relative to the pool", dfield, dataset.Name))
+			}
+
+			if seen[dataset.Name] {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q is declared more than once", dfield, dataset.Name))
+			}
+
+			seen[dataset.Name] = true
+		}
+
+		problems = append(problems, validateZFSMountPoint(dfield+".mountPoint", dataset.MountPoint)...)
+	}
+
+	return problems
+}
+
+// validateZFSMountPoint accepts an absolute path or ZFS's own special values,
+// which is what distinguishes it from the RAID mount point: "none" and "legacy"
+// are meaningful to ZFS and must not be rejected as non-absolute paths.
+func validateZFSMountPoint(field, mountPoint string) []error {
+	switch mountPoint {
+	case "", "none", "legacy":
+		return nil
+	}
+
+	if !strings.HasPrefix(mountPoint, "/") {
+		return []error{fmt.Errorf(
+			"%s: %q must be an absolute path, or \"none\" or \"legacy\"", field, mountPoint)}
+	}
+
+	return nil
 }
 
 func (c *Config) validateAPI() []error {

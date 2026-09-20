@@ -263,6 +263,170 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  zfs:
+    name: Build and publish the ZFS variant
+    # After the base image is built, published and signed: the variant derives
+    # from that exact digest, so it cannot run until the digest exists.
+    needs: build
+    # Whenever the base image is published -- main, tags, the weekly security
+    # rebuild and manual dispatch -- but never on a pull request, where the base
+    # was built but not pushed, so there is no digest to derive from. This
+    # deliberately does not gate ZFS behind a tag the way `artefacts` does: the
+    # variant should track the base on every publish, security rebuilds included.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing, exactly as the base image job.
+      id-token: write
+
+    env:
+      # A separate repository, not a tag on the base image. containers-policy
+      # scopes match on whole path components, so this sits outside the policy a
+      # node enforces for ghcr.io/corium-os/corium; a node that wants the variant
+      # enforced adds a corium-zfs scope pinned to the same key (see issue #52).
+      ZFS_IMAGE_NAME: corium-os/corium-zfs
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: |
+          # FROM the base by digest, not by tag: the ZFS module is compiled
+          # against the kernel this exact image ships, and a module built against
+          # any other kernel will not load. The digest is the one just published
+          # and signed a job ago.
+          #
+          # ZFS_VERSION is deliberately not passed: the Containerfile default is
+          # the single source of truth for which OpenZFS release matches the base
+          # kernel. Bump it there, not here.
+          #
+          # Retried for the same transient base-pull reason as the base build.
+          # bootc container lint runs inside the build with --fatal-warnings, so a
+          # genuine problem fails deterministically and the retry cannot hide it.
+          for attempt in 1 2 3; do
+            if podman build \
+              --build-arg BASE="${{ needs.build.outputs.digest }}" \
+              --tag "localhost/corium-zfs:ci" \
+              --file deploy/zfs/Containerfile \
+              deploy/zfs
+            then
+              break
+            fi
+
+            echo "build attempt ${attempt} failed" >&2
+            [ "${attempt}" = "3" ] && exit 1
+            sleep $((attempt * 20))
+          done
+
+      - name: Inspect what was produced
+        run: |
+          # The point of the variant: the userspace and the matching kmod are
+          # present. `zfs version` prints both the userspace and the module
+          # version, and fails if either is missing.
+          podman run --rm localhost/corium-zfs:ci zfs version
+          # It is still a bootable Corium image with the same k0s underneath.
+          podman run --rm localhost/corium-zfs:ci k0s version
+          echo "image size: $(podman images --format '{{.Size}}' localhost/corium-zfs:ci)"
+
+      - name: Log in to the registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        id: push
+        run: |
+          image="${REGISTRY}/${ZFS_IMAGE_NAME}"
+          version="${{ needs.build.outputs.version }}"
+          tags="${version}"
+
+          # The same tag ladder as the base image, kept in step with it so a node
+          # tracking corium:1.4 can track corium-zfs:1.4 and get the variant of
+          # the very image it would otherwise run. The grammar is semver's own,
+          # for the same reasons documented in the base job's Push step.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [[ "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              major="${BASH_REMATCH[1]}"
+              minor="${BASH_REMATCH[2]}"
+
+              tags="${version} ${major}.${minor}"
+              if [ "${major}" != "0" ]; then
+                tags="${tags} ${major}"
+              fi
+              tags="${tags} latest"
+            else
+              echo "::notice::${version} is a prerelease or not a stable semantic version; publishing that tag only"
+            fi
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            tags="${tags} main"
+          fi
+
+          digest=""
+          for tag in ${tags}; do
+            if [[ ! "${tag}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$ ]]; then
+              echo "::error::${tag} is not a valid OCI tag" >&2
+              exit 1
+            fi
+
+            podman tag localhost/corium-zfs:ci "${image}:${tag}"
+            podman push --digestfile /tmp/digest "${image}:${tag}"
+            pushed="$(cat /tmp/digest)"
+            echo "pushed ${image}:${tag} (${pushed})"
+
+            # Every tag is the same manifest; only one is signed. Check the
+            # invariant rather than assume it, exactly as the base job does.
+            if [ -z "${digest}" ]; then
+              digest="${pushed}"
+            elif [ "${pushed}" != "${digest}" ]; then
+              echo "::error::${tag} pushed ${pushed}, but ${digest} was expected" >&2
+              exit 1
+            fi
+          done
+
+          echo "digest=${image}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # cosign v2, not v3: the same reason the base job pins it -- v3 writes
+          # signatures as OCI referrers, and containers-policy enforcement only
+          # finds the <digest>.sig tag v2 writes.
+          cosign-release: v2.6.5
+
+      - name: Sign the image
+        run: |
+          digest="${{ steps.push.outputs.digest }}"
+
+          # Signed twice with the same key material as the base image. The key
+          # signature is the one a node enforces; a node running the variant
+          # needs a ghcr.io/corium-os/corium-zfs scope in its policy pinned to
+          # the same cosign.pub. See issue #52.
+          cosign sign --yes "${digest}"
+          echo "signed (keyless) ${digest}"
+
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${digest}"
+          echo "signed (key) ${digest}"
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### ZFS variant"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${{ needs.build.outputs.version }}\` |"
+            echo "| Base | \`${{ needs.build.outputs.digest }}\` |"
+            echo "| Digest | \`${{ steps.push.outputs.digest }}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   artefacts:
     name: Build and publish the installable artefacts
     needs: build

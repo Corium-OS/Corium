@@ -45,6 +45,11 @@ BIB = "{{ env.BIB | default(value='quay.io/centos-bootc/bootc-image-builder:late
 # The appliance image is built locally and never pushed: it accepts an
 # unauthenticated claim, so publishing one would be handing out machines.
 APPLIANCE_IMAGE = "{{ env.APPLIANCE_IMAGE | default(value='localhost/corium-appliance:dev') }}"
+
+# The ZFS image is a locally built variant that bakes in a kernel module matching
+# the base image's kernel. Built on demand rather than published; see
+# deploy/zfs/README.md.
+ZFS_IMAGE = "{{ env.ZFS_IMAGE | default(value='localhost/corium-zfs:dev') }}"
 OUTPUT_DIR = "{{ env.OUTPUT_DIR | default(value = config_root ~ '/output') }}"
 
 # ---------------------------------------------------------------- Go
@@ -160,6 +165,23 @@ echo "A machine built from it is claimed by whoever reaches it first:"
 echo "  deploy/appliance/README.md"
 echo
 echo "For an ISO:  IMAGE=${APPLIANCE_IMAGE} mise run artefact-anaconda-iso"
+'''
+
+[tasks."zfs-image"]
+description = "Build a Corium image with ZFS (read deploy/zfs/README.md)"
+run = '''
+set -eu
+podman build \
+	--tag "${ZFS_IMAGE}" \
+	--build-arg "BASE=${IMAGE}" \
+	${ZFS_VERSION:+--build-arg "ZFS_VERSION=${ZFS_VERSION}"} \
+	--file deploy/zfs/Containerfile \
+	deploy/zfs
+echo
+echo "Built ${ZFS_IMAGE} from ${IMAGE}."
+echo "Declare pools in the corium.zfs block: docs/zfs.md"
+echo
+echo "For a qcow2:  IMAGE=${ZFS_IMAGE} mise run artefact-qcow2"
 '''
 
 [tasks."artefact-qcow2"]

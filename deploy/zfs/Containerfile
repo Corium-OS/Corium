@@ -1,0 +1,118 @@
+# A Corium image with ZFS.
+#
+# ZFS is not in the main image, and that is a decision rather than an omission:
+# read deploy/zfs/README.md and docs/adr/0007-zfs-data-disks.md before building
+# it. The short version is that OpenZFS is a kernel module Fedora does not ship
+# (CDDL), so it has to be compiled, and on Fedora it has no stable kABI, so it
+# has to be recompiled against the exact kernel it will run on. That maps cleanly
+# onto bootc -- one image, one kernel, one matching module, versioned together by
+# digest -- but it is weight and build fragility the base image should not carry
+# for the nodes that do not want it.
+#
+# Build:  IMAGE=ghcr.io/corium-os/corium:<tag> mise run zfs-image
+
+# The Corium image this derives from. Its kernel is the kernel the module is
+# built against, which is the whole point of deriving rather than starting fresh:
+# a module built against a different kernel will not load.
+ARG BASE=ghcr.io/corium-os/corium:latest
+
+# The OpenZFS release to build. Override it to match the base image's kernel:
+# a release only supports kernels up to the one current when it shipped (see the
+# Linux-Maximum field in the release's META file), and Fedora's kernel moves
+# faster than OpenZFS. If the build fails in configure with a message about an
+# unsupported kernel, this is the knob. The default tracks the newest kernel the
+# current base image ships; bump it whenever that kernel outgrows this release.
+ARG ZFS_VERSION=2.3.9
+
+# ---------------------------------------------------------------------------
+# Stage 1 -- compile OpenZFS into kmod and userspace RPMs.
+#
+# FROM the base image, not a generic Fedora builder, so `rpm -q kernel` names the
+# exact kernel the module has to match and `configure` autodetects it from the
+# single kernel-devel installed beside it. The toolchain lives only in this
+# throwaway stage and never reaches the shipped image.
+# ---------------------------------------------------------------------------
+FROM ${BASE} AS zfs-builder
+
+ARG ZFS_VERSION
+
+# kernel-devel is pinned to the running image's kernel by version-release-arch,
+# so configure builds against the kernel this image actually ships rather than
+# whatever the repo now considers newest.
+RUN set -eu; \
+	kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel | tail -1)"; \
+	dnf install -y --setopt=install_weak_deps=False \
+		"kernel-devel-${kver}" \
+		gcc make autoconf automake libtool rpm-build \
+		libblkid-devel libuuid-devel libudev-devel openssl-devel \
+		libtirpc-devel \
+		zlib-ng-compat-devel libaio-devel libattr-devel elfutils-libelf-devel \
+		libffi-devel libcurl-devel ncompress \
+		python3 python3-devel python3-setuptools python3-cffi \
+		tar curl-minimal
+
+# Compile from the release tarball and produce RPMs. rpm-kmod builds the kernel
+# module package -- pre-compiled against this one kernel, the model OpenZFS
+# recommends for a fleet over dkms, which rebuilds at runtime and writes state
+# into /var that an immutable image has no place for. rpm-utils builds the
+# userspace (zpool, zfs, libraries).
+RUN set -eu; \
+	cd /tmp; \
+	curl -fsSL -o zfs.tar.gz \
+		"https://github.com/openzfs/zfs/releases/download/zfs-${ZFS_VERSION}/zfs-${ZFS_VERSION}.tar.gz"; \
+	mkdir -p zfs && tar -xzf zfs.tar.gz -C zfs --strip-components=1; \
+	cd zfs; \
+	./configure --with-config=srpm >/dev/null; \
+	./configure >/dev/null; \
+	make -j"$(nproc)" rpm-kmod rpm-utils
+
+# Keep only the runtime packages: no -devel, -debuginfo, -debugsource, dkms,
+# test or source RPMs, none of which belong on a node.
+RUN set -eu; \
+	mkdir -p /rpms; \
+	find /tmp/zfs -maxdepth 1 -name '*.rpm' \
+		! -name '*-devel-*' \
+		! -name '*-debuginfo-*' \
+		! -name '*-debugsource-*' \
+		! -name '*dkms*' \
+		! -name '*-test-*' \
+		! -name '*.src.rpm' \
+		-exec cp {} /rpms/ \;
+
+# ---------------------------------------------------------------------------
+# Stage 2 -- the shipped image: base Corium plus the ZFS packages.
+# ---------------------------------------------------------------------------
+FROM ${BASE}
+
+# The compiled RPMs, installed and then removed: the module lands under
+# /usr/lib/modules/<kver>/extra, part of the read-only image and replaced
+# wholesale on upgrade alongside the kernel it matches. The kmod %post runs
+# depmod, so the module is resolvable at boot.
+COPY --from=zfs-builder /rpms /tmp/zfs-rpms
+COPY files/usr /usr
+
+RUN set -eu; \
+	dnf install -y --setopt=install_weak_deps=False /tmp/zfs-rpms/*.rpm; \
+	rm -rf /tmp/zfs-rpms /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
+
+# Import by scanning the attached disks rather than from a cached device list:
+# corium-agent creates pools with cachefile=none, and a node that may be
+# reprovisioned onto replacement hardware wants its pools found by what is
+# actually present. zfs-import-scan provides zfs-import.target; the cache-based
+# unit is deliberately not enabled, since the two conflict.
+RUN systemctl enable \
+		zfs-import-scan.service \
+		zfs-import.target \
+		zfs-mount.service \
+		zfs-zed.service \
+		zfs.target
+
+# The module is force-loaded at boot as well as by corium-agent, so a node whose
+# pools are imported by the systemd units (every boot after the first) has it
+# without depending on the agent having run.
+#
+# State directories, /var seeding and service wiring beyond this are inherited
+# unchanged from the base image.
+
+# bootc must still be satisfied the derived image is bootable.
+RUN bootc container lint
