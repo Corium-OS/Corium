@@ -323,10 +323,17 @@ jobs:
 
       - name: Inspect what was produced
         run: |
-          # The point of the variant: the userspace and the matching kmod are
-          # present. `zfs version` prints both the userspace and the module
-          # version, and fails if either is missing.
-          podman run --rm localhost/corium-zfs:ci zfs version
+          # The module cannot be loaded here -- a CI runner is not running this
+          # image's kernel -- so `zfs version`, which auto-loads the kmod, would
+          # fail with "the ZFS modules cannot be auto-loaded". Check the parts are
+          # baked in instead: the userspace tools, and the compiled module for the
+          # image's own kernel under /usr/lib/modules/<kver>/extra.
+          podman run --rm localhost/corium-zfs:ci sh -c '
+            set -e
+            command -v zpool >/dev/null
+            command -v zfs >/dev/null
+            ls -1 /usr/lib/modules/*/extra/zfs.ko*
+          '
           # It is still a bootable Corium image with the same k0s underneath.
           podman run --rm localhost/corium-zfs:ci k0s version
           echo "image size: $(podman images --format '{{.Size}}' localhost/corium-zfs:ci)"
