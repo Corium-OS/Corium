@@ -12,6 +12,28 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-20
+
+### Added
+
+- **ZFS pools on data disks, declared in the `corium:` block.** A `zfs[]` block
+  builds pools from whole disks before k0s starts, on the same footing as
+  `raid[]`: k0s is made to wait for their mounts, a pool is created only when it
+  is not already there — an existing pool is imported and adopted rather than
+  rebuilt, and its datasets reconciled rather than duplicated — and a disk that
+  already holds data is refused rather than consumed. Checksummed, compressed,
+  snapshot-capable local storage behind a persistent-volume provisioner or an
+  image cache. See [ZFS on data disks](docs/zfs.md) and
+  [ADR 7](docs/adr/0007-zfs-data-disks.md).
+
+- **A signed ZFS image variant, `ghcr.io/corium-os/corium-zfs`.** OpenZFS is a
+  kernel module Fedora does not ship, so it stays out of the base image; this
+  variant bakes in the module built against the release's exact kernel and is
+  published and signed on the same tag ladder as the base. A node that runs it
+  adds a matching signing scope to its policy to enforce that signature. You can
+  still build your own from [`deploy/zfs/`](deploy/zfs/). See
+  [ZFS on data disks](docs/zfs.md).
+
 ## [0.3.0] - 2026-09-20
 
 ### Added
@@ -408,7 +430,8 @@ the node is described in cloud-init.
   turns it into a disk image is pinned to a floating tag, so two runs against
   the same digest may not produce identical bytes.
 
-[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Corium-OS/Corium/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Corium-OS/Corium/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Corium-OS/Corium/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Corium-OS/Corium/releases/tag/v0.1.0
