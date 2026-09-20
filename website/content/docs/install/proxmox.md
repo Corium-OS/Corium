@@ -44,7 +44,7 @@ you would rather not have it on a hypervisor, skip it, skip step 3's check, and
 fetch the one script on its own:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v0.2.0/deploy/proxmox/create-vm.sh
+curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v0.3.0/deploy/proxmox/create-vm.sh
 chmod +x create-vm.sh
 ```
 
@@ -54,7 +54,7 @@ On the Proxmox host, so the bytes land where they are needed:
 
 ```bash
 cd /var/lib/vz/template
-curl -fLO https://corium.b-cdn.net/corium-0.2.0-x86_64.qcow2
+curl -fLO https://corium.b-cdn.net/corium-0.3.0-x86_64.qcow2
 ```
 
 The exact URL for a release is in [its notes](https://github.com/Corium-OS/Corium/releases/latest),
@@ -64,7 +64,7 @@ along with the two other ways to fetch it. A real run took 15 seconds for
 ## 2. Check what you downloaded
 
 ```bash
-sha256sum /var/lib/vz/template/corium-0.2.0-x86_64.qcow2
+sha256sum /var/lib/vz/template/corium-0.3.0-x86_64.qcow2
 ```
 
 Compare it with the hash in the release notes. Matching it means you hold the
@@ -112,7 +112,7 @@ corium-agent validate /root/corium-node.yaml
 
 ```bash
 VMID=900 VM_NAME=corium \
-  DISK_IMAGE=/var/lib/vz/template/corium-0.2.0-x86_64.qcow2 \
+  DISK_IMAGE=/var/lib/vz/template/corium-0.3.0-x86_64.qcow2 \
   CLOUD_CONFIG=/root/corium-node.yaml \
   MEMORY=6144 CORES=2 \
   /root/Corium/deploy/proxmox/create-vm.sh
@@ -154,7 +154,7 @@ ssh core@<address>
 
 ```console
 $ corium-agent version
-corium-agent 0.2.0 (d5a8f78)
+corium-agent 0.3.0 (b853821)
 
 $ systemctl is-active corium-bootstrap k0scontroller
 active

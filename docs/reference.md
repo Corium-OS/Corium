@@ -1,8 +1,8 @@
 # Configuration reference
 
 What the configuration file contains, where it comes from, and what Corium does
-with it. This page tracks `main`. The current stable release is **0.2.0**, and
-fields added since are marked *new since 0.2.0* — the
+with it. This page tracks `main`. The current stable release is **0.3.0**, and
+fields added since are marked *new since 0.3.0* — the
 [changelog](https://github.com/Corium-OS/Corium/blob/main/CHANGELOG.md) lists
 them.
 
@@ -645,7 +645,7 @@ you meant.
 
 ### 3.12 `wireguard`
 
-*New since 0.2.0.* Neither this field nor the `wireguard-tools` package is
+*New in 0.3.0.* Neither this field nor the `wireguard-tools` package is
 present in 0.2.0.
 
 A list of host WireGuard interfaces, brought up at first boot **before k0s**, so

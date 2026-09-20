@@ -74,7 +74,7 @@ lsblk -o NAME,SIZE,TYPE,MODEL
 podman run --rm --privileged --pid=host \
   -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
   --security-opt label=type:unconfined_t \
-  ghcr.io/corium-os/corium:0.2.0 \
+  ghcr.io/corium-os/corium:0.3.0 \
   bootc install to-disk --wipe /dev/nvme0n1
 ```
 
@@ -130,7 +130,7 @@ lsblk -o NAME,SIZE,TYPE,MODEL
 ```bash
 apt-get install -y qemu-utils        # or the distribution's equivalent
 
-qemu-img convert -O raw -p corium-0.2.0-x86_64.qcow2 /dev/nvme0n1
+qemu-img convert -O raw -p corium-0.3.0-x86_64.qcow2 /dev/nvme0n1
 sync && partprobe /dev/nvme0n1
 
 sgdisk -e /dev/nvme0n1               # move the backup GPT to the end of the real disk
