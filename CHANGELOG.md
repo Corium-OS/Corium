@@ -12,6 +12,16 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The ZFS variant's kernel module now loads at boot.** The `corium-zfs` image
+  shipped `zfs.ko` under `/usr/lib/modules/<kver>/extra/zfs/` but with no
+  matching entry in `modules.dep`, so on a node `modprobe zfs` failed with
+  "Module zfs not found", the module never loaded, and pools never imported —
+  the whole point of the variant, silently broken. The image now runs `depmod`
+  explicitly after installing the kmod, and CI verifies the module *resolves*
+  (`modprobe --show-depends`) rather than only checking the file exists.
+
 ## [0.3.2] - 2026-09-20
 
 ### Fixed
