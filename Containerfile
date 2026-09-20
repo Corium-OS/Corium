@@ -84,6 +84,8 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		wireguard-tools \
 		qemu-guest-agent \
 		greenboot \
+		vim \
+		htop \
 	&& dnf clean all \
 	&& rm -rf /var/cache/* /var/lib/dnf /var/log/dnf* /var/log/hawkey.log
 
