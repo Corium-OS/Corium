@@ -14,7 +14,6 @@ package issue
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
@@ -76,10 +75,6 @@ func Render(node *nodeinfo.Node) string {
 
 		if staged := node.OS.Staged; staged != nil {
 			line("staged", image(staged)+"  (next reboot)")
-		}
-
-		if node.Health.UptimeSeconds > 0 {
-			line("uptime", uptime(node.Health.UptimeSeconds))
 		}
 	}
 
@@ -151,24 +146,4 @@ func shortDigest(digest string) string {
 	}
 
 	return algo + hex[:12]
-}
-
-// uptime renders a duration the way an operator says it: "5m", "3h 12m",
-// "2d 4h". Seconds are dropped because on a console nobody is timing anything to
-// one, and the label is about how long the node has been up, not how precisely.
-func uptime(seconds int64) string {
-	d := time.Duration(seconds) * time.Second
-
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-
-	switch {
-	case days > 0:
-		return fmt.Sprintf("%dd %dh", days, hours)
-	case hours > 0:
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	default:
-		return fmt.Sprintf("%dm", minutes)
-	}
 }

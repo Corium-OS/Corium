@@ -14,7 +14,7 @@ func TestRenderBootstrapped(t *testing.T) {
 		Cluster:      "prod-eu",
 		Endpoint:     "https://10.0.0.1:6443",
 		Kubernetes:   nodeinfo.Kubernetes{Version: "v1.36.4+k0s.0", Service: "k0sworker", Active: true},
-		Health:       nodeinfo.Health{Greenboot: "passed", UptimeSeconds: 11520},
+		Health:       nodeinfo.Health{Greenboot: "passed"},
 		OS: nodeinfo.OS{
 			Booted: &nodeinfo.Deployment{Version: "0.2.0", Digest: "sha256:1a2b3c4d5e6f7a8b9c0d"},
 		},
@@ -31,7 +31,6 @@ func TestRenderBootstrapped(t *testing.T) {
 		"v1.36.4+k0s.0 (running)",
 		"passed",
 		"0.2.0  sha256:1a2b3c4d5e6f",
-		"3h 12m",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("banner missing %q\n%s", want, got)
@@ -126,19 +125,29 @@ func TestShortDigest(t *testing.T) {
 	}
 }
 
-func TestUptime(t *testing.T) {
-	tests := map[int64]string{
-		0:      "0m",
-		45:     "0m",
-		300:    "5m",
-		11520:  "3h 12m",
-		180000: "2d 2h",
+// TestRenderOmitsVolatileFields guards the reprint fix. The banner must not
+// carry a field that changes on every render -- uptime was one -- because the
+// timer reloads agetty only when the banner changes, and agetty reprints the
+// whole prompt rather than redrawing it in place. A volatile field would fire
+// that reload on every tick and march a fresh banner down the console forever.
+// A long-running node must render byte-identically to one just booted.
+func TestRenderOmitsVolatileFields(t *testing.T) {
+	fresh := &nodeinfo.Node{
+		Bootstrapped: true,
+		Role:         "single",
+		Health:       nodeinfo.Health{Greenboot: "passed"},
 	}
 
-	for seconds, want := range tests {
-		if got := uptime(seconds); got != want {
-			t.Errorf("uptime(%d) = %q, want %q", seconds, got, want)
-		}
+	aged := *fresh
+	aged.Health.UptimeSeconds = 987654
+
+	if Render(fresh) != Render(&aged) {
+		t.Errorf("banner changes with uptime; it must not\n--- fresh ---\n%s--- aged ---\n%s",
+			Render(fresh), Render(&aged))
+	}
+
+	if strings.Contains(Render(&aged), "uptime") {
+		t.Errorf("banner still shows a volatile uptime field:\n%s", Render(&aged))
 	}
 }
 

@@ -18,9 +18,10 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   show the Fedora banner and nothing else; it now shows the node's role, its
   cluster, whether k0s is running, greenboot's verdict, the booted image and any
   image staged for the next reboot. It is a drop-in in `/run/issue.d` that a
-  timer refreshes and `agetty --reload` redraws in place, so a console left open
-  tracks a node joining a cluster or an upgrade staging without anyone logging
-  in. On a node still waiting to be claimed it sits above the pairing code, not
+  timer keeps current and reprints with `agetty --reload` only when the state it
+  shows actually changes, so a console left open tracks a node joining a cluster
+  or an upgrade staging without redrawing itself into a wall of stale banners.
+  On a node still waiting to be claimed it sits above the pairing code, not
   instead of it.
 
 - **A host WireGuard overlay can be declared from the `corium:` block.** A new
