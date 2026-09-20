@@ -15,14 +15,24 @@ type ReconcilePlan struct {
 	// sent to `cctl reset`, rather than applied in part.
 	Immutable []string
 
-	// Addons is true when the add-on set changed and nothing immutable did.
+	// Addons is true when the add-on set changed at all -- added, removed or
+	// altered. It says something changed, not that it can be applied; see
+	// RemovedAddons.
 	Addons bool
+
+	// RemovedAddons names the charts present in the running configuration and
+	// absent from the proposal. Removal is not reconcilable: k0s's Helm
+	// extensions install a chart from the configuration but do not uninstall
+	// one dropped from it -- the release is left running (see docs/features.md,
+	// "Removing add-ons"). Re-rendering k0s.yaml without the chart would report
+	// a removal that did not happen, so a proposal that drops one is refused.
+	RemovedAddons []string
 }
 
 // Reconcilable reports whether the plan can be applied to a running node: it
-// can exactly when nothing immutable changed.
+// can exactly when nothing immutable changed and no add-on was removed.
 func (p ReconcilePlan) Reconcilable() bool {
-	return len(p.Immutable) == 0
+	return len(p.Immutable) == 0 && len(p.RemovedAddons) == 0
 }
 
 // Empty reports that the two configurations are equivalent for reconciliation:
@@ -73,6 +83,26 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 	}
 
 	plan.Addons = !reflect.DeepEqual(old.Addons, next.Addons)
+	plan.RemovedAddons = removedAddons(old.Addons, next.Addons)
 
 	return plan
+}
+
+// removedAddons names the charts in old that next no longer declares, matched
+// by name -- the field k0s keys a release on.
+func removedAddons(old, next []Addon) []string {
+	declared := make(map[string]bool, len(next))
+	for _, addon := range next {
+		declared[addon.Name] = true
+	}
+
+	var removed []string
+
+	for _, addon := range old {
+		if !declared[addon.Name] {
+			removed = append(removed, addon.Name)
+		}
+	}
+
+	return removed
 }

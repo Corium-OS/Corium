@@ -125,10 +125,10 @@ func (s *Server) handleApplyConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg *config.Config, document []byte) {
 	result, err := s.reconcile(r.Context(), cfg, document)
 	if err != nil {
-		var immutable *immutableChangeError
+		var refused *refusedApplyError
 
 		switch {
-		case errors.As(err, &immutable), errors.Is(err, errNoBaseline):
+		case errors.As(err, &refused), errors.Is(err, errNoBaseline):
 			writeError(w, http.StatusConflict, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, err.Error())

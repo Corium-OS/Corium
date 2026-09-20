@@ -171,7 +171,7 @@ that would fail at boot is refused while somebody is still watching.
 
 **On a node that has already bootstrapped, `cctl apply` re-applies only the
 safe part of the document.** Today that is the add-on set: the node regenerates
-its k0s configuration and cycles the control plane to install or remove a chart,
+its k0s configuration and cycles the control plane to install or update a chart,
 reports `reconciled`, and an apply that matches what it is already running
 reports `unchanged` and does nothing. Every field that defines what the node
 *is* — its role, cluster, name, network, disks, and the rest — still answers
@@ -181,6 +181,15 @@ saying two different things, which is the thing Corium's provisioning model
 exists to prevent. This is enforced by the node, not by `cctl`, and not by your
 role — an `admin` certificate does not get past it either. See
 [ADR 8](adr/0008-day-two-reconcile.md); the safe set is expected to grow.
+
+Two edges are worth knowing. **Removing** an add-on is refused, not applied:
+k0s installs a chart from its configuration but does not uninstall one dropped
+from it, so a node that reported the removal done would be lying — delete the
+release with `kubectl delete chart <name> -n kube-system` and drop it from the
+document, and it stays out at the next bootstrap. And a node **bootstrapped by
+a release older than this feature** has no record of what it was built with, so
+its first day-two apply is refused until it is re-bootstrapped through
+`cctl reset`; a node bootstrapped since records that baseline itself.
 
 One thing to watch: the document is the node's entire configuration, not a
 patch. Leaving `api:` out of it turns the management API off at the next boot,
@@ -596,10 +605,10 @@ the same answer on your workstation as on the machine.
 | Not there | Why |
 |---|---|
 | `cctl exec` | The moment an API can run any command it is SSH with a worse client, and every argument for keeping its surface small stops applying |
-| `cctl apply` on a node in service | A node already running Kubernetes cannot have its role or cluster rewritten underneath it. Applying a configuration works only before a node has bootstrapped; afterwards it is `cctl reset` |
-| Anything that reconciles | An applied document is written once and read once, by the bootstrap. Nothing watches it and nothing re-applies it |
+| Rewriting what a node *is*, in service | A node already running Kubernetes cannot have its role, cluster, name, network or disks rewritten underneath it. `cctl apply` re-applies the safe subset (the add-on set) day-two and refuses each of those, naming it; changing one is `cctl reset`. See [ADR 8](adr/0008-day-two-reconcile.md) |
+| A reconcile loop | Nothing watches a document and corrects a running node toward it. `cctl apply` re-applies the safe subset when you ask it to, once, and does nothing between one apply and the next |
 | Anything Kubernetes beyond `kubeconfig` | The API hands over the admin kubeconfig once and does nothing else with Kubernetes. It does not proxy the apiserver, list pods, or keep credentials for you |
-| A fleet inventory | `cctl` acts on addresses you supply. There is no registry, no desired state, and nothing that reconciles |
+| A fleet inventory | `cctl` acts on addresses you supply. There is no registry and no desired state; a rolling change is a loop over the addresses you name |
 
 The last one is the design, not an omission: a node knows only about itself, and
 the sequencing that needs to know about the others lives here rather than on any

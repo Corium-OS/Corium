@@ -257,6 +257,44 @@ func TestApplyReconcilesAddonsOnARunningNode(t *testing.T) {
 	}
 }
 
+func TestApplyRefusesRemovingAnAddonOnARunningNode(t *testing.T) {
+	// k0s leaves a dropped chart's release running, so a removal is refused
+	// rather than reported as done. The message points at the k0s way to remove.
+	ca := newAuthority(t)
+	server, store, configPath, appliedPath := configurableServer(t, ca, true)
+
+	baseline := "role: single\n" +
+		"api: { enabled: true }\n" +
+		"addons:\n" +
+		"  - name: cert-manager\n" +
+		"    chart: jetstack/cert-manager\n" +
+		"    namespace: cert-manager\n" +
+		"    repository: { name: jetstack, url: 'https://charts.jetstack.io' }\n"
+
+	if err := os.WriteFile(appliedPath, []byte(baseline), 0o600); err != nil {
+		t.Fatalf("seeding the baseline: %v", err)
+	}
+
+	address := serveOn(t, server)
+	admin := client(t, store, ca.issue(t, RoleAdmin))
+
+	// The same node, with cert-manager dropped from the document.
+	status, body := postRaw(t, admin, "https://"+address+"/v1/config",
+		configBody(t, "corium:\n  role: single\n  api: { enabled: true }\n"))
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%v)", status, body)
+	}
+
+	message, _ := body["error"].(string)
+	if !strings.Contains(message, "cert-manager") || !strings.Contains(message, "kubectl delete chart") {
+		t.Errorf("error = %q, want it to name the chart and the k0s way to remove it", message)
+	}
+
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Error("a refused apply wrote the document anyway")
+	}
+}
+
 func TestApplyOnARunningNodeIsANoOpWhenUnchanged(t *testing.T) {
 	// A document that matches what the node is running does nothing: no restart,
 	// no rewrite of the rendered k0s configuration.

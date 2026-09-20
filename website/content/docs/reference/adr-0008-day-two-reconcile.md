@@ -132,13 +132,17 @@ is written with the same care as the rest of that directory and never logged. Li
 the rest of `/var`, it is seeded once and survives an OS upgrade, which is what
 lets a node upgraded into this feature still diff against what it was built with.
 
-Removing an add-on needs its behaviour pinned down before this ships, not assumed.
-The gate treats a dropped chart as a change to apply, which asks k0s to bring its
-chart set back in line — but whether k0s *uninstalls* a chart removed from its
-extension list, or merely stops managing it and leaves it running, is a property
-of the pinned k0s version (AGENTS §11). The difference is a `cert-manager` that
-either leaves cleanly or lingers with its CRDs and webhooks, so it is verified on
-a machine, against `build/k0s.lock`, as a condition of accepting this ADR.
+Removing an add-on is refused rather than reconciled, and that is a decision this
+record now settles rather than defers. k0s's Helm extensions install a chart from
+the configuration but do **not** uninstall one dropped from it — the release is
+left running, which Corium already documents (`docs/features.md`, "Removing
+add-ons"). So a node that re-rendered its k0s.yaml without the chart and reported
+the removal done would be lying: the `cert-manager` an operator thinks they took
+off is still there, CRDs and webhooks and all. The gate therefore treats a
+dropped chart as unreconcilable and refuses the apply, naming the chart and
+pointing at `kubectl delete chart`, the k0s-native way to remove a release.
+Adding a chart and changing one (a version or values bump, which k0s does apply
+on the running node) stay reconcilable; only removal is out.
 
 The apply path shares the bootstrap's renderer and validator, so a document the
 node would refuse at boot is a document it refuses to apply, and the same input
