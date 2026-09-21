@@ -1,7 +1,7 @@
 # Configuration reference
 
 What the configuration file contains, where it comes from, and what Corium does
-with it. This page tracks `main`. The current stable release is **0.3.3**, and a
+with it. This page tracks `main`. The current stable release is **0.3.4**, and a
 field newer than the release you are running carries the version that
 introduced it — the
 [changelog](https://github.com/Corium-OS/Corium/blob/main/CHANGELOG.md) lists
