@@ -67,8 +67,8 @@ Corium boots UEFI only. Verify the download before trusting it — the chain is
 [downloads](downloads.md). Then register it with the firmware property set:
 
 ```bash
-openstack image create corium-0.3.3 \
-  --file corium-0.3.3-x86_64.qcow2 --disk-format qcow2 --container-format bare \
+openstack image create corium-0.3.4 \
+  --file corium-0.3.4-x86_64.qcow2 --disk-format qcow2 --container-format bare \
   --property hw_firmware_type=uefi \
   --property hw_machine_type=q35 \
   --property hw_disk_bus=virtio \
@@ -150,7 +150,7 @@ Boot it, and wait for k0s:
 
 ```bash
 openstack server create corium-wg-ctl \
-  --image corium-0.3.3 --flavor c3-4 \
+  --image corium-0.3.4 --flavor c3-4 \
   --key-name corium-wg --security-group corium-wg --network Ext-Net \
   --user-data stretched-controller-calico-wireguard.yaml --wait
 
@@ -197,7 +197,7 @@ Then create both workers:
 ```bash
 for loc in ovh home; do
   openstack server create corium-wg-w-$loc \
-    --image corium-0.3.3 --flavor c3-4 \
+    --image corium-0.3.4 --flavor c3-4 \
     --key-name corium-wg --security-group corium-wg --network Ext-Net \
     --user-data stretched-worker-$loc.yaml --wait
 done
@@ -362,7 +362,7 @@ Calico's UDP/4789) between members — the `--remote-group` rule in step 2 does.
 for n in corium-wg-ctl corium-wg-w-ovh corium-wg-w-home; do
   openstack server delete "$n" --wait
 done
-openstack image delete corium-0.3.3
+openstack image delete corium-0.3.4
 openstack security group delete corium-wg
 openstack keypair delete corium-wg
 ```
