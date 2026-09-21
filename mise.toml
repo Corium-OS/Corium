@@ -36,11 +36,20 @@ IMAGE_NAME = "{{ env.IMAGE_NAME | default(value='corium') }}"
 IMAGE_TAG = "{{ env.IMAGE_TAG | default(value='dev') }}"
 IMAGE = "{{ env.REGISTRY | default(value='ghcr.io/corium-os') }}/{{ env.IMAGE_NAME | default(value='corium') }}:{{ env.IMAGE_TAG | default(value='dev') }}"
 
-# bootc-image-builder turns the OS image into something you can actually boot.
+# The builder that turns the OS image into something you can actually boot.
 # It needs a privileged container and access to the local image store, and it
 # must run on a Linux host: it mounts the root filesystem it creates in order
 # to populate it.
-BIB = "{{ env.BIB | default(value='quay.io/centos-bootc/bootc-image-builder:latest') }}"
+#
+# bootc-image-builder was archived upstream on 2026-06-18 and merged into
+# image-builder, which keeps shipping the same entry point under this name as
+# a compatibility image. The quay.io tag has not moved since that day and its
+# Fedora 42 base is past end of life, so this points at image-builder's copy
+# instead, pinned to a release and its digest: a build is reproducible, and
+# bumping it is a diff someone reads. Why not `image-builder build
+# --bootc-ref` directly yet, and what happens to the ISO, is in
+# docs/adr/0009-image-builder.md.
+BIB = "{{ env.BIB | default(value='ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c') }}"
 
 # The appliance image is built locally and never pushed: it accepts an
 # unauthenticated claim, so publishing one would be handing out machines.

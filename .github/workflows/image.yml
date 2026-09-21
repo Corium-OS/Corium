@@ -501,6 +501,10 @@ jobs:
       - name: Build the artefacts from the published image
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          # The same pin as mise.toml, and for the same reasons; the two are
+          # bumped together. bootc-image-builder is archived and this is the
+          # compatibility image its successor publishes: docs/adr/0009-image-builder.md.
+          BIB: ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c
         run: |
           # Measured, because the numbers in circulation are wrong: GitHub
           # documents 14 GB of runner storage and the figure people repeat is
@@ -532,17 +536,16 @@ jobs:
               --security-opt label=type:unconfined_t \
               -v /var/lib/containers/storage:/var/lib/containers/storage \
               -v "${PWD}/output:/output" \
-              quay.io/centos-bootc/bootc-image-builder:latest \
+              "${BIB}" \
               --type "${type}" \
               "${IMAGE_DIGEST}"
             echo "::endgroup::"
           done
 
-          # bootc-image-builder floats on :latest, here as in mise.toml, so
-          # these are verifiable but not reproducible. Record which builder
-          # produced them, since that is the part we can still be honest about.
-          sudo podman image inspect --format '{{index .RepoDigests 0}}' \
-            quay.io/centos-bootc/bootc-image-builder:latest
+          # The builder is pinned by digest, so these are reproducible from
+          # this workflow file alone. Say which one anyway: a log that names
+          # its inputs is worth more than one that has to be cross-referenced.
+          echo "built with ${BIB}"
 
           sudo chown -R "$(id -u):$(id -g)" output
           find output -type f -printf '%s\t%p\n'

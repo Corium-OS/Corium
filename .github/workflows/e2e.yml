@@ -91,6 +91,11 @@ jobs:
           sudo podman build --tag localhost/corium:e2e --file Containerfile .
 
       - name: Build a disk from it
+        env:
+          # The same pin as mise.toml and the release workflow, bumped with
+          # them: a builder that only the release path has met is not tested.
+          # See docs/adr/0009-image-builder.md.
+          BIB: ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c
         run: |
           mkdir -p output
           # The same invocation the release path uses, so this exercises the
@@ -99,7 +104,7 @@ jobs:
             --security-opt label=type:unconfined_t \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             -v "${PWD}/output:/output" \
-            quay.io/centos-bootc/bootc-image-builder:latest \
+            "${BIB}" \
             --type qcow2 localhost/corium:e2e
           sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
           qemu-img resize output/qcow2/disk.qcow2 20G

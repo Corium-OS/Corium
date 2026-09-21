@@ -12,6 +12,20 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Changed
+
+- **The disk and ISO builder is pinned, and comes from image-builder.**
+  `bootc-image-builder` was archived upstream in June 2026 and folded into
+  [image-builder](https://github.com/osbuild/image-builder), which keeps
+  publishing the same entry point as `ghcr.io/osbuild/bootc-image-builder`.
+  Builds now use that image, pinned to a release and a digest, instead of a
+  `quay.io` tag that stopped moving the day the repository was archived and
+  whose base has since left support. `mise run artefact-*`, the files it
+  writes and the published artefacts are unchanged, and `BIB=` still overrides
+  the builder. What comes after — the disks moving to `image-builder build
+  --bootc-ref`, and an installer ISO of our own once upstream's `anaconda-iso`
+  type is retired — is in [ADR 9](docs/adr/0009-image-builder.md).
+
 ## [0.3.6] - 2026-09-22
 
 ### Fixed
