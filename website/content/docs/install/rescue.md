@@ -26,8 +26,10 @@ cannot run a container at all, and OVH's is one of them.
 - A public SSH key, and the configuration you want the node to have. A
   dedicated server has no metadata service, so both routes seed those by hand.
 - For route B, the Corium qcow2 on the rescue system, and `qemu-img`, `sgdisk`,
-  `growpart`, `resize2fs` and `setfattr` available there. See
-  [downloads](/docs/install/downloads/) for the qcow2 and how to check what you got.
+  `growpart`, `resize2fs`, `setfattr` and `getfattr` available there. The last
+  two are the `attr` package, which a rescue system is as likely to leave out as
+  to ship — OVH's leaves it out. See [downloads](/docs/install/downloads/) for the qcow2 and
+  how to check what you got.
 
 ## Which route
 
@@ -74,7 +76,7 @@ lsblk -o NAME,SIZE,TYPE,MODEL
 podman run --rm --privileged --pid=host \
   -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
   --security-opt label=type:unconfined_t \
-  ghcr.io/corium-os/corium:0.3.0 \
+  ghcr.io/corium-os/corium:0.3.3 \
   bootc install to-disk --wipe /dev/nvme0n1
 ```
 
@@ -127,10 +129,19 @@ grow the root partition to the disk you actually have.
 lsblk -o NAME,SIZE,TYPE,MODEL
 ```
 
+A rescue system rarely has `oras`, and installing one to pull a single blob is
+not worth it. The CDN copy is a plain HTTPS URL, and the release notes publish
+the digest to check it against — the same bytes either way:
+
+```bash
+curl -fsSLO https://corium.b-cdn.net/corium-0.3.3-x86_64.qcow2
+sha256sum corium-0.3.3-x86_64.qcow2   # must equal the digest in the release notes
+```
+
 ```bash
 apt-get install -y qemu-utils        # or the distribution's equivalent
 
-qemu-img convert -O raw -p corium-0.3.0-x86_64.qcow2 /dev/nvme0n1
+qemu-img convert -O raw -p corium-0.3.3-x86_64.qcow2 /dev/nvme0n1
 sync && partprobe /dev/nvme0n1
 
 sgdisk -e /dev/nvme0n1               # move the backup GPT to the end of the real disk
@@ -202,16 +213,49 @@ the journals on a machine you may have no other way into. See
 > unlabelled seed behaves exactly like a node with no seed at all, which makes
 > this the failure most likely to cost an afternoon.
 
-Label them by hand:
+Label them by hand. These four paths are exactly what the `mkdir -p` above
+created, so labelling them covers everything the rescue system brought into
+existence:
 
 ```bash
-for p in ../seed . meta-data user-data; do
+cd /mnt/root/ostree/deploy/default/var/lib/cloud
+
+for p in seed seed/nocloud seed/nocloud/meta-data seed/nocloud/user-data; do
   setfattr -n security.selinux -v "system_u:object_r:cloud_var_lib_t:s0" "$p"
 done
+
+getfattr -R -n security.selinux seed
 ```
 
-`getfattr -n security.selinux --only-values user-data` should print
-`system_u:object_r:cloud_var_lib_t:s0`.
+The last command prints one line per path, each
+`security.selinux="system_u:object_r:cloud_var_lib_t:s0"`. A path that answers
+`No such attribute` instead is one cloud-init will not be allowed to read —
+which is what all four say before the loop runs.
+
+`/var/lib/cloud` itself comes from the image with its label already on it, which
+is why nothing above `seed` is in the loop — and why the loop is anchored there
+rather than written with `..`, which is easy to get wrong by one directory.
+Confirm rather than assume: `getfattr -n security.selinux --only-values .` from
+that directory prints the same type. If it prints nothing, label it the same
+way, and its parents with `var_lib_t` for `/var/lib` and `var_t` for `/var`. An
+unlabelled directory is `unlabeled_t`, which cloud-init may not traverse, so one
+unlabelled parent fails exactly like an unlabelled `user-data`.
+
+> **On 0.3.3 and earlier, add one more file.** `ds-identify` decides whether
+> cloud-init runs at all, and it runs as a systemd generator — before `/var` is
+> mounted, so it cannot see the seed you just wrote and concludes there is
+> nothing to do. The node then boots healthy and completely inert: no account,
+> no API, nothing on the console but a login prompt. Later images ship the fix;
+> on these, write it yourself, into the deployment's `/etc`:
+>
+> ```bash
+> E=$(ls -d /mnt/root/ostree/deploy/default/deploy/*/etc | head -1)
+> echo 'policy: search,found=all,maybe=all,notfound=enabled' > "$E/cloud/ds-identify.cfg"
+> setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$E/cloud/ds-identify.cfg"
+> ```
+>
+> The label matters here for the same reason it does for the seed: cloud-init
+> cannot read what it is not allowed to.
 
 ### 3. Leave rescue mode
 
@@ -235,6 +279,11 @@ produce their own errors first and send you looking in the wrong direction:
 
 Those first two are worth chasing only far enough to reach the third.
 
+It also ships without `attr`, so step 2's labelling dies with `setfattr:
+command not found` — at the one step on this page where doing nothing looks
+like success and costs an afternoon. `apt-get install -y attr` first; the
+rescue has working networking and apt.
+
 ### The UEFI boot entry
 
 The qcow2 carries both the removable path `EFI/BOOT/BOOTX64.EFI` and
@@ -244,8 +293,15 @@ route B's step 1 and before you leave rescue mode:
 
 ```bash
 apt-get install -y efibootmgr
+efibootmgr | grep Corium             # already there? -c would add a second one
 efibootmgr -c -d /dev/nvme0n1 -p 2 -L "Corium" -l '\EFI\fedora\shimx64.efi'
 ```
+
+`-c` creates an entry every time it runs rather than reconciling one, so a
+machine installed twice ends up with two `Corium` entries pointing at the same
+file. `efibootmgr -b <n> -B` deletes one. The partition UUIDs are fixed in the
+image, so an entry made before a reinstall still resolves afterwards and there
+is usually nothing to redo.
 
 Recent hardware is UEFI, and `[ -d /sys/firmware/efi ] && echo UEFI` from the
 rescue says so for the machine in front of you.

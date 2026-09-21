@@ -12,6 +12,43 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A node seeded from a rescue system booted inert, and nothing said why.**
+  `ds-identify` decides whether cloud-init runs, and it runs as a systemd
+  generator — before any mount unit, so on an ostree system it cannot see the
+  stateroot's `/var`. A seed written to `/var/lib/cloud/seed/nocloud`, which is
+  how a dedicated server is configured from rescue mode, was therefore
+  invisible at the moment the question was asked; ds-identify returned
+  notfound, and the default policy turned that into "disable cloud-init for
+  this boot". Neither `corium-bootstrap` nor `corium-apid` started either,
+  because both are `WantedBy=cloud-init.target` and only cloud-init's generator
+  enables that target. The result was a machine that booted healthy and did
+  nothing: no account, since the image creates none, no API, and a console
+  showing a login prompt and no way in. The image now ships
+  `/etc/cloud/ds-identify.cfg` with `notfound=enabled`, so cloud-init starts
+  and repeats the search with `/var` mounted. A node with no seed at all now
+  searches every datasource before giving up, which costs it the
+  metadata-service timeouts on a boot that had nothing to do regardless.
+
+- **The rescue-mode install guide could not be followed as written.** Its
+  SELinux labelling step pointed at `../seed` from inside `seed/nocloud`, which
+  resolves to a directory that has never existed, so the loop failed on its
+  first path and left the seed unlabelled — the exact failure the page opens by
+  warning about. The step is now anchored on `/var/lib/cloud`, checks all four
+  paths in one command, and says what to do when a parent directory is
+  unlabelled too. The page also names the `attr` package that provides
+  `setfattr`, which OVH's rescue does not ship and which its ramfs discards on
+  every boot; shows how to fetch the qcow2 on a rescue system that has no
+  `oras`; and warns that `efibootmgr -c` adds another boot entry every time it
+  runs rather than reconciling one. Checked by running the whole route on a
+  dedicated server.
+
+- **Documentation pinned 0.3.0.** The quick start, downloads and install guides
+  told you to pull artefacts three patch releases old. The configuration and
+  `cctl` references also promised a *new since* marker that no field or command
+  carried, because the markers name the version that introduced them instead.
+
 ## [0.3.3] - 2026-09-20
 
 ### Fixed
