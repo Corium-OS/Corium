@@ -12,6 +12,26 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The rescue-mode install guide could not be followed as written.** Its
+  SELinux labelling step pointed at `../seed` from inside `seed/nocloud`, which
+  resolves to a directory that has never existed, so the loop failed on its
+  first path and left the seed unlabelled — the exact failure the page opens by
+  warning about. The step is now anchored on `/var/lib/cloud`, checks all four
+  paths in one command, and says what to do when a parent directory is
+  unlabelled too. The page also names the `attr` package that provides
+  `setfattr`, which OVH's rescue does not ship and which its ramfs discards on
+  every boot; shows how to fetch the qcow2 on a rescue system that has no
+  `oras`; and warns that `efibootmgr -c` adds another boot entry every time it
+  runs rather than reconciling one. Checked by running the whole route on a
+  dedicated server.
+
+- **Documentation pinned 0.3.0.** The quick start, downloads and install guides
+  told you to pull artefacts three patch releases old. The configuration and
+  `cctl` references also promised a *new since* marker that no field or command
+  carried, because the markers name the version that introduced them instead.
+
 ## [0.3.3] - 2026-09-20
 
 ### Fixed
