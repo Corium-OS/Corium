@@ -139,6 +139,11 @@ PAGES = [
      "Why cctl apply re-applies the safe subset of a running node's "
      "configuration -- the add-on set -- while refusing every field that "
      "defines what the node is, and why it stays explicit rather than a loop."),
+    ("adr/0009-image-builder.md", "decisions", "adr-0009-image-builder",
+     "ADR 9 — Artefact builder", 990,
+     "What replaces the archived bootc-image-builder: which of its successor's "
+     "paths are drop-in, why the ISO is not, where a custom kickstart goes, "
+     "and what pinning buys in the meantime."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
