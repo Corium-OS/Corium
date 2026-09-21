@@ -14,6 +14,23 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **A node seeded from a rescue system booted inert, and nothing said why.**
+  `ds-identify` decides whether cloud-init runs, and it runs as a systemd
+  generator — before any mount unit, so on an ostree system it cannot see the
+  stateroot's `/var`. A seed written to `/var/lib/cloud/seed/nocloud`, which is
+  how a dedicated server is configured from rescue mode, was therefore
+  invisible at the moment the question was asked; ds-identify returned
+  notfound, and the default policy turned that into "disable cloud-init for
+  this boot". Neither `corium-bootstrap` nor `corium-apid` started either,
+  because both are `WantedBy=cloud-init.target` and only cloud-init's generator
+  enables that target. The result was a machine that booted healthy and did
+  nothing: no account, since the image creates none, no API, and a console
+  showing a login prompt and no way in. The image now ships
+  `/etc/cloud/ds-identify.cfg` with `notfound=enabled`, so cloud-init starts
+  and repeats the search with `/var` mounted. A node with no seed at all now
+  searches every datasource before giving up, which costs it the
+  metadata-service timeouts on a boot that had nothing to do regardless.
+
 - **The rescue-mode install guide could not be followed as written.** Its
   SELinux labelling step pointed at `../seed` from inside `seed/nocloud`, which
   resolves to a directory that has never existed, so the loop failed on its

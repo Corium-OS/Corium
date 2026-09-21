@@ -241,6 +241,22 @@ way, and its parents with `var_lib_t` for `/var/lib` and `var_t` for `/var`. An
 unlabelled directory is `unlabeled_t`, which cloud-init may not traverse, so one
 unlabelled parent fails exactly like an unlabelled `user-data`.
 
+> **On 0.3.3 and earlier, add one more file.** `ds-identify` decides whether
+> cloud-init runs at all, and it runs as a systemd generator — before `/var` is
+> mounted, so it cannot see the seed you just wrote and concludes there is
+> nothing to do. The node then boots healthy and completely inert: no account,
+> no API, nothing on the console but a login prompt. Later images ship the fix;
+> on these, write it yourself, into the deployment's `/etc`:
+>
+> ```bash
+> E=$(ls -d /mnt/root/ostree/deploy/default/deploy/*/etc | head -1)
+> echo 'policy: search,found=all,maybe=all,notfound=enabled' > "$E/cloud/ds-identify.cfg"
+> setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$E/cloud/ds-identify.cfg"
+> ```
+>
+> The label matters here for the same reason it does for the seed: cloud-init
+> cannot read what it is not allowed to.
+
 ### 3. Leave rescue mode
 
 Unmount everything, **disable rescue mode in the provider's panel**, and
