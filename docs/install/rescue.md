@@ -67,7 +67,7 @@ lsblk -o NAME,SIZE,TYPE,MODEL
 podman run --rm --privileged --pid=host \
   -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
   --security-opt label=type:unconfined_t \
-  ghcr.io/corium-os/corium:0.3.5 \
+  ghcr.io/corium-os/corium:0.3.6 \
   bootc install to-disk --wipe /dev/nvme0n1
 ```
 
@@ -125,14 +125,14 @@ not worth it. The CDN copy is a plain HTTPS URL, and the release notes publish
 the digest to check it against — the same bytes either way:
 
 ```bash
-curl -fsSLO https://corium.b-cdn.net/corium-0.3.5-x86_64.qcow2
-sha256sum corium-0.3.5-x86_64.qcow2   # must equal the digest in the release notes
+curl -fsSLO https://corium.b-cdn.net/corium-0.3.6-x86_64.qcow2
+sha256sum corium-0.3.6-x86_64.qcow2   # must equal the digest in the release notes
 ```
 
 ```bash
 apt-get install -y qemu-utils        # or the distribution's equivalent
 
-qemu-img convert -O raw -p corium-0.3.5-x86_64.qcow2 /dev/nvme0n1
+qemu-img convert -O raw -p corium-0.3.6-x86_64.qcow2 /dev/nvme0n1
 sync && partprobe /dev/nvme0n1
 
 sgdisk -e /dev/nvme0n1               # move the backup GPT to the end of the real disk

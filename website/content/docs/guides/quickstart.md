@@ -15,7 +15,7 @@ managing it without SSH.
 The short version, if you are in a hurry:
 
 ```bash
-oras pull ghcr.io/corium-os/corium-qcow2:0.3.5   # download a ready-made disk
+oras pull ghcr.io/corium-os/corium-qcow2:0.3.6   # download a ready-made disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -50,8 +50,8 @@ Pull the artefact that matches where the node will run:
 
 | Artefact | Pull it with | Use it for |
 |---|---|---|
-| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.3.5` | Proxmox, KVM, libvirt |
-| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.3.5` | Bare metal. Installs unattended |
+| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.3.6` | Proxmox, KVM, libvirt |
+| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.3.6` | Bare metal. Installs unattended |
 
 The tag above is only an example. **The exact coordinates for a given version,
 with their digests, are on that version's
@@ -64,7 +64,7 @@ No `oras`? A plain `curl` or a browser download works too. See
 received is what was published:
 
 ```bash
-cosign verify ghcr.io/corium-os/corium-qcow2:0.3.5 \
+cosign verify ghcr.io/corium-os/corium-qcow2:0.3.6 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -222,7 +222,7 @@ Install `cctl` on your own machine. Archives are attached to each release, for
 linux and macOS on amd64 and arm64:
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.5'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.6'
 ```
 
 The quotes and the version are both required. See
@@ -394,7 +394,7 @@ survive an upgrade.
 To publish it:
 
 ```bash
-REGISTRY=ghcr.io/you IMAGE_TAG=0.3.5-1 mise run push
+REGISTRY=ghcr.io/you IMAGE_TAG=0.3.6-1 mise run push
 ```
 
 ### Turn it into a disk
