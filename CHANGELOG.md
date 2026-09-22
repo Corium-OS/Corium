@@ -12,6 +12,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cctl upgrade` could never reboot a single-node cluster, and reported a
+  misleading failure when it did not.** `apply` drains a control-plane node
+  before rebooting, but draining the only node in a cluster has nowhere to move
+  its pods, so eviction blocks on their disruption budgets and the drain can
+  never finish — cancelling the upgrade and leaving the node staged but never
+  rebooted. A `single` node (or any cluster of one) now skips the drain and
+  reboots straight into the staged image, the same as a worker does. Separately,
+  `cctl`'s post-reboot check accepted the first reply from the node without
+  confirming it had actually rebooted: because the drain-and-reboot runs
+  asynchronously, the node kept answering on its old image, and `cctl` read that
+  as "came back on the wrong digest". It now waits for the node's uptime to drop
+  below what it was before the reboot, and on a node that never reboots it times
+  out saying so rather than blaming the image.
+
 ## [0.3.5] - 2026-09-22
 
 ### Added

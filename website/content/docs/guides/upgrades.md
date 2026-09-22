@@ -308,6 +308,13 @@ Two behaviours worth knowing, because both are deliberate:
   credentials, and only a node running a control plane has them locally. On
   `worker` nodes, `apply` behaves as it did before. Use `download` there and
   drive the reboot from somewhere that can talk to the API.
+- **A single-node cluster reboots undrained too.** Draining the only node has
+  nowhere to move its pods, so eviction blocks on their disruption budgets and
+  the drain can never finish — which, under the rule above, would cancel every
+  upgrade. So a `single` node (or any cluster of one) skips the drain and
+  reboots straight into the staged image; its pods come back when it does. This
+  is what lets `cctl upgrade` actually reboot a one-box cluster rather than
+  leaving it staged forever.
 - **The new image stays locked until the drain has succeeded.** `apply` stages
   with `bootc upgrade --download-only`, which leaves the deployment *locked for
   finalization*, and unlocks it with `--from-downloaded` only once the node is
