@@ -37,7 +37,7 @@ it needs a CA you have already made.
 
 ```bash
 # The image, derived from whichever Corium release you want to base it on.
-IMAGE=ghcr.io/corium-os/corium:0.3.5 mise run appliance-image
+IMAGE=ghcr.io/corium-os/corium:0.3.6 mise run appliance-image
 
 # An installer ISO from it.
 IMAGE=localhost/corium-appliance:dev mise run artefact-anaconda-iso
