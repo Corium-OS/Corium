@@ -12,6 +12,21 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **`cctl apply` re-applies the `k0s` escape hatch day-two, instead of refusing
+  it.** Changing `k0s.patch` on a node already in service — adding an OIDC
+  `extraArgs` to the API server, say — used to return `409 Conflict` and send
+  the operator to `cctl reset`, which on a single node meant destroying a
+  cluster to change one flag. `k0s` now joins `addons` in the safe subset: the
+  node regenerates `/etc/k0s/k0s.yaml` and cycles the control plane so k0s
+  reconciles against it, at the cost of the same brief control-plane pause an
+  add-on change already carries. The patch re-applies with the contract it has
+  at bootstrap — Corium checks only that the result is valid YAML, and a patch
+  that breaks the cluster is yours to own. Every field Corium models (`role`,
+  `cluster`, `network`, and the rest) stays immutable in service and still
+  needs a reset. See [ADR 8](docs/adr/0008-day-two-reconcile.md).
+
 ## [0.3.4] - 2026-09-21
 
 ### Fixed

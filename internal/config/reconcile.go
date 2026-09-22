@@ -20,6 +20,14 @@ type ReconcilePlan struct {
 	// RemovedAddons.
 	Addons bool
 
+	// K0s is true when the k0s escape hatch (`k0s.patch`) changed. Like Addons
+	// it renders into /etc/k0s/k0s.yaml, which k0s reconciles when the
+	// controller restarts, so it is re-applied the same way rather than sending
+	// the node to a reset. The patch is passed through verbatim, so a change
+	// that rewrites something load-bearing is the operator's to own -- the same
+	// contract it carries at bootstrap.
+	K0s bool
+
 	// RemovedAddons names the charts present in the running configuration and
 	// absent from the proposal. Removal is not reconcilable: k0s's Helm
 	// extensions install a chart from the configuration but do not uninstall
@@ -38,19 +46,22 @@ func (p ReconcilePlan) Reconcilable() bool {
 // Empty reports that the two configurations are equivalent for reconciliation:
 // nothing immutable and nothing in the safe subset changed.
 func (p ReconcilePlan) Empty() bool {
-	return len(p.Immutable) == 0 && !p.Addons
+	return len(p.Immutable) == 0 && !p.Addons && !p.K0s
 }
 
 // PlanReconcile classifies the change from a node's running configuration (old)
 // to a proposed one (new), field by field.
 //
-// The safe subset is deliberately one field wide: `addons`, whose reconciler is
-// k0s. Every other field is treated as immutable day-two, because it defines
-// the node's identity (`role`, `node`), its cluster (`cluster`, `join`, `ha`),
-// its network or disks (`network`, `storage`, `raid`, `wireguard`), or reaches
-// past what this path can reason about (`k0s`, and for now `upgrades` and
-// `api`). Changing any of those is a provisioning act. See ADR 8; the set the
-// node calls safe is expected to grow there before it grows here.
+// The safe subset is `addons` and the `k0s` escape hatch. Both render into
+// /etc/k0s/k0s.yaml, which k0s reconciles when the controller restarts:
+// `addons` are charts k0s installs, and `k0s.patch` is passed through verbatim,
+// so a patch that rewrites something load-bearing is the operator's to own --
+// the same contract it carries at bootstrap. Every other field stays immutable
+// day-two, because it defines the node's identity (`role`, `node`), its cluster
+// (`cluster`, `join`, `ha`), its network or disks (`network`, `storage`,
+// `raid`, `wireguard`), or is not yet reconciled here (`upgrades`, `api`).
+// Changing any of those is a provisioning act. See ADR 8; the set the node
+// calls safe is expected to grow.
 func PlanReconcile(old, next *Config) ReconcilePlan {
 	var plan ReconcilePlan
 
@@ -73,7 +84,6 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 		{"wireguard", old.WireGuard, next.WireGuard},
 		{"upgrades", old.Upgrades, next.Upgrades},
 		{"api", old.API, next.API},
-		{"k0s", old.K0s, next.K0s},
 	}
 
 	for _, field := range immutable {
@@ -84,6 +94,7 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 
 	plan.Addons = !reflect.DeepEqual(old.Addons, next.Addons)
 	plan.RemovedAddons = removedAddons(old.Addons, next.Addons)
+	plan.K0s = !reflect.DeepEqual(old.K0s, next.K0s)
 
 	return plan
 }

@@ -106,6 +106,36 @@ addons:
 	}
 }
 
+func TestPlanReconcileK0sPatchIsSafe(t *testing.T) {
+	// The k0s escape hatch renders into k0s.yaml, which k0s reconciles on a
+	// controller restart, so changing it day-two is reconcilable rather than a
+	// reset -- the patch is the operator's to own, as it is at bootstrap.
+	old := parseForReconcile(t, "role: single\n")
+	next := parseForReconcile(t, `role: single
+k0s:
+  patch:
+    spec:
+      api:
+        extraArgs:
+          oidc-issuer-url: https://id.example.com
+          oidc-client-id: k0s
+`)
+
+	plan := PlanReconcile(old, next)
+
+	if !plan.K0s {
+		t.Error("a changed k0s patch should be seen as a k0s change")
+	}
+
+	if !plan.Reconcilable() {
+		t.Errorf("a k0s-only change must be reconcilable, got immutable %v", plan.Immutable)
+	}
+
+	if plan.Empty() {
+		t.Error("a k0s change is not nothing")
+	}
+}
+
 func TestPlanReconcileImmutableFieldsAreRefused(t *testing.T) {
 	base := "role: single\n"
 
@@ -124,9 +154,6 @@ func TestPlanReconcileImmutableFieldsAreRefused(t *testing.T) {
 		},
 		"network": {
 			"role: single\nnetwork:\n  podCIDR: 10.9.0.0/16\n", "network",
-		},
-		"the k0s escape hatch": {
-			"role: single\nk0s:\n  patch:\n    spec:\n      images:\n        konnectivity:\n          image: x\n", "k0s",
 		},
 		"upgrades": {
 			"role: single\nupgrades:\n  automatic: apply\n", "upgrades",
