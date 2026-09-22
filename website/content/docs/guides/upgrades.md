@@ -76,7 +76,7 @@ what makes the maintenance window yours to choose:
 
 ```
 Queued for next boot: ghcr.io/corium-os/corium:0.3
-  Version: 0.3.4
+  Version: 0.3.5
   Digest: sha256:38c2194904b1de400a6f2366760c85dae5e45bb7f5f500612bb428817e850bb6
 ```
 
@@ -244,13 +244,13 @@ accepts.
 | Tag | Moves | You get |
 |---|---|---|
 | `corium@sha256:...` | Never | Exactly one image. The strongest pin |
-| `corium:0.3.4` | Never | One release |
+| `corium:0.3.5` | Never | One release |
 | `corium:0.3` | On patch releases | Fixes, no new behaviour |
 | `corium:latest` | On every release | Whatever is newest |
 | `corium:main` | On every push to `main` | Development builds, unreleased |
 
 **Track `0.3`.** It moves only on patch releases, which do not change
-behaviour, so it picks up fixes without you deciding anything. Pin `0.3.4`
+behaviour, so it picks up fixes without you deciding anything. Pin `0.3.5`
 exactly if you would rather choose the moment yourself, and read the changelog
 before moving to `0.4`: a minor release may require a configuration change, and
 it will say which.

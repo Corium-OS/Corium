@@ -221,7 +221,7 @@ from `deploy/proxmox/`.
 > it **destroys** any VM already holding one of those VMIDs.
 
 ```bash
-DISK_IMAGE=/var/lib/vz/template/corium-0.3.4-x86_64.qcow2 \
+DISK_IMAGE=/var/lib/vz/template/corium-0.3.5-x86_64.qcow2 \
 SSH_KEY="$(cat ~/.ssh/id_ed25519.pub)" \
 CLUSTER_NAME=homelab VIP=192.168.0.200 GATEWAY=192.168.0.1 \
 NODE_IPS="192.168.0.201 192.168.0.202 192.168.0.203" \
