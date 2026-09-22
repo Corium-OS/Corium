@@ -92,11 +92,36 @@ grep -q "role *single" <<<"${STATUS}" || fail "status does not report role singl
 grep -q "cluster *e2e" <<<"${STATUS}" ||
 	fail "status does not name the cluster the applied configuration asked for, so the node bootstrapped with the document it booted with rather than the one it was sent"
 
-step "a bootstrapped node refuses a new configuration"
-if "${CCTL}" apply "${ADDRESS}" --file "${WORK}/node.yaml" >/dev/null 2>&1; then
-	fail "apply succeeded on a bootstrapped node; it must refuse with 409"
+step "a bootstrapped node accepts the document it is already running"
+# Re-applying on a bootstrapped node used to be a flat refusal, and this script
+# checked for one. ADR 8 changed that: the safe subset is re-applied in place,
+# and a document identical to what the node runs is reported as unchanged
+# rather than refused. The rule is enforced by the node, not by cctl, so this
+# is the node being asked.
+APPLIED="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/node.yaml")" ||
+	fail "apply of the document the node is already running was refused; since ADR 8 it must be accepted, and reported as unchanged"
+echo "${APPLIED}"
+grep -q "No change on" <<<"${APPLIED}" ||
+	fail "apply of the running document was accepted but not reported as unchanged, so the node either rewrote something or misread its own baseline"
+
+step "a bootstrapped node refuses a change to what it is"
+# The other half of ADR 8. An identity field -- here the cluster name -- cannot
+# change on a node in service; the answer is a 409 that names the field and
+# points at cctl reset, so an operator sees which part of their document is the
+# problem rather than that there was one.
+sed 's/^    name: e2e$/    name: somewhere-else/' "${WORK}/node.yaml" \
+	> "${WORK}/other-cluster.yaml"
+grep -q "somewhere-else" "${WORK}/other-cluster.yaml" ||
+	fail "this script could not rewrite the cluster name in its own document; the heredoc above changed shape"
+if REFUSAL="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/other-cluster.yaml" 2>&1)"; then
+	fail "apply changed the cluster of a bootstrapped node; it must refuse with 409 and point at cctl reset"
 fi
-echo "refused, as it must"
+echo "${REFUSAL}"
+grep -q "409" <<<"${REFUSAL}" ||
+	fail "the refusal was not a 409; a node that will not make a change must say so as a conflict, not as an error in the request"
+grep -q "cluster" <<<"${REFUSAL}" ||
+	fail "the refusal does not name the field it refused (cluster)"
+echo "refused, naming the field, as it must"
 
 step "services and journals"
 "${CCTL}" services "${ADDRESS}"
