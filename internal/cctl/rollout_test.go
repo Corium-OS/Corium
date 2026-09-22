@@ -26,6 +26,15 @@ type fakeNode struct {
 	// the case that matters most: a node that rebooted onto something else.
 	comesBackAs string
 
+	// uptime is what the node reports, in seconds. A simulated reboot resets it
+	// low, which is how waitForReturn tells a real return from a node that only
+	// answered on its way down.
+	uptime int64
+
+	// stuckUp models a node whose drain never lets it reboot: Apply is accepted
+	// but the node keeps answering on its old image at its old uptime.
+	stuckUp bool
+
 	// failStage and failApply make the node refuse.
 	failStage, failApply error
 
@@ -42,6 +51,7 @@ func (f *fakeNode) node() *nodeinfo.Node {
 			Service: "k0sworker.service",
 			Active:  !f.unhealthy,
 		},
+		Health: nodeinfo.Health{UptimeSeconds: f.uptime},
 	}
 }
 
@@ -122,6 +132,69 @@ func TestRolloutStopsAtTheFirstNodeThatDoesNotComeBack(t *testing.T) {
 	// do with a half-upgraded cluster.
 	if !strings.Contains(err.Error(), "1 of 3") {
 		t.Errorf("error = %q, want it to say how many were upgraded", err)
+	}
+}
+
+func TestRolloutWaitsForARealRebootNotJustAReply(t *testing.T) {
+	// The bug this guards: Apply starts the drain-and-reboot asynchronously, so
+	// the node keeps answering for a while. A node whose drain never lets it
+	// reboot answers throughout -- and must not be read as "came back" on its
+	// pre-reboot state. It is a timeout that names the reason, not a success.
+	fleet := &fleet{t: t, nodes: map[string]*fakeNode{
+		"a:7443": {digest: "sha256:old", active: true, uptime: 68_400, stuckUp: true},
+	}}
+
+	var out strings.Builder
+
+	rollout := &Rollout{
+		Image:   "ghcr.io/corium-os/corium:0.2",
+		Nodes:   []string{"a:7443"},
+		Connect: fleet.connect,
+		Poll:    time.Millisecond,
+		Settle:  40 * time.Millisecond,
+		Out:     &out,
+	}
+
+	err := rollout.Run(t.Context())
+	if err == nil {
+		t.Fatalf("Run() = nil, want a failure for a node that never rebooted\n%s", out.String())
+	}
+
+	if !strings.Contains(err.Error(), "did not reboot") {
+		t.Errorf("error = %q, want it to say the node did not reboot", err)
+	}
+
+	// It was told to apply -- the staging and the reboot request happened; what
+	// did not happen is the reboot itself, and the check caught that.
+	if fleet.nodes["a:7443"].applied != 1 {
+		t.Errorf("applied %d times, want 1", fleet.nodes["a:7443"].applied)
+	}
+}
+
+func TestRolloutAcceptsAReturnOnceUptimeDrops(t *testing.T) {
+	// The other side of the gate: a node that really rebooted reports an uptime
+	// below what it had before, and is accepted on the image it staged.
+	fleet := &fleet{t: t, nodes: map[string]*fakeNode{
+		"a:7443": {digest: "sha256:old", active: true, uptime: 68_400},
+	}}
+
+	var out strings.Builder
+
+	rollout := &Rollout{
+		Image:   "ghcr.io/corium-os/corium:0.2",
+		Nodes:   []string{"a:7443"},
+		Connect: fleet.connect,
+		Poll:    time.Millisecond,
+		Settle:  time.Second,
+		Out:     &out,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v\n%s", err, out.String())
+	}
+
+	if fleet.nodes["a:7443"].applied != 1 {
+		t.Errorf("applied %d times, want 1", fleet.nodes["a:7443"].applied)
 	}
 }
 
@@ -248,11 +321,16 @@ func newTestClient(t *testing.T, node *fakeNode) *Client {
 
 		node.applied++
 
-		// The reboot, compressed: the node comes back on what it staged, or on
-		// whatever the test said it would come back as.
-		node.digest = node.staged
-		if node.comesBackAs != "" {
-			node.digest = node.comesBackAs
+		if !node.stuckUp {
+			// The reboot, compressed: the node comes back on what it staged, or
+			// on whatever the test said it would come back as, and its uptime
+			// resets the way a real boot's would.
+			node.digest = node.staged
+			if node.comesBackAs != "" {
+				node.digest = node.comesBackAs
+			}
+
+			node.uptime = 30
 		}
 
 		w.WriteHeader(http.StatusAccepted)

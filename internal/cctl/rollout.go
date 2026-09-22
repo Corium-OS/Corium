@@ -108,7 +108,12 @@ func (r *Rollout) upgradeOne(ctx context.Context, address string) error {
 
 	r.say("        draining and rebooting")
 
-	after, err := r.waitForReturn(ctx, address)
+	// The uptime before the reboot is what tells a real return from a node that
+	// merely answered: Apply starts the drain-and-reboot asynchronously, so the
+	// node keeps replying for a while, and reading its still-running state as
+	// "came back" is how an upgrade that never rebooted gets called a failure on
+	// the wrong image. waitForReturn holds out for an uptime lower than this.
+	after, err := r.waitForReturn(ctx, address, before.Health.UptimeSeconds)
 	if err != nil {
 		return err
 	}
@@ -134,15 +139,24 @@ func (r *Rollout) upgradeOne(ctx context.Context, address string) error {
 	return nil
 }
 
-// waitForReturn polls until the node answers again.
+// waitForReturn polls until the node answers again on a fresh boot.
 //
 // The connection is expected to fail for a while: the machine is rebooting.
-// Failures are the normal state here, and only the deadline ends the wait.
-func (r *Rollout) waitForReturn(ctx context.Context, address string) (*nodeinfo.Node, error) {
+// Failures are the normal state here. But a success is not enough on its own --
+// the drain runs asynchronously and the node answers throughout it, so a reply
+// is accepted only once its uptime has dropped below what it was before Apply,
+// which is the one thing that cannot be true without a reboot in between. Only
+// the deadline ends the wait.
+func (r *Rollout) waitForReturn(ctx context.Context, address string, beforeUptime int64) (*nodeinfo.Node, error) {
 	deadline := time.Now().Add(r.Settle)
 
 	ticker := time.NewTicker(r.Poll)
 	defer ticker.Stop()
+
+	// Set once the node has answered without having rebooted, so the timeout can
+	// say which of the two failures this was: a node that never came back at
+	// all, or one that stayed up because its drain never let it reboot.
+	answeredWithoutReboot := false
 
 	for {
 		select {
@@ -154,17 +168,43 @@ func (r *Rollout) waitForReturn(ctx context.Context, address string) (*nodeinfo.
 		r.say(".")
 
 		if node, err := r.probe(ctx, address); err == nil {
-			r.say("\n")
+			if rebooted(beforeUptime, node) {
+				r.say("\n")
 
-			return node, nil
+				return node, nil
+			}
+
+			answeredWithoutReboot = true
 		}
 
 		if time.Now().After(deadline) {
 			r.say("\n")
 
+			if answeredWithoutReboot {
+				return nil, fmt.Errorf(
+					"stayed up and did not reboot within %s, so the staged image was "+
+						"never applied -- its drain may not have finished", r.Settle)
+			}
+
 			return nil, fmt.Errorf("did not come back within %s", r.Settle)
 		}
 	}
+}
+
+// rebooted reports whether the node has restarted since it was last seen.
+//
+// A reboot resets uptime, so an uptime below the one recorded before Apply is
+// the proof a reply came from a fresh boot rather than from a node still on its
+// way down. When the earlier uptime is unknown -- a node old enough not to
+// report it -- there is nothing to compare against, so the reply is accepted
+// rather than waited on forever: the weaker guarantee this had before uptime
+// was reported, and no worse than it.
+func rebooted(beforeUptime int64, node *nodeinfo.Node) bool {
+	if beforeUptime <= 0 {
+		return true
+	}
+
+	return node.Health.UptimeSeconds < beforeUptime
 }
 
 func (r *Rollout) probe(ctx context.Context, address string) (*nodeinfo.Node, error) {

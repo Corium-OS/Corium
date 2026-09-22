@@ -40,32 +40,46 @@ log "a new image is staged"
 # undrained -- the same behaviour as before, and documented as such.
 node="$(hostname)"
 
-if k0s kubectl get node "${node}" &>/dev/null; then
-    log "draining ${node}"
-
-    # The marker is written before draining, not after: if the reboot happens
-    # between the two, the node must still know to uncordon itself.
-    mkdir -p "$(dirname "${CORDON_MARKER}")"
-    touch "${CORDON_MARKER}"
-
-    if ! k0s kubectl drain "${node}" \
-        --ignore-daemonsets \
-        --delete-emptydir-data \
-        --timeout="${DRAIN_TIMEOUT}"; then
-
-        # Deliberately not rebooting. A drain usually fails because a pod
-        # disruption budget says this workload cannot lose a replica right now
-        # -- which is exactly the situation where forcing a reboot is wrong.
-        # The timer will try again later.
-        log "drain did not finish; leaving the node up and the image staged" >&2
-        k0s kubectl uncordon "${node}" || true
-        rm -f "${CORDON_MARKER}"
-        exit 1
-    fi
-
-    log "drained"
-else
+if ! k0s kubectl get node "${node}" &>/dev/null; then
     log "no cluster admin access on this node; rebooting without draining"
+else
+    # Draining the only node in a cluster is futile: there is nowhere to
+    # reschedule its pods, so eviction blocks on their pod disruption budgets
+    # and the drain can never finish. A node that drained itself here would
+    # cancel every upgrade on a drain that structurally cannot succeed -- which
+    # is exactly what stranded single-node clusters on their old image. So the
+    # only node reboots undrained, the same as a worker does: its pods come back
+    # when it does. `|| true` because a transient API hiccup here should fall
+    # through to a normal drain, not skip one that would have worked.
+    node_count="$(k0s kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || true)"
+
+    if [[ "${node_count}" == "1" ]]; then
+        log "single-node cluster; rebooting without draining (nowhere to evict to)"
+    else
+        log "draining ${node}"
+
+        # The marker is written before draining, not after: if the reboot
+        # happens between the two, the node must still know to uncordon itself.
+        mkdir -p "$(dirname "${CORDON_MARKER}")"
+        touch "${CORDON_MARKER}"
+
+        if ! k0s kubectl drain "${node}" \
+            --ignore-daemonsets \
+            --delete-emptydir-data \
+            --timeout="${DRAIN_TIMEOUT}"; then
+
+            # Deliberately not rebooting. A drain usually fails because a pod
+            # disruption budget says this workload cannot lose a replica right
+            # now -- which is exactly the situation where forcing a reboot is
+            # wrong. The timer will try again later.
+            log "drain did not finish; leaving the node up and the image staged" >&2
+            k0s kubectl uncordon "${node}" || true
+            rm -f "${CORDON_MARKER}"
+            exit 1
+        fi
+
+        log "drained"
+    fi
 fi
 
 # 3. Unlock the staged deployment, then boot into it.
