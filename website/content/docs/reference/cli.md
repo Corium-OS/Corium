@@ -317,7 +317,7 @@ What the command does depends on where the node is in its life:
 | The node | What `cctl apply` does |
 |---|---|
 | Has not bootstrapped | `applied`: the document is written, and is what the node will bootstrap with |
-| Has bootstrapped, and only the add-on set differs | `reconciled`, or `unchanged` when the document matches what it is already running |
+| Has bootstrapped, and only the add-on set or the `k0s` block differs | `reconciled`, or `unchanged` when the document matches what it is already running |
 | Has bootstrapped, and an identity field differs | `409`, naming the field it refused and pointing at `cctl reset` |
 
 Rewriting what a node *is* while it is in service would leave its configuration
@@ -326,14 +326,21 @@ provisioning model exists to prevent. See
 [ADR 8](/docs/decisions/adr-0008-day-two-reconcile/).
 
 The identity fields are `role`, `cluster`, `join`, `node`, `network`, `storage`,
-`raid`, `wireguard`, `ha`, `upgrades`, `api` and `k0s`. The safe subset today is
-`addons` alone, and it is expected to grow. A reconcile regenerates the node's
-k0s configuration and cycles the control plane so k0s installs or updates the
-chart, and the change is live rather than deferred to the next boot; only a
-controller does that, because a worker's charts are declared by the controllers
-and rewriting its copy would change nothing it runs. The whole rule is enforced
-by the node, not by `cctl` and not by your role — an `admin` certificate does
-not get past it either.
+`raid`, `wireguard`, `ha`, `upgrades` and `api`. The safe subset today is
+`addons` and the `k0s` escape hatch, and it is expected to grow. A reconcile
+regenerates the node's k0s configuration and cycles the control plane so k0s
+installs or updates the chart, or picks up the patched configuration — an OIDC
+`extraArgs` on the API server, say — and the change is live rather than deferred
+to the next boot; only a controller does that, because a worker's charts and
+cluster configuration are declared by the controllers and rewriting its copy
+would change nothing it runs. The whole rule is enforced by the node, not by
+`cctl` and not by your role — an `admin` certificate does not get past it either.
+
+`k0s.patch` is passed through verbatim, so it re-applies with the same contract
+it carries at bootstrap: Corium checks only that the result is valid YAML, and a
+patch that rewrites something load-bearing — or breaks the cluster — is yours to
+own. What it cannot do is change a field Corium *models* (`role`, `cluster`, and
+the rest above); those stay a reset away.
 
 Two edges are worth knowing. **Removing** an add-on is refused, not applied:
 k0s installs a chart from its configuration but does not uninstall one dropped

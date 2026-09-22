@@ -67,8 +67,9 @@ type reconcileResult struct {
 // bootstrapped, and refuses anything outside it.
 //
 // It is what turns `cctl apply` on a running node from a flat refusal into the
-// gated re-application ADR 8 describes: the add-on set is handed back to k0s to
-// reconcile, and every field that defines what the node is refuses to move.
+// gated re-application ADR 8 describes: the add-on set and the k0s escape hatch
+// are handed back to k0s to reconcile, and every field that defines what the
+// node is refuses to move.
 func (s *Server) reconcile(ctx context.Context, next *config.Config, document []byte) (reconcileResult, error) {
 	baseline, err := s.baselineConfig()
 	if err != nil {
@@ -93,36 +94,48 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 
 	var result reconcileResult
 
+	// Both the add-on set and the k0s escape hatch render into k0s.yaml, so a
+	// change to either is re-applied the same way: regenerate the file and let
+	// k0s reconcile against it. Named separately so the response says which one
+	// moved.
+	renderNeeded := false
+
 	if plan.Addons {
 		result.changed = append(result.changed, "addons")
+		renderNeeded = true
+	}
 
-		// Add-ons render into the k0s configuration as Helm extensions, so they
-		// are a control-plane concern: on a worker the charts are declared by
-		// the controllers, and rewriting this node's copy changes nothing it
-		// runs. Only a controller re-renders and restarts.
-		if next.Role.IsController() {
-			rendered, err := k0s.Render(next)
-			if err != nil {
-				return reconcileResult{}, fmt.Errorf("rendering k0s configuration: %w", err)
-			}
+	if plan.K0s {
+		result.changed = append(result.changed, "k0s")
+		renderNeeded = true
+	}
 
-			// Reusing writeConfigDocument for its atomic 0600 write: a k0s.yaml
-			// is not a login banner, and a half-written one is worse than none.
-			if err := writeConfigDocument(s.k0sConfigPath, rendered); err != nil {
-				return reconcileResult{}, err
-			}
-
-			// k0s reads its configuration at startup and reconciles its Helm
-			// chart set to match, so a restart is how a changed add-on set is
-			// picked up. On a single node this is a brief control-plane pause;
-			// the kubelet and its pods keep running. See ADR 8.
-			service := k0s.ServiceName(next.Role)
-			if _, err := s.systemd.Restart(ctx, service); err != nil {
-				return reconcileResult{}, fmt.Errorf("restarting %s: %w", service, err)
-			}
-
-			result.restarted = service
+	// The rendered k0s.yaml is a control-plane concern: on a worker the charts
+	// and the cluster configuration are owned by the controllers, so rewriting
+	// this node's copy changes nothing it runs. Only a controller re-renders and
+	// restarts.
+	if renderNeeded && next.Role.IsController() {
+		rendered, err := k0s.Render(next)
+		if err != nil {
+			return reconcileResult{}, fmt.Errorf("rendering k0s configuration: %w", err)
 		}
+
+		// Reusing writeConfigDocument for its atomic 0600 write: a k0s.yaml is
+		// not a login banner, and a half-written one is worse than none.
+		if err := writeConfigDocument(s.k0sConfigPath, rendered); err != nil {
+			return reconcileResult{}, err
+		}
+
+		// k0s reads its configuration at startup and reconciles to match, so a
+		// restart is how a changed add-on set or k0s patch is picked up. On a
+		// single node this is a brief control-plane pause; the kubelet and its
+		// pods keep running. See ADR 8.
+		service := k0s.ServiceName(next.Role)
+		if _, err := s.systemd.Restart(ctx, service); err != nil {
+			return reconcileResult{}, fmt.Errorf("restarting %s: %w", service, err)
+		}
+
+		result.restarted = service
 	}
 
 	// Persisted last, once the change is live: the document the node acted on

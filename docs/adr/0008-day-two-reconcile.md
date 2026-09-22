@@ -87,13 +87,26 @@ file happens to say, the node records the document it last applied — extending
 apply is then a no-op, as AGENTS §7 requires, and the diff is against the intent
 the node is actually running.
 
-`k0s.patch` — the escape hatch — is deliberately **not** in the safe subset. A
-patch can rewrite any part of the k0s configuration, including parts as
-load-bearing as `cluster`, and Corium cannot tell a safe patch from a
-cluster-redefining one by inspecting it. For the gate it is treated as an
-immutable field: a node whose `k0s.patch` changed is sent to `cctl reset`, or its
-operator edits k0s by hand and owns the result. A later revision may carve out
-provably-safe corners of it.
+`k0s.patch` — the escape hatch — was **originally excluded** from the safe
+subset, on the reasoning that a patch can rewrite any part of the k0s
+configuration, including parts as load-bearing as `cluster`, and Corium cannot
+tell a safe patch from a cluster-redefining one by inspecting it. The gate
+treated it as immutable and sent a node whose patch changed to `cctl reset`.
+
+**Amended 2026-09-22: `k0s.patch` is now in the safe subset.** A reconcile
+regenerates `/etc/k0s/k0s.yaml` and lets k0s reconcile against it, exactly as
+`addons` do, with the same controller restart — which is what makes a day-two
+change like adding an OIDC `extraArgs` to the API server land without a reset.
+The judgement Corium declined to make — safe patch versus cluster-redefining
+one — is still not made, and does not need to be: the patch carries the same
+contract day-two that it carries at bootstrap, where it is "passed through
+without interpretation" and "a patch that breaks the cluster is the operator's
+to own" (`internal/config/types.go`, `docs/reference.md` §3.15). An operator
+reaching for the escape hatch owns its result on day two for the same reason
+they own it on day one. What stays immutable is everything Corium *models* —
+`role`, `cluster`, `network`, `storage`, and the rest — because those are the
+fields whose meaning Corium guarantees; the escape hatch is by definition the
+part it does not, so it was never Corium's guarantee to protect with a reset.
 
 `api` is left out of the first cut for a specific reason, not an omission:
 `api.enabled: false` applied over the API would ask the node to shut down the very

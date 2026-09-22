@@ -258,6 +258,70 @@ func TestApplyReconcilesAddonsOnARunningNode(t *testing.T) {
 	}
 }
 
+func TestApplyReconcilesK0sPatchOnARunningNode(t *testing.T) {
+	// The k0s escape hatch is part of the safe subset: an operator adds an OIDC
+	// extraArg to a node already in service, and the node re-renders k0s and
+	// cycles the control plane to pick it up rather than sending them to reset.
+	// A patch that breaks the cluster is the operator's to own. See ADR 8.
+	ca := newAuthority(t)
+	server, store, configPath, appliedPath := configurableServer(t, ca, true)
+
+	if err := os.WriteFile(appliedPath, []byte("role: single\n"), 0o600); err != nil {
+		t.Fatalf("seeding the baseline: %v", err)
+	}
+
+	var restarted string
+	server.Supervise(&systemd.Manager{
+		Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "restart" {
+				restarted = args[1]
+			}
+
+			return nil, nil
+		},
+	})
+
+	address := serveOn(t, server)
+	admin := client(t, store, ca.issue(t, RoleAdmin))
+
+	document := "corium:\n" +
+		"  role: single\n" +
+		"  k0s:\n" +
+		"    patch:\n" +
+		"      spec:\n" +
+		"        api:\n" +
+		"          extraArgs:\n" +
+		"            oidc-issuer-url: https://id.example.com\n" +
+		"            oidc-client-id: k0s\n"
+
+	status, body := postRaw(t, admin, "https://"+address+"/v1/config", configBody(t, document))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%v)", status, body)
+	}
+
+	if got, _ := body["status"].(string); got != "reconciled" {
+		t.Errorf("status = %q, want reconciled", got)
+	}
+
+	if restarted != "k0scontroller.service" {
+		t.Errorf("restarted %q, want k0scontroller.service", restarted)
+	}
+
+	rendered, err := os.ReadFile(server.k0sConfigPath)
+	if err != nil {
+		t.Fatalf("the reconcile did not write a k0s configuration: %v", err)
+	}
+
+	if !strings.Contains(string(rendered), "oidc-issuer-url") {
+		t.Errorf("k0s.yaml does not carry the patched extraArgs:\n%s", rendered)
+	}
+
+	written, err := os.ReadFile(configPath)
+	if err != nil || string(written) != document {
+		t.Errorf("the reconciled document was not recorded: %v\n%s", err, written)
+	}
+}
+
 func TestApplyRefusesRemovingAnAddonOnARunningNode(t *testing.T) {
 	// k0s leaves a dropped chart's release running, so a removal is refused
 	// rather than reported as done. The message points at the k0s way to remove.
