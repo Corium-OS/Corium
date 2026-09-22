@@ -46,7 +46,7 @@ With [mise](https://mise.jdx.dev), which picks the archive matching your
 machine:
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.4'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.5'
 ```
 
 Both the quotes and the version are load-bearing, and leaving either out fails
@@ -65,7 +65,7 @@ candidates included** — pinning is how you say you meant the stable one.
 By hand, checking what you downloaded:
 
 ```bash
-version=0.3.4
+version=0.3.5
 os=linux          # darwin on macOS
 arch=amd64        # arm64 on Apple silicon, and on 64-bit Arm linux
 base=https://github.com/Corium-OS/Corium/releases/download/v${version}
@@ -109,16 +109,16 @@ See [cctl](/docs/reference/cli/) for what it does.
 
 ```bash
 # 1. With oras. One command, and it names the file for you.
-oras pull ghcr.io/corium-os/corium-iso:0.3.4
+oras pull ghcr.io/corium-os/corium-iso:0.3.5
 
 # 2. Without oras. The registry issues pull tokens anonymously for public
 #    packages, so curl is enough.
 token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pull" | jq -r .token)
-curl -L -H "Authorization: Bearer ${token}" -o corium-0.3.4-x86_64.iso \
+curl -L -H "Authorization: Bearer ${token}" -o corium-0.3.5-x86_64.iso \
   https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<the digest from the release notes>
 
 # 3. From a browser, no tooling at all. The release notes carry the link.
-https://<cdn>/corium-0.3.4-x86_64.iso
+https://<cdn>/corium-0.3.5-x86_64.iso
 ```
 
 The third is a CDN copy. There is no index to browse, so the link for a given
@@ -140,7 +140,7 @@ a file*.
 `cctl` is attached, because the same reasoning points the other way for it. It
 is three megabytes, it is fetched by a person setting up a workstation rather
 than by a machine, and the installers people already use —
-`mise use 'github:Corium-OS/Corium[exe=cctl]@0.3.4'` — read release assets and
+`mise use 'github:Corium-OS/Corium[exe=cctl]@0.3.5'` — read release assets and
 not registries.
 Signing it as a blob rather than as an OCI artefact costs one extra file and
 keeps it reachable by the tools that would actually go looking.
@@ -186,7 +186,7 @@ commit and which tag, recorded in a public transparency log.
 the SHA-256 of each artefact in its notes:
 
 ```bash
-sha256sum corium-0.3.4-x86_64.iso
+sha256sum corium-0.3.5-x86_64.iso
 # must equal the hash printed in the release notes
 ```
 
