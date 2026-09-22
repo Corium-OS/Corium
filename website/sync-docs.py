@@ -50,6 +50,9 @@ PAGES = [
      "Replacing kube-router with Cilium from the node's own cloud-config: "
      "what k0s stops doing, what installs the chart, and the kube-proxy-free "
      "variant."),
+    ("oidc.md", "guides", "oidc", "OIDC login", 127,
+     "Wiring an OpenID Connect provider to the cluster's API server through "
+     "k0s.patch, a kubeconfig that logs in with kubelogin, and RBAC by group."),
     ("raid.md", "guides", "raid", "Software RAID", 130,
      "Declaring mdadm arrays on a node's spare disks, why they are built "
      "before k0s starts, and where a RAID root filesystem stands today."),
