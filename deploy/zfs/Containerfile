@@ -39,10 +39,28 @@ ARG ZFS_VERSION
 # kernel-devel is pinned to the running image's kernel by version-release-arch,
 # so configure builds against the kernel this image actually ships rather than
 # whatever the repo now considers newest.
+#
+# That pin outlives the repo, and Koji is what catches it when it does. Fedora's
+# `updates` carries only the newest kernel, so the hour a new one goes stable,
+# kernel-devel for the kernel this image still ships drops out of it -- and
+# `updates-archive`, which is meant to keep it, lags that push by a day or more.
+# In between, this build fails on a package that existed yesterday, and keeps
+# failing until the upstream bootc image is rebuilt onto the new kernel days
+# later; the retry wrapped around it in CI cannot help, because nothing about
+# that is transient. Koji keeps every build indefinitely and addresses it by
+# exact NVRA, so it is the same package from a source that does not rotate. It
+# is only consulted once dnf has already failed to find it, and a miss there is
+# still a hard failure -- building the module against a different kernel than
+# the image boots would produce a module that silently will not load.
 RUN set -eu; \
 	kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel | tail -1)"; \
+	karch="${kver##*.}"; nvr="${kver%.*}"; \
+	koji="https://kojipkgs.fedoraproject.org/packages/kernel/${nvr%%-*}/${nvr#*-}/${karch}/kernel-devel-${kver}.rpm"; \
+	if ! dnf install -y --setopt=install_weak_deps=False "kernel-devel-${kver}"; then \
+		echo "kernel-devel-${kver} is no longer in the repos; falling back to ${koji}" >&2; \
+		dnf install -y --setopt=install_weak_deps=False "${koji}"; \
+	fi; \
 	dnf install -y --setopt=install_weak_deps=False \
-		"kernel-devel-${kver}" \
 		gcc make autoconf automake libtool rpm-build \
 		libblkid-devel libuuid-devel libudev-devel openssl-devel \
 		libtirpc-devel \
