@@ -130,6 +130,12 @@ node silently joins the wrong cluster.
 | `raw` | Bare metal, and most clouds' import paths |
 | `anaconda-iso` | Interactive or kickstarted bare-metal installs |
 
+The builder is the `bootc-image-builder` entry point that
+[image-builder](https://github.com/osbuild/image-builder) still ships, pinned
+by digest; the original project was archived in June 2026, and the ISO type is
+on its way out upstream. [ADR 9](docs/adr/0009-image-builder.md) is the plan
+for both.
+
 You only need to build these if you have changed the image. Every release
 publishes the ISO and the qcow2 ready-made and signed: see
 [**Downloads**](docs/install/downloads.md) for where they live, why nothing is

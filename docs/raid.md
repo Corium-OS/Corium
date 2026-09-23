@@ -215,6 +215,13 @@ locale and users are all yours to supply. A
 `[customizations.installer.kickstart]` block cannot be combined with other
 installer customizations.
 
+> **Note.** This rides the `anaconda-iso` type, which upstream has deprecated
+> along with `bootc-image-builder` itself. The kickstart below does not go
+> away when the ISO moves to its successor — it becomes a file in an installer
+> container rather than a build configuration — but it will be re-verified
+> then, and this section rewritten. Until that lands, this is the procedure
+> that was tested. See [ADR 9](adr/0009-image-builder.md).
+
 > **Warning.** This kickstart is not sufficient on its own. An install from it
 > boots, and then does not survive losing its first disk. Three manual steps go
 > with it, all of them needed, and all three are below: build a second ESP in
