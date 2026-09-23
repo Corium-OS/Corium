@@ -26,6 +26,18 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   --bootc-ref`, and an installer ISO of our own once upstream's `anaconda-iso`
   type is retired — is in [ADR 9](docs/adr/0009-image-builder.md).
 
+### Fixed
+
+- **The ZFS image stopped building whenever Fedora shipped a new kernel.** The
+  variant compiles the OpenZFS module against the exact kernel the base image
+  ships, and installs `kernel-devel` pinned to it. Fedora's `updates` repository
+  keeps only the newest kernel, so the hour a new one went stable, that pinned
+  `kernel-devel` vanished from it — while the base image still shipped the older
+  kernel for days, until it was rebuilt upstream. Every ZFS build in between
+  failed on a package that had existed the day before. It now falls back to
+  Koji, which keeps every build and addresses it by exact version, so the module
+  is still compiled against the kernel the image actually boots.
+
 ## [0.3.6] - 2026-09-22
 
 ### Fixed
