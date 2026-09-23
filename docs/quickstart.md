@@ -352,8 +352,8 @@ This is the one part that needs a **Linux host** with `podman` and about 20 GB o
 free disk, plus [mise](https://mise.jdx.dev), which runs every command below and
 provisions the toolchain they need. `mise install` once, in the checkout.
 
-macOS and Windows cannot build the disk images. `bootc-image-builder` mounts the
-root filesystem it creates in order to populate it, which needs a real Linux
+macOS and Windows cannot build the disk images. The builder mounts the root
+filesystem it creates in order to populate it, which needs a real Linux
 kernel. A Linux VM is fine; so is the hypervisor you are deploying to, which is
 often the most convenient place.
 
@@ -400,5 +400,11 @@ Pick the artefact that matches where the node will run:
 | `mise run artefacts` | all three | |
 
 Each takes several minutes and needs `sudo`, because the builder runs
-privileged. From here, pick up at [step 2](#2-write-a-node-configuration) with
-the disk you just built.
+privileged. The two disks are built by
+[image-builder](https://github.com/osbuild/image-builder); the
+ISO by the `bootc-image-builder` entry point it still ships, which is the only
+one that builds that type. Both are pinned by digest in `mise.toml` and
+overridable there — see [ADR 9](adr/0009-image-builder.md).
+
+From here, pick up at [step 2](#2-write-a-node-configuration) with the disk you
+just built.

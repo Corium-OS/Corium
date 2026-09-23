@@ -82,7 +82,7 @@ jobs:
 
       - name: Build the OS image
         run: |
-          # sudo, because bootc-image-builder below runs as root and reads the
+          # sudo, because image-builder below runs as root and reads the
           # root container store. Built rootless, the image lands in the runner
           # user's store instead and the builder reports "image not known" --
           # which is what happened the first time this ran. The release path
@@ -95,17 +95,23 @@ jobs:
           # The same pin as mise.toml and the release workflow, bumped with
           # them: a builder that only the release path has met is not tested.
           # See docs/adr/0009-image-builder.md.
-          BIB: ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c
+          IMAGE_BUILDER: ghcr.io/osbuild/image-builder:v83.0.0@sha256:66b7505f1a14e4e9eae6eb4d840a2fb1418c56f7d1b6974ef89ff25c59d35156
         run: |
           mkdir -p output
           # The same invocation the release path uses, so this exercises the
-          # artefact route rather than a private one.
+          # artefact route rather than a private one: image-builder proper,
+          # --output-dir and --output-name putting the disk where everything
+          # below reads it, and no --ignore-warnings -- a warning that would
+          # stop a release should stop this first.
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             -v "${PWD}/output:/output" \
-            "${BIB}" \
-            --type qcow2 localhost/corium:e2e
+            "${IMAGE_BUILDER}" build \
+            --bootc-ref localhost/corium:e2e \
+            --output-dir /output/qcow2 \
+            --output-name disk \
+            qcow2
           sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
           qemu-img resize output/qcow2/disk.qcow2 20G
 

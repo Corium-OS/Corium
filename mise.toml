@@ -36,19 +36,25 @@ IMAGE_NAME = "{{ env.IMAGE_NAME | default(value='corium') }}"
 IMAGE_TAG = "{{ env.IMAGE_TAG | default(value='dev') }}"
 IMAGE = "{{ env.REGISTRY | default(value='ghcr.io/corium-os') }}/{{ env.IMAGE_NAME | default(value='corium') }}:{{ env.IMAGE_TAG | default(value='dev') }}"
 
-# The builder that turns the OS image into something you can actually boot.
-# It needs a privileged container and access to the local image store, and it
-# must run on a Linux host: it mounts the root filesystem it creates in order
-# to populate it.
+# The builders that turn the OS image into something you can actually boot.
+# Both need a privileged container and access to the local image store, and
+# both must run on a Linux host: they mount the root filesystem they create in
+# order to populate it.
 #
+# The disks come from image-builder itself, through `build --bootc-ref`: the
+# path upstream develops. Pinned to a release and its digest, so a build is
+# reproducible and bumping it is a diff someone reads.
+IMAGE_BUILDER = "{{ env.IMAGE_BUILDER | default(value='ghcr.io/osbuild/image-builder:v83.0.0@sha256:66b7505f1a14e4e9eae6eb4d840a2fb1418c56f7d1b6974ef89ff25c59d35156') }}"
+
+# The ISO comes from the compatibility entry point, and nothing else does.
 # bootc-image-builder was archived upstream on 2026-06-18 and merged into
-# image-builder, which keeps shipping the same entry point under this name as
-# a compatibility image. The quay.io tag has not moved since that day and its
-# Fedora 42 base is past end of life, so this points at image-builder's copy
-# instead, pinned to a release and its digest: a build is reproducible, and
-# bumping it is a diff someone reads. Why not `image-builder build
-# --bootc-ref` directly yet, and what happens to the ISO, is in
-# docs/adr/0009-image-builder.md.
+# image-builder, which keeps shipping its entry point under this name for the
+# life of RHEL 10. `image-builder build --bootc-ref` refuses `anaconda-iso`
+# outright, so the ISO stays here until it is rebuilt on the generic type:
+# docs/adr/0009-image-builder.md, step 3.
+#
+# Pinned to the same release as IMAGE_BUILDER above -- they are built from one
+# commit by one workflow, and are bumped together.
 BIB = "{{ env.BIB | default(value='ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c') }}"
 
 # The appliance image is built locally and never pushed: it accepts an
@@ -144,8 +150,50 @@ run = 'podman push "${IMAGE}"'
 
 # ---------------------------------------------------- Installable artefacts
 
-# The privileged invocation lives here once, and the three artefact tasks below
-# differ only in the type they ask for.
+# The privileged invocation lives here once for the disks, and once below for
+# the ISO. Both read the image out of the *root* container store, which is what
+# the store mount exposes: an image built rootless -- `mise run image` without
+# sudo -- lands in the user's own store and the builder reports "image not
+# known". Build it with sudo, or pull it.
+[tasks.disk]
+hide = true
+usage = 'arg "<type>" help="disk image type image-builder should produce (qcow2, raw)"'
+run = '''
+set -eu
+
+# Left alone, image-builder writes
+# bootc-based-<type>-x86_64/bootc-based-<type>-x86_64.<ext>. --output-dir and
+# --output-name restore the layout bootc-image-builder wrote and everything
+# here still reads: deploy/proxmox/, the publish step, the docs. The raw
+# disk's directory is "image", not "raw", because that is what it has always
+# been called.
+case "${usage_type}" in
+	qcow2) directory=qcow2 ;;
+	raw)   directory=image ;;
+	*)     echo "disk: unknown type ${usage_type}" >&2; exit 1 ;;
+esac
+
+mkdir -p "${OUTPUT_DIR}"
+
+# No --ignore-warnings. A warning during manifest generation stops the build,
+# which is the behaviour to keep: a warning the old entry point tolerated is
+# still worth reading before a disk is installed somewhere.
+#
+# No --bootc-default-fs either: the root filesystem type is declared by the
+# image, in /usr/lib/bootc/install/00-corium.toml (ADR 2).
+sudo podman run --rm --privileged \
+	--security-opt label=type:unconfined_t \
+	-v /var/lib/containers/storage:/var/lib/containers/storage \
+	-v "${OUTPUT_DIR}:/output" \
+	"${IMAGE_BUILDER}" build \
+	--bootc-ref "${IMAGE}" \
+	--output-dir "/output/${directory}" \
+	--output-name disk \
+	"${usage_type}"
+'''
+
+# The ISO, and only the ISO. `image-builder build --bootc-ref` refuses
+# anaconda-iso and says so; see docs/adr/0009-image-builder.md.
 [tasks.bib]
 hide = true
 usage = 'arg "<type>" help="artefact type bootc-image-builder should produce"'
@@ -195,11 +243,11 @@ echo "For a qcow2:  IMAGE=${ZFS_IMAGE} mise run artefact-qcow2"
 
 [tasks."artefact-qcow2"]
 description = "Build a qcow2 for Proxmox, KVM and libvirt"
-depends = ["bib qcow2"]
+depends = ["disk qcow2"]
 
 [tasks."artefact-raw"]
 description = "Build a raw disk for bare metal and most clouds"
-depends = ["bib raw"]
+depends = ["disk raw"]
 
 [tasks."artefact-anaconda-iso"]
 description = "Build an installer ISO for bare metal"

@@ -216,9 +216,9 @@ download would not have added anything.
 Nothing above is required. `mise run artefacts` produces the qcow2, the raw disk
 and the ISO locally from any image you can pull, including one you have
 modified. It needs a Linux host and `sudo`, because the builder —
-`bootc-image-builder`, as [image-builder](https://github.com/osbuild/image-builder)
-still ships it — mounts the filesystem it creates. See the
-[quick start](/docs/guides/quickstart/).
+[image-builder](https://github.com/osbuild/image-builder) for the disks, the
+`bootc-image-builder` entry point it still ships for the ISO — mounts the
+filesystem it creates. See the [quick start](/docs/guides/quickstart/).
 
 A raw disk image is not published. It would be roughly 5 GB, and the ISO
 already covers bare metal.

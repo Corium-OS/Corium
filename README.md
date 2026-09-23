@@ -122,19 +122,21 @@ node silently joins the wrong cluster.
 
 ## Installable artefacts
 
-`mise run artefacts` produces, via `bootc-image-builder`:
+`mise run artefacts` produces, via
+[image-builder](https://github.com/osbuild/image-builder):
 
-| Artefact | For |
-|---|---|
-| `qcow2` | Proxmox, KVM, libvirt |
-| `raw` | Bare metal, and most clouds' import paths |
-| `anaconda-iso` | Interactive or kickstarted bare-metal installs |
+| Artefact | For | Built by |
+|---|---|---|
+| `qcow2` | Proxmox, KVM, libvirt | `image-builder build --bootc-ref` |
+| `raw` | Bare metal, and most clouds' import paths | `image-builder build --bootc-ref` |
+| `anaconda-iso` | Interactive or kickstarted bare-metal installs | the `bootc-image-builder` entry point |
 
-The builder is the `bootc-image-builder` entry point that
-[image-builder](https://github.com/osbuild/image-builder) still ships, pinned
-by digest; the original project was archived in June 2026, and the ISO type is
-on its way out upstream. [ADR 9](docs/adr/0009-image-builder.md) is the plan
-for both.
+Both builders are pinned by digest and come from the same upstream release.
+The disks are on the code path upstream develops; the ISO is on the
+compatibility entry point `bootc-image-builder` left behind when it was
+archived in June 2026, because that is the only one that still builds the
+type — and that type is itself on its way out upstream.
+[ADR 9](docs/adr/0009-image-builder.md) is the plan for the rest.
 
 You only need to build these if you have changed the image. Every release
 publishes the ISO and the qcow2 ready-made and signed: see

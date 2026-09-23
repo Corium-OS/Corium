@@ -501,9 +501,12 @@ jobs:
       - name: Build the artefacts from the published image
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
-          # The same pin as mise.toml, and for the same reasons; the two are
-          # bumped together. bootc-image-builder is archived and this is the
-          # compatibility image its successor publishes: docs/adr/0009-image-builder.md.
+          # The same two pins as mise.toml, and for the same reasons; all of
+          # them are bumped together. The disks come from image-builder, the
+          # ISO from the compatibility entry point that bootc-image-builder
+          # left behind, because that is the only one that still builds it:
+          # docs/adr/0009-image-builder.md.
+          IMAGE_BUILDER: ghcr.io/osbuild/image-builder:v83.0.0@sha256:66b7505f1a14e4e9eae6eb4d840a2fb1418c56f7d1b6974ef89ff25c59d35156
           BIB: ghcr.io/osbuild/bootc-image-builder:v83.0.0@sha256:e7aadce6b3f5639cd47d83354791931ea219891a0d113c2fe74a0f0d352b165c
         run: |
           # Measured, because the numbers in circulation are wrong: GitHub
@@ -517,35 +520,53 @@ jobs:
           # By digest, not by tag: these install the exact bytes that were
           # signed a job ago, and nothing that moves in between.
           #
-          # Pulling first is what bootc-image-builder expects -- using local
-          # storage is its default now, and it tells you to run this exact
-          # command if it cannot find the image.
+          # Pulling first is what both builders expect -- reading the *root*
+          # container store is how they are given an image, and neither of them
+          # is configured with registry credentials. image-builder has
+          # --bootc-pull-container for the other case; there is no reason to
+          # reach for it here.
           sudo podman pull "${IMAGE_DIGEST}"
 
           mkdir -p output
-          # One run per artefact. --type does take more than one value, but
-          # bootc-image-builder counts ISOs and disks separately and refuses a
-          # request containing both: "cannot mix ISO/disk images in request".
-          # qcow2 and raw together would be fine; an ISO with either is not.
-          #
-          # The cost is small. The image above is pulled once and both runs
-          # read it out of the same local storage.
-          for type in anaconda-iso qcow2; do
-            echo "::group::building ${type}"
-            sudo podman run --rm --privileged \
-              --security-opt label=type:unconfined_t \
-              -v /var/lib/containers/storage:/var/lib/containers/storage \
-              -v "${PWD}/output:/output" \
-              "${BIB}" \
-              --type "${type}" \
-              "${IMAGE_DIGEST}"
-            echo "::endgroup::"
-          done
 
-          # The builder is pinned by digest, so these are reproducible from
-          # this workflow file alone. Say which one anyway: a log that names
-          # its inputs is worth more than one that has to be cross-referenced.
-          echo "built with ${BIB}"
+          # The ISO, from the compatibility entry point. It is the only thing
+          # left on it: `image-builder build --bootc-ref` refuses the type,
+          # rather than build something subtly different.
+          echo "::group::building anaconda-iso"
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            -v "${PWD}/output:/output" \
+            "${BIB}" \
+            --type anaconda-iso \
+            "${IMAGE_DIGEST}"
+          echo "::endgroup::"
+
+          # The qcow2, from image-builder proper. --output-dir and
+          # --output-name keep output/qcow2/disk.qcow2 where the publish step
+          # below and the docs expect it; without them this writes
+          # bootc-based-qcow2-x86_64/bootc-based-qcow2-x86_64.qcow2.
+          #
+          # No --ignore-warnings: a warning during manifest generation stops
+          # the build, and on the release path that is the point.
+          echo "::group::building qcow2"
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            -v "${PWD}/output:/output" \
+            "${IMAGE_BUILDER}" build \
+            --bootc-ref "${IMAGE_DIGEST}" \
+            --output-dir /output/qcow2 \
+            --output-name disk \
+            qcow2
+          echo "::endgroup::"
+
+          # Both builders are pinned by digest, so these are reproducible from
+          # this workflow file alone. Say which is which anyway: a log that
+          # names its inputs is worth more than one that has to be
+          # cross-referenced.
+          echo "qcow2 built with ${IMAGE_BUILDER}"
+          echo "iso built with ${BIB}"
 
           sudo chown -R "$(id -u):$(id -g)" output
           find output -type f -printf '%s\t%p\n'
@@ -576,7 +597,7 @@ jobs:
         run: |
           version="${{ needs.build.outputs.version }}"
 
-          # $1 key  $2 file bootc-image-builder wrote  $3 published file name
+          # $1 key  $2 file the builder wrote  $3 published file name
           # $4 repository  $5 artifact type  $6 layer media type
           publish() {
             key="$1"; built="$2"; name="$3"; repo="$4"; artifact="$5"; media="$6"
