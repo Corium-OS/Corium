@@ -1,0 +1,32 @@
+[Unit]
+Description=Snapshot the Corium control plane
+Documentation=https://docs.k0sproject.io/stable/backup/
+
+# `k0s backup` asks the control plane's status socket whether this node is a
+# controller before it reads anything, so it needs k0s up rather than merely
+# installed. Requisite and not Requires: a controller somebody stopped on
+# purpose should see the run fail and say why, not be started again by the
+# backup timer.
+After=k0scontroller.service
+Requisite=k0scontroller.service
+
+[Service]
+Type=oneshot
+
+# Where the archive goes and how many survive arrive in a drop-in corium-agent
+# writes at first boot from corium.backup. Without one there is nothing to run,
+# which is why the timer ships disabled and the agent is what enables it.
+ExecStart=/usr/bin/corium-agent backup
+
+# The archive holds the cluster CA's private key and every Secret in etcd. The
+# agent logs its path and its size and never its contents; nothing here should
+# ever grow a step that cats it.
+StandardOutput=journal
+StandardError=journal
+
+# A snapshot that failed must not take the node with it. The timer comes round
+# again, and the failure is visible in `systemctl status corium-backup`.
+Restart=no
+
+# No [Install] section: this unit is started by corium-backup.timer, not wanted
+# by a target. Enabling the timer is what puts a backup on a schedule.

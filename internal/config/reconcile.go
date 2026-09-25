@@ -59,8 +59,8 @@ func (p ReconcilePlan) Empty() bool {
 // the same contract it carries at bootstrap. Every other field stays immutable
 // day-two, because it defines the node's identity (`role`, `node`), its cluster
 // (`cluster`, `join`, `ha`), its network or disks (`network`, `storage`,
-// `raid`, `wireguard`), or is not yet reconciled here (`upgrades`, `api`).
-// Changing any of those is a provisioning act. See ADR 8; the set the node
+// `raid`, `wireguard`), or is not yet reconciled here (`upgrades`, `backup`,
+// `api`). Changing any of those is a provisioning act. See ADR 8; the set the node
 // calls safe is expected to grow.
 func PlanReconcile(old, next *Config) ReconcilePlan {
 	var plan ReconcilePlan
@@ -83,6 +83,7 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 		{"raid", old.RAID, next.RAID},
 		{"wireguard", old.WireGuard, next.WireGuard},
 		{"upgrades", old.Upgrades, next.Upgrades},
+		{"backup", old.Backup, next.Backup},
 		{"api", old.API, next.API},
 	}
 
