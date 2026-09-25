@@ -232,6 +232,7 @@ var reconcileClassification = map[string]bool{
 	"ha":        true,
 	"raid":      true,
 	"zfs":       true,
+	"manifests": true,
 	"wireguard": true,
 	"upgrades":  true,
 	"backup":    true,

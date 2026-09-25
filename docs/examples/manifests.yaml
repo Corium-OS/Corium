@@ -1,0 +1,82 @@
+#cloud-config
+#
+# A node that installs MetalLB as a chart and configures it with plain
+# Kubernetes YAML in the same document.
+#
+# This is the pair the two k0s extension mechanisms make. addons[] installs the
+# chart, which brings the CRDs; manifests[] ships the two custom resources that
+# give MetalLB an address range to hand out. Those resources have no chart of
+# their own, and wrapping three lines of YAML in one to publish somewhere the
+# node can reach is a heavier thing to own than the YAML.
+#
+# The manifests are written to /var/lib/k0s/manifests/<stack>/ before k0s is
+# installed. k0s's manifest deployer applies every .yaml file in each direct
+# subdirectory there, keeps the cluster matching what the files say, and prunes
+# the resources of a file that is removed.
+#
+# See docs/reference.md section 3.18.
+
+corium:
+  role: controller+worker
+
+  addons:
+    - name: metallb
+      chart: metallb/metallb
+      version: 0.14.9
+      namespace: metallb-system
+      repository:
+        name: metallb
+        url: https://metallb.github.io/metallb
+
+  manifests:
+    # The stack. Its name is the directory under /var/lib/k0s/manifests, and it
+    # must be yours: k0s runs several of its own in-cluster components as stacks
+    # in that same directory, and two writers sharing one is a directory that
+    # keeps changing under both.
+    - name: metallb-config
+
+      files:
+        # The file name must end in .yaml. The deployer reads that extension and
+        # no other, so a file named .yml is not rejected by k0s -- it is skipped
+        # without a word. Corium refuses the name at validation instead.
+        - name: pools.yaml
+
+          # Written byte for byte. One file may hold several documents separated
+          # by `---`, the way kubectl accepts them, so related objects stay
+          # together.
+          #
+          # Always name the namespace. The deployer has no default one.
+          content: |
+            apiVersion: metallb.io/v1beta1
+            kind: IPAddressPool
+            metadata:
+              name: default
+              namespace: metallb-system
+            spec:
+              addresses:
+                - 192.0.2.10-192.0.2.20
+            ---
+            apiVersion: metallb.io/v1beta1
+            kind: L2Advertisement
+            metadata:
+              name: default
+              namespace: metallb-system
+            spec:
+              ipAddressPools:
+                - default
+
+  # manifests[] is checked offline, before anything is written: the stack and
+  # file names, the .yaml extension, duplicates, and that the content parses as
+  # YAML. Run it before booting anything:
+  #
+  #   corium-agent validate node.yaml
+  #
+  # What it does not check is whether the API server will accept the objects --
+  # Corium has no schema for a Kubernetes resource. A document the cluster
+  # rejects shows up in the controller's log, not here.
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

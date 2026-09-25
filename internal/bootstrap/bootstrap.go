@@ -216,6 +216,14 @@ func apply(ctx context.Context, cfg *config.Config, rendered []byte, args []stri
 		slog.Info("wrote join token", "path", k0s.TokenPath)
 	}
 
+	// Bundled manifests before the service exists, for the same reason the
+	// disks came before it: the deployer applies what is in the directory when
+	// the controller starts, and a stack that lands afterwards reaches a cluster
+	// that has already told everything watching that it is complete.
+	if err := applyManifests(cfg); err != nil {
+		return err
+	}
+
 	slog.Info("installing k0s service", "args", args)
 
 	if err := k0s.Install(ctx, args); err != nil {
