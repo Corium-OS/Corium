@@ -124,6 +124,17 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | Version ladder | n/a | `0.3.6`, `0.3` and `latest` per release. No major rung below 1.0, because a 0.x minor may break. See [upgrades](/docs/guides/upgrades/#choosing-what-to-track) |
 | Automatic rollback on failure | n/a | greenboot health check; a node that cannot run k0s returns to its previous image |
 
+### Backups
+
+| Feature | Field | Notes |
+|---|---|---|
+| Scheduled control plane snapshot | `backup.enabled` | A systemd timer running [`k0s backup`](https://docs.k0sproject.io/stable/backup/): etcd or kine, the PKI, `k0s.yaml`, manifests and Helm config. Controllers only, and rejected on a worker |
+| Schedule | `backup.schedule` | systemd `OnCalendar`, default daily |
+| Target directory | `backup.path` | Default `/var/lib/corium/backups`. Archives written `0600` in a `0700` directory |
+| Retention | `backup.keep` | Default 7. Deletes only the archives Corium named, never a glob |
+| Restore | n/a | Manual. `k0s restore` on a stopped node is an operator decision, not a timer's. See [reference §3.18](/docs/reference/configuration/#318-backup) |
+| Workload data | n/a | Out of scope: a `k0s backup` holds the control plane, not PersistentVolumes |
+
 ### Disks
 
 | Feature | Field | Notes |

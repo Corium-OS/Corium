@@ -45,6 +45,12 @@ See [HA cluster](install/ha-cluster.md) for the procedure these belong to.
 | [`stretched-worker.yaml`](examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](raid.md) |
 
+## Day two
+
+| Example | What it builds |
+|---|---|
+| [`backup.yaml`](examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](reference.md#318-backup) |
+
 ## Extensions
 
 | Example | What it builds |

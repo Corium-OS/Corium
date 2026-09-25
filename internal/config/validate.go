@@ -36,6 +36,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateManifests()...)
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
+	problems = append(problems, c.validateBackup()...)
 	problems = append(problems, c.validateRAID()...)
 	problems = append(problems, c.validateZFS()...)
 	problems = append(problems, c.validateWireGuard()...)
@@ -547,6 +548,116 @@ func (c *Config) validateUpgrades() []error {
 	}
 
 	return nil
+}
+
+// onCalendarShorthands are the named schedules systemd.time(7) accepts in place
+// of a full calendar expression.
+var onCalendarShorthands = map[string]bool{
+	"minutely":     true,
+	"hourly":       true,
+	"daily":        true,
+	"weekly":       true,
+	"monthly":      true,
+	"quarterly":    true,
+	"semiannually": true,
+	"yearly":       true,
+	"annually":     true,
+}
+
+// onCalendarPattern is the character set a systemd calendar expression is drawn
+// from: weekday names, digits, and the separators between them.
+var onCalendarPattern = regexp.MustCompile(`^[A-Za-z0-9*/,:.~+ -]+$`)
+
+// validOnCalendar reports whether a schedule could plausibly be a systemd
+// OnCalendar expression.
+//
+// It is a syntactic check and nothing more. Validation performs no network and
+// no filesystem access and does not shell out, so `systemd-analyze calendar`,
+// which is the only authority on this grammar, is not available to it — and a
+// reimplementation of that grammar here would be a second parser to keep in
+// step with systemd's.
+//
+// What it does catch is the mistake that actually happens: writing cron. A cron
+// expression has no date separator and no time separator, so "0 3 * * *" lands
+// here rather than in a timer that never fires. Weekday-only expressions such
+// as "Mon,Fri" carry neither separator either, and are allowed through because
+// they carry no digits.
+func validOnCalendar(schedule string) bool {
+	if onCalendarShorthands[strings.ToLower(schedule)] {
+		return true
+	}
+
+	if !onCalendarPattern.MatchString(schedule) {
+		return false
+	}
+
+	if strings.ContainsAny(schedule, "-:") {
+		return true
+	}
+
+	return !strings.ContainsAny(schedule, "0123456789")
+}
+
+// validateBackup checks the scheduled backup block.
+//
+// The role check is the one worth being loud about. `k0s backup` reads the
+// control plane's datastore and PKI, and refuses outright to run anywhere else,
+// so a backup block on a plain worker describes a timer that would fail on
+// every tick. Ignoring it would leave somebody believing a node is backed up.
+func (c *Config) validateBackup() []error {
+	// Nothing written, nothing to check. ApplyDefaults only fills this block in
+	// once it is enabled, so an untouched configuration reaches here zero.
+	if c.Backup == (Backup{}) {
+		return nil
+	}
+
+	var problems []error
+
+	// An empty role is a node waiting to be told what it is; the document that
+	// answers is validated in its turn, and this check belongs to that one.
+	if c.Role != "" && !c.Role.IsController() {
+		problems = append(problems, fmt.Errorf(
+			"backup: role %q runs no control plane, so there is nothing for "+
+				"`k0s backup` to snapshot; backups belong on a controller",
+			c.Role))
+	}
+
+	// A configured backup that is switched off is a setting that silently does
+	// nothing, which is worth saying rather than ignoring -- the same reading
+	// upgrades.schedule gets.
+	if !c.Backup.Enabled {
+		problems = append(problems, errors.New(
+			"backup: configured but backup.enabled is false, so nothing is scheduled"))
+	}
+
+	switch {
+	case c.Backup.Path == "":
+		problems = append(problems, errors.New("backup.path: required"))
+	case !strings.HasPrefix(c.Backup.Path, "/"):
+		problems = append(problems, fmt.Errorf(
+			"backup.path: %q must be an absolute path", c.Backup.Path))
+	case strings.ContainsAny(c.Backup.Path, "\"\\\n"):
+		// The path is written verbatim into a quoted systemd Environment=
+		// line. Rejecting the three characters that could break out of it is
+		// cheaper than escaping them, and no real backup target needs one.
+		problems = append(problems, fmt.Errorf(
+			"backup.path: %q must not contain a quote, a backslash or a newline",
+			c.Backup.Path))
+	}
+
+	if c.Backup.Schedule != "" && !validOnCalendar(c.Backup.Schedule) {
+		problems = append(problems, fmt.Errorf(
+			"backup.schedule: %q is not a systemd OnCalendar expression; "+
+				"use daily, weekly, or a calendar spec such as \"*-*-* 03:00:00\"",
+			c.Backup.Schedule))
+	}
+
+	if c.Backup.Keep < 0 {
+		problems = append(problems, fmt.Errorf(
+			"backup.keep: %d must not be negative", c.Backup.Keep))
+	}
+
+	return problems
 }
 
 // raidNamePattern keeps an array name usable as a device node under /dev/md/.

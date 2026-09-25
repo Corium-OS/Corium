@@ -244,6 +244,13 @@ func apply(ctx context.Context, cfg *config.Config, rendered []byte, args []stri
 		return err
 	}
 
+	// A backup schedule belongs here for the same reason: `k0s backup` reads a
+	// control plane that has to be up, and scheduling one is about the node's
+	// future rather than about bringing it up.
+	if err := applyBackupPolicy(ctx, cfg); err != nil {
+		return err
+	}
+
 	// What the node became, recorded before the marker so that a machine the
 	// marker calls bootstrapped can always say what it was bootstrapped as.
 	if err := recordState(cfg); err != nil {

@@ -1,0 +1,19 @@
+[Unit]
+Description=Snapshot the Corium control plane on a schedule
+Documentation=https://github.com/Corium-OS/Corium
+
+[Timer]
+# Overridden by a drop-in when corium.backup.schedule is set.
+OnCalendar=daily
+
+# Spread the controllers of one cluster out, rather than having all three stop
+# to snapshot the same etcd at the same minute. Cleared along with the calendar
+# when an operator writes an explicit schedule, because that is a maintenance
+# window and moving it by half an hour would defeat the point of writing one.
+RandomizedDelaySec=30m
+
+# Catch up after a node has been off, instead of skipping the day entirely.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

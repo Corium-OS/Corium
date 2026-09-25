@@ -1,0 +1,55 @@
+#cloud-config
+#
+# A controller that snapshots its own control plane every night.
+#
+# `k0s backup` already knows how to take the snapshot -- etcd or kine, the PKI,
+# k0s.yaml, the manifests and the Helm configuration, in one archive. What it
+# has no opinion about is when to run, where the archive goes, and what removes
+# last month's. This block answers those three, and corium-agent turns them into
+# a systemd timer at first boot.
+#
+# Restore stays manual. See docs/reference.md#318-backup for the command.
+
+corium:
+  role: controller+worker
+
+  cluster:
+    name: prod
+    endpoint: 10.0.0.10
+
+  backup:
+    enabled: true
+
+    # A systemd OnCalendar expression, not cron. `0 30 2 * * *` is rejected at
+    # validation, before the node boots into a timer that never fires.
+    #
+    # Writing one explicitly also clears the timer's randomised delay: an
+    # explicit schedule is a maintenance window, and moving the run out of it
+    # would defeat the point of writing one.
+    schedule: "*-*-* 02:30:00"
+
+    # Absolute, and created if it does not exist -- 0700, with each archive
+    # 0600 inside it. The archive holds the cluster CA's private key and every
+    # Secret in etcd, so treat it as you would a kubeconfig.
+    #
+    # This one is a mount that leaves the machine. The default,
+    # /var/lib/corium/backups, is on the node's own disk: enough to survive an
+    # operator mistake, no help at all when the hardware does not come back.
+    # Corium creates the directory; the mount is yours to provide, here through
+    # cloud-init's own `mounts` module below.
+    path: /mnt/backups
+
+    # Two weeks of nightly archives. Each run deletes the oldest beyond this,
+    # and only files it named itself -- a k0s backup you took by hand into the
+    # same directory is left where it is.
+    #
+    # There is no value meaning "keep everything": a directory that only grows
+    # eventually fills the filesystem holding /var/lib/k0s, which takes the
+    # cluster down to protect backups of it.
+    keep: 14
+
+# The mount the backups land on. Nothing in the corium: block provisions
+# storage, so this is cloud-init's job -- the escape hatch doing exactly what it
+# is for.
+mounts:
+  - [ "nfs.example.internal:/exports/corium", /mnt/backups, nfs, "defaults,_netdev", "0", "0" ]

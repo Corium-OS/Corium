@@ -46,6 +46,12 @@ var known = []Unit{
 	{"corium-upgrade-download.service", "stages a newer OS image", false},
 	{"corium-upgrade-apply.service", "drains and reboots into a staged image", false},
 	{"corium-uncordon.service", "returns the node to service after an upgrade", false},
+	// Readable, because "when did this node last back itself up, and did it
+	// work" is exactly the question an operator asks from a distance. Not
+	// restartable: restarting it writes a fresh copy of the cluster CA's
+	// private key and of every Secret in etcd to disk, and a client holding a
+	// certificate should not be able to make a node do that on demand.
+	{"corium-backup.service", "snapshots the control plane on a schedule", false},
 	{"greenboot-healthcheck.service", "decides whether this boot is healthy", false},
 	{"cloud-final.service", "cloud-init; where provisioning problems surface", false},
 }
