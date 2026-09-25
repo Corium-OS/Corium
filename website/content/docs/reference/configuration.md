@@ -91,6 +91,14 @@ list entry are written with `[]`, the way you would index them.
 | `addons[].repository.url` | [§3.8 `addons`](#38-addons) |
 | `addons[].values` | [§3.8 `addons`](#38-addons) |
 
+### `manifests`
+
+| Field | Section |
+|---|---|
+| `manifests[].name` | [§3.19 `manifests`](#319-manifests) |
+| `manifests[].files[].name` | [§3.19 `manifests`](#319-manifests) |
+| `manifests[].files[].content` | [§3.19 `manifests`](#319-manifests) |
+
 ### `ha`
 
 | Field | Section |
@@ -1098,8 +1106,6 @@ label stops the bootstrap rather than being consumed.
 Prefer `/dev/disk/by-id/...` over `/dev/sdb`, for the reason [`raid`](#310-raid)
 gives: kernel names are handed out in discovery order.
 
----
-
 ### 3.18 `backup`
 
 Recurring `k0s backup` runs on a control-plane node, wired as a systemd timer at
@@ -1175,6 +1181,90 @@ Two things decide whether this works. The cluster's external address must be the
 same as it was when the backup was taken, because it is in the certificates. And
 on a multi-controller cluster you restore onto one fresh controller, start it,
 then join the others with a new token — you do not restore three machines.
+
+---
+
+### 3.19 `manifests`
+
+Plain Kubernetes YAML, written to `/var/lib/k0s/manifests/<stack>/` before k0s
+starts. This is k0s's
+[Manifest Deployer](https://docs.k0sproject.io/stable/manifests/), the other
+half of its extension mechanism, alongside the Helm charts
+[`addons`](#38-addons) models.
+
+Every direct subdirectory of `/var/lib/k0s/manifests` is an independent
+**stack**. The controller applies every `.yaml` file in it, keeps the cluster
+matching what the files say, and prunes the resources of a file that is
+removed.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** The stack directory name: no slash, no leading dot |
+| `files` | list | — | **Required.** One or more manifest files; see below |
+
+Each **file**:
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** A plain file name **ending in `.yaml`** |
+| `content` | string | — | **Required.** The manifest, written byte for byte. Several documents separated by `---` are fine |
+
+```yaml
+corium:
+  role: controller+worker
+  manifests:
+    - name: metallb-config
+      files:
+        - name: pools.yaml
+          content: |
+            apiVersion: metallb.io/v1beta1
+            kind: IPAddressPool
+            metadata:
+              name: default
+              namespace: metallb-system
+            spec:
+              addresses:
+                - 192.0.2.10-192.0.2.20
+            ---
+            apiVersion: metallb.io/v1beta1
+            kind: L2Advertisement
+            metadata:
+              name: default
+              namespace: metallb-system
+```
+
+Use it for the objects that have no chart of their own: a MetalLB
+`IPAddressPool`, a cert-manager `ClusterIssuer`, a `StorageClass`, the RBAC an
+in-house controller needs. Everything with a chart belongs in
+[`addons`](#38-addons).
+
+**`.yml` is rejected.** The deployer reads `.yaml` and no other extension, so a
+file named `.yml` is not reported by k0s — it is skipped in silence. Corium
+refuses it at validation instead.
+
+**Do not name a stack after one of k0s's own.** k0s runs several of its
+in-cluster components as stacks in the same directory. Corium cannot enumerate
+them — the set changes upstream — so pick a name that is obviously yours.
+
+Rejected at validation, offline, before anything is written: a stack or file
+name containing a slash, `..`, or a leading dot; two stacks sharing a name; two
+files sharing a name within one stack; a file name not ending in `.yaml`; empty
+content; and content that does not parse as YAML. Corium checks the syntax and
+stops there — it has no schema for a Kubernetes object, so a document the API
+server rejects is reported by the deployer in the controller's log.
+
+Manifests are applied by a controller, so declaring them on a worker is
+rejected — the same rule, for the same reason, as `addons`.
+
+They are written **before** `k0s install`. A stack that landed afterwards would
+reach a cluster that had already reported itself ready, which is the difference
+between a node that boots with its address pool and one that boots, goes green,
+and acquires the pool some time after whatever was waiting on a LoadBalancer
+gave up.
+
+Like every other field but `addons` and `k0s.patch`, `manifests` cannot be
+changed on a node that has already bootstrapped: `cctl apply` refuses it and
+names it. Change a live stack with `kubectl`, or reset the node.
 
 ---
 

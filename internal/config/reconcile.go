@@ -60,8 +60,14 @@ func (p ReconcilePlan) Empty() bool {
 // day-two, because it defines the node's identity (`role`, `node`), its cluster
 // (`cluster`, `join`, `ha`), its network or disks (`network`, `storage`,
 // `raid`, `wireguard`), or is not yet reconciled here (`upgrades`, `backup`,
-// `api`). Changing any of those is a provisioning act. See ADR 8; the set the node
-// calls safe is expected to grow.
+// `api`, `manifests`). Changing any of those is a provisioning act. See ADR 8;
+// the set the node calls safe is expected to grow.
+//
+// `manifests` is the one that looks reconcilable and is not yet: the deployer
+// would in fact pick up a rewritten file, and prune what a deleted one created,
+// which is more than `addons` manages. What is missing is the decision, not the
+// mechanism -- ADR 8 names the safe subset, and this list grows when that
+// document does, not when a field looks like it would cope.
 func PlanReconcile(old, next *Config) ReconcilePlan {
 	var plan ReconcilePlan
 
@@ -85,6 +91,7 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 		{"upgrades", old.Upgrades, next.Upgrades},
 		{"backup", old.Backup, next.Backup},
 		{"api", old.API, next.API},
+		{"manifests", old.Manifests, next.Manifests},
 	}
 
 	for _, field := range immutable {
