@@ -95,6 +95,16 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | Chart repositories | `addons[].repository` | |
 | Chart values | `addons[].values` | Converted to the YAML string k0s expects |
 
+### Bundled manifests
+
+| Feature | Field | Notes |
+|---|---|---|
+| Plain Kubernetes YAML at bootstrap | `manifests[]` | Written to `/var/lib/k0s/manifests/<stack>/` before k0s starts, for objects with no chart of their own. See [Manifest Deployer](https://docs.k0sproject.io/stable/manifests/) |
+| Several files, several documents | `manifests[].files` | One file may hold documents separated by `---`, the way kubectl accepts them |
+| Checked offline | `manifests[].files[].content` | Parsed as YAML by `corium-agent validate`; Corium has no schema for a Kubernetes object and does not pretend to |
+| `.yml` refused | n/a | The deployer reads `.yaml` and no other extension, so `.yml` would be skipped in silence. Corium rejects it instead |
+| Reconciling and pruning | n/a | k0s's, not Corium's: it watches each stack and prunes the resources of a file that is removed |
+
 ### Upgrades
 
 | Feature | Field | Notes |

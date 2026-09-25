@@ -61,6 +61,11 @@ type Config struct {
 	// extensions mechanism. No Helm binary or in-cluster operator is involved.
 	Addons []Addon `yaml:"addons,omitempty" json:"addons,omitempty"`
 
+	// Manifests are plain Kubernetes documents written under
+	// /var/lib/k0s/manifests/<stack>/ at bootstrap, for the resources that have
+	// no chart to install them from. See the ManifestStack documentation.
+	Manifests []ManifestStack `yaml:"manifests,omitempty" json:"manifests,omitempty"`
+
 	// HA configures a highly available control plane.
 	HA HA `yaml:"ha,omitempty" json:"ha,omitempty"`
 
@@ -308,6 +313,68 @@ type Addon struct {
 type Repository struct {
 	Name string `yaml:"name" json:"name"`
 	URL  string `yaml:"url" json:"url"`
+}
+
+// ManifestStack declares one directory of plain Kubernetes manifests, written
+// under /var/lib/k0s/manifests/<name>/ before k0s starts.
+//
+// This is k0s's other extension mechanism, the one Addon does not reach. Every
+// direct subdirectory of /var/lib/k0s/manifests is an independent stack: the
+// controller's manifest deployer applies each .yaml file in it, keeps the
+// cluster matching what the files say, and prunes a resource whose file is
+// removed. See https://docs.k0sproject.io/stable/manifests/.
+//
+// It exists because a chart is the wrong unit for a handful of objects. A
+// MetalLB IPAddressPool, a cert-manager ClusterIssuer or a StorageClass is three
+// lines of YAML that some add-on's CRD gave meaning to, and the only way to ship
+// those three lines was to wrap them in a chart, publish it somewhere the node
+// can reach, and then own a chart.
+//
+// What it earns over the two escape hatches that already write into that
+// directory:
+//
+//   - Over cloud-init's write_files: the `corium:` block is read from the whole
+//     source chain, so a node with no cloud-init datasource — bare metal, PXE,
+//     an appliance — still gets its manifests, where write_files never runs.
+//     The names are also checked before anything is written, which matters more
+//     here than it looks: the deployer reads .yaml and no other extension, so a
+//     file write_files spells .yml is not rejected, it is silently never
+//     applied.
+//   - Over k0s.patch: the patch reaches the rendered k0s.yaml and nothing else.
+//     Bundled manifests are files on disk, not a k0s configuration key, and no
+//     patch can produce one.
+//
+// Ordering, templating and pruning are deliberately absent. They belong to the
+// deployer, which already does the last of them; Corium writes the files.
+type ManifestStack struct {
+	// Name is the stack's directory name under /var/lib/k0s/manifests. A plain
+	// directory name, with no slash in it: the deployer does not descend into
+	// nested directories, so a manifest one level deeper is not applied late, it
+	// is never applied at all.
+	//
+	// k0s runs its own in-cluster components as stacks in the same directory.
+	// Pick a name of your own; a stack sharing a name with one of k0s's is a
+	// directory two writers rewrite.
+	Name string `yaml:"name" json:"name"`
+
+	// Files are the manifests in the stack. At least one is required, and each
+	// may hold several documents separated by `---`, the way kubectl accepts
+	// them.
+	Files []ManifestFile `yaml:"files" json:"files"`
+}
+
+// ManifestFile is one manifest file written into a stack directory.
+type ManifestFile struct {
+	// Name is the file name within the stack directory. It must end in .yaml:
+	// the deployer reads that extension and no other, so .yml is the one
+	// spelling that fails without saying so.
+	Name string `yaml:"name" json:"name"`
+
+	// Content is the manifest, written byte for byte. Corium checks that it
+	// parses as a YAML stream and stops there — it does not know a Kubernetes
+	// object from any other mapping, and a document the API server rejects is
+	// reported by the deployer in the controller's log.
+	Content string `yaml:"content" json:"content"`
 }
 
 // UpgradePolicy says how far a node goes on its own when a newer image exists.

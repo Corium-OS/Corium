@@ -53,6 +53,12 @@ See [HA cluster](install/ha-cluster.md) for the procedure these belong to.
 |---|---|
 | [`backup.yaml`](examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](reference.md#318-backup) |
 
+## Extensions
+
+| Example | What it builds |
+|---|---|
+| [`manifests.yaml`](examples/manifests.yaml) | MetalLB installed as a chart and configured with plain Kubernetes YAML in the same document, through `manifests[]` |
+
 ## Managed nodes
 
 | Example | What it builds |

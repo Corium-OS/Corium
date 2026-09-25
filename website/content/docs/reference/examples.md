@@ -62,6 +62,12 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 |---|---|
 | [`backup.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](/docs/reference/configuration/#318-backup) |
 
+## Extensions
+
+| Example | What it builds |
+|---|---|
+| [`manifests.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/manifests.yaml) | MetalLB installed as a chart and configured with plain Kubernetes YAML in the same document, through `manifests[]` |
+
 ## Managed nodes
 
 | Example | What it builds |
