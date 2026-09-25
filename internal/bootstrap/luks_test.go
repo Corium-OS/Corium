@@ -367,3 +367,49 @@ func TestLUKSMountPoints(t *testing.T) {
 		t.Errorf("luksMountPoints() = %v, want only the mounted volume", got)
 	}
 }
+
+// TestWriteKeyFileReusesWhatIsAlreadyOnDisk is the regression test for a second
+// bootstrap failing on a volume that was already unlocked.
+//
+// It was found on a real node: the passphrase came from a cloud-init
+// write_files entry under /run, the node rebooted, /run was empty, and the next
+// `corium-agent bootstrap` stopped at "LUKS passphrase: not available yet" --
+// on a volume whose key file was sitting in /etc/luks-keys the whole time.
+func TestWriteKeyFileReusesWhatIsAlreadyOnDisk(t *testing.T) {
+	original := keyDir
+	t.Cleanup(func() { keyDir = original })
+	keyDir = t.TempDir()
+
+	volume := &config.LUKSVolume{
+		Name:           "passdata",
+		Device:         "/dev/sdc",
+		Unlock:         config.LUKSUnlockPassphrase,
+		PassphraseFrom: &config.SecretSource{File: "/run/gone-after-a-reboot"},
+	}
+
+	// What the first boot left behind.
+	existing := keyFilePath(volume.Name)
+	if err := os.WriteFile(existing, []byte("the-original-passphrase"), 0o600); err != nil {
+		t.Fatalf("seeding the key file: %v", err)
+	}
+
+	// The source is gone. Resolving it would fail, so reaching the resolver at
+	// all is the bug.
+	path, err := writeKeyFile(t.Context(), volume)
+	if err != nil {
+		t.Fatalf("writeKeyFile() = %v, want it to reuse the key file on disk", err)
+	}
+
+	if path != existing {
+		t.Errorf("key file = %q, want %q", path, existing)
+	}
+
+	content, err := os.ReadFile(path) //nolint:gosec // a path this test created
+	if err != nil {
+		t.Fatalf("reading the key file: %v", err)
+	}
+
+	if string(content) != "the-original-passphrase" {
+		t.Errorf("key file = %q, want the original left untouched", content)
+	}
+}

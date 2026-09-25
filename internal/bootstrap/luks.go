@@ -348,12 +348,35 @@ func keyFilePath(name string) string { return filepath.Join(keyDir, name+".key")
 
 // writeKeyFile resolves the volume's passphrase and stores it for later boots.
 //
+// A key file already on disk is the answer, and resolving the secret again is
+// skipped. The file is what every boot after the first one unlocks with, so it
+// is the authority rather than a cache of one -- and re-resolving turns a
+// second bootstrap into a failure whenever the source was transient, which is
+// the common shape: a cloud-init write_files entry under /run is gone after the
+// first reboot, and `waitFor` would sit there for its whole window waiting for
+// a secret nothing is going to write again. A volume that needs a different
+// passphrase needs `cryptsetup luksChangeKey`, which this does not do and
+// `luks` being immutable day-two already says.
+//
 // The passphrase is resolved through the same path as a join token, so it need
 // not sit in instance metadata. What lands on disk afterwards is a 0600 file in
 // a 0700 directory on an unencrypted root: it protects a disk that leaves the
 // machine, not a machine that leaves the building. The ADR says so rather than
 // letting the word "encrypted" imply more than it buys.
 func writeKeyFile(ctx context.Context, volume *config.LUKSVolume) (string, error) {
+	path := keyFilePath(volume.Name)
+
+	if _, err := os.Stat(path); err == nil {
+		slog.Info("reusing the key file already on disk",
+			"name", volume.Name, "path", path)
+
+		return path, nil
+	} else if !os.IsNotExist(err) {
+		// A stat that failed for any other reason is not permission to resolve
+		// the secret and overwrite whatever is there.
+		return "", fmt.Errorf("checking the key file for volume %q: %w", volume.Name, err)
+	}
+
 	passphrase := volume.Passphrase
 
 	if volume.PassphraseFrom != nil {
@@ -372,8 +395,6 @@ func writeKeyFile(ctx context.Context, volume *config.LUKSVolume) (string, error
 	if err := os.MkdirAll(keyDir, 0o700); err != nil {
 		return "", fmt.Errorf("creating %s: %w", keyDir, err)
 	}
-
-	path := keyFilePath(volume.Name)
 
 	// Written verbatim, with no trailing newline: cryptsetup uses the file's
 	// bytes as the key, so a newline here would become part of the key and the
