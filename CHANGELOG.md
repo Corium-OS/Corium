@@ -12,6 +12,24 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **A node can back its own control plane up, on a schedule.** A new `backup:`
+  block in the `corium:` document turns `k0s backup` into a systemd timer:
+  `enabled`, an `OnCalendar` `schedule` (default daily), a target `path`
+  (default `/var/lib/corium/backups`) and a `keep` count (default 7). Each run
+  writes one archive of the etcd or kine datastore, the PKI, `k0s.yaml`, the
+  manifests and the Helm configuration, then deletes the oldest beyond `keep`
+  -- and only archives Corium named itself, so a `k0s backup` you took by hand
+  into the same directory is left alone. The archive is `0600` in a `0700`
+  directory, because it holds the cluster CA's private key and every Secret in
+  etcd. A `backup:` block on a `role: worker` node is rejected at validation
+  rather than ignored: `k0s backup` needs a control plane, and a timer failing
+  every night on a node you believe is backed up is the worse outcome.
+  Restoring stays manual -- see
+  [reference §3.18](docs/reference.md#318-backup) for the `k0s restore`
+  command and what it needs.
+
 ### Changed
 
 - **The disk and ISO builder is pinned, and comes from image-builder.**

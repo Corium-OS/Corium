@@ -44,7 +44,7 @@ func applyUpgradePolicy(ctx context.Context, cfg *config.Config) error {
 		timer = applyTimer
 	}
 
-	if err := writeSchedule(timer, cfg.Upgrades.Schedule); err != nil {
+	if err := writeSchedule(timer, cfg.Upgrades.Schedule, config.DefaultUpgradeSchedule); err != nil {
 		return err
 	}
 
@@ -62,13 +62,14 @@ func applyUpgradePolicy(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// writeSchedule overrides a timer's OnCalendar.
+// writeSchedule overrides a timer's OnCalendar. shipped is the schedule the
+// unit file already carries, which needs no drop-in to restate.
 //
 // The empty OnCalendar= first is not redundant: systemd accumulates OnCalendar
 // entries across drop-ins, so without clearing it the unit would fire on both
 // its built-in schedule and the operator's.
-func writeSchedule(timer, schedule string) error {
-	if schedule == "" || schedule == config.DefaultUpgradeSchedule {
+func writeSchedule(timer, schedule, shipped string) error {
+	if schedule == "" || schedule == shipped {
 		return nil
 	}
 
@@ -83,11 +84,11 @@ func writeSchedule(timer, schedule string) error {
 
 	// RandomizedDelaySec is cleared along with the calendar.
 	//
-	// The built-in hour of jitter exists so that a fleet on the default daily
-	// schedule does not arrive at the registry together. An operator who wrote
-	// an explicit schedule is expressing a maintenance window, and silently
-	// moving the run by up to an hour contradicts it.
-	content := "# Written by corium-agent from corium.upgrades.schedule.\n" +
+	// The built-in jitter exists so that a fleet on the default daily schedule
+	// does not all arrive at the same moment. An operator who wrote an explicit
+	// schedule is expressing a maintenance window, and silently moving the run
+	// out of it contradicts them.
+	content := "# Written by corium-agent from the corium: block.\n" +
 		"[Timer]\n" +
 		"OnCalendar=\n" +
 		"OnCalendar=" + schedule + "\n" +

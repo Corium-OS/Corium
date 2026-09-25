@@ -14,6 +14,20 @@ const (
 	// DefaultUpgradeSchedule checks once a day. systemd applies a randomised
 	// delay on top, so a fleet does not converge on the registry at once.
 	DefaultUpgradeSchedule = "daily"
+
+	// DefaultBackupSchedule snapshots the control plane once a day. The timer
+	// carries a randomised delay, so the controllers of one cluster do not all
+	// stop to snapshot etcd at the same minute.
+	DefaultBackupSchedule = "daily"
+
+	// DefaultBackupPath is on the node's own disk, under Corium's state
+	// directory. It is somewhere rather than nowhere; a backup that matters
+	// belongs on a mount that outlives the machine.
+	DefaultBackupPath = "/var/lib/corium/backups"
+
+	// DefaultBackupKeep is a week of daily archives. Long enough to notice
+	// something went wrong on Friday, short enough not to fill /var.
+	DefaultBackupKeep = 7
 )
 
 // ApplyDefaults fills in unset fields. It is idempotent.
@@ -44,6 +58,23 @@ func (c *Config) ApplyDefaults() {
 
 	if c.Upgrades.Schedule == "" {
 		c.Upgrades.Schedule = DefaultUpgradeSchedule
+	}
+
+	// Only for a block that asked for something. Filling these in
+	// unconditionally would make every configuration carry a backup block,
+	// which is how a setting nobody wrote ends up rejected on a worker.
+	if c.Backup.Enabled {
+		if c.Backup.Schedule == "" {
+			c.Backup.Schedule = DefaultBackupSchedule
+		}
+
+		if c.Backup.Path == "" {
+			c.Backup.Path = DefaultBackupPath
+		}
+
+		if c.Backup.Keep == 0 {
+			c.Backup.Keep = DefaultBackupKeep
+		}
 	}
 
 	for i := range c.Addons {

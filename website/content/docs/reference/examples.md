@@ -54,6 +54,12 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 | [`stretched-worker.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](/docs/guides/raid/) |
 
+## Day two
+
+| Example | What it builds |
+|---|---|
+| [`backup.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](/docs/reference/configuration/#318-backup) |
+
 ## Managed nodes
 
 | Example | What it builds |
