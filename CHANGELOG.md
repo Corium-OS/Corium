@@ -22,9 +22,22 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   `quay.io` tag that stopped moving the day the repository was archived and
   whose base has since left support. `mise run artefact-*`, the files it
   writes and the published artefacts are unchanged, and `BIB=` still overrides
-  the builder. What comes after — the disks moving to `image-builder build
-  --bootc-ref`, and an installer ISO of our own once upstream's `anaconda-iso`
-  type is retired — is in [ADR 9](docs/adr/0009-image-builder.md).
+  the builder.
+- **The qcow2 and the raw disk are now built by `image-builder` itself**, with
+  `image-builder build --bootc-ref`, from `ghcr.io/osbuild/image-builder`
+  pinned to the same release and its own digest. That is the code path
+  upstream develops, rather than the one it preserves; the compatibility entry
+  point is now used for the installer ISO and nothing else. `mise run
+  artefact-qcow2` and `mise run artefact-raw` still write
+  `output/qcow2/disk.qcow2` and `output/image/disk.raw`, and the published
+  qcow2 is the same artefact built the same way. Two things are worth knowing
+  if you build your own: the image has to be in **root's** container store
+  before the build, as before, and a warning during manifest generation now
+  stops the build, where the old entry point carried on past some of them.
+  `IMAGE_BUILDER=` overrides the disk builder the way `BIB=` overrides the ISO
+  one. The rest of the plan — an installer ISO of our own, once upstream's
+  `anaconda-iso` type is retired — is in
+  [ADR 9](docs/adr/0009-image-builder.md).
 
 ### Fixed
 

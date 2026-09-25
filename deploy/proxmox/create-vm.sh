@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Create a Corium VM on a Proxmox host from a qcow2 produced by
-# bootc-image-builder.
+# image-builder.
 #
 # Run this on the Proxmox node itself. It is idempotent only in the sense that
 # it refuses to touch an existing VM: destroy it yourself first.
