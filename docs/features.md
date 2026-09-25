@@ -119,6 +119,11 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | ZFS datasets | `zfs[].datasets` | Per-dataset mount points and properties (compression, recordsize, quota) |
 | ZFS refuses to destroy data | `zfs[].wipe` | Off by default; a device in a pool cannot also be in a `raid[]` array |
 | Root filesystem on ZFS | n/a | Out of scope: needs the module in the initramfs, which bootc has no declarative path for. See [ADR 7](adr/0007-zfs-data-disks.md) |
+| LUKS encryption on data disks | `luks[]` | LUKS2 volumes set up before k0s; nothing added to the image. See [disk encryption](luks.md) |
+| TPM-backed unlock | `luks[].unlock: tpm2` | The default: `systemd-cryptenroll --tpm2-device=auto`, unattended boot, no key stored in the clear |
+| Passphrase unlock | `luks[].passphraseFrom` | Resolved as a secret, never inline-only; kept as a `0600` key file for later boots |
+| LUKS refuses to destroy data | `luks[].wipe` | Off by default; an existing LUKS header is adopted, never reformatted, whatever `wipe` says |
+| Encrypted root filesystem | n/a | Out of scope: it is unlocked in the initramfs, before `corium-agent` exists. See [ADR 10](adr/0010-luks-data-disks.md) |
 
 ### Overlay networking
 
@@ -323,6 +328,7 @@ should be.
 | **Forking or patching k0s** | Corium configures upstream k0s. A fork would mean owning Kubernetes bugs, which is not a business worth being in |
 | **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Dropping a chart from the configuration leaves the release running — remove it with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/). For the same reason, `cctl apply` refuses a day-two document that drops a chart rather than reporting a removal that did not happen |
 | **Multiple Kubernetes distributions** | Only k0s. Supporting k3s or RKE2 as well would mean an abstraction that fits none of them properly |
+| **An encrypted root filesystem** | `luks[]` covers data disks. Root is unlocked in the initramfs, before `corium-agent` exists, so it is the installer's decision and not a `corium:` field — the same boundary a RAID root sits on. See [ADR 10](adr/0010-luks-data-disks.md) |
 
 **On fleet management.** The management API does not change that answer: it is
 one daemon per node, answering for that node, with no registry, no inventory

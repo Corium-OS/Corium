@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/Corium-OS/Corium/internal/config"
-	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
 // applyZFS brings every declared pool into existence and mounts its datasets.
@@ -40,7 +37,7 @@ func applyZFS(ctx context.Context, cfg *config.Config) error {
 
 	// k0s must not start on a node whose storage did not turn up. Same guarantee
 	// as RAID, by the same mechanism.
-	return requireZFSMountsForK0s(cfg)
+	return requireMountsForK0s(cfg, "zfs", zfsMountPoints(cfg))
 }
 
 func applyPool(ctx context.Context, pool *config.ZFSPool) error {
@@ -237,12 +234,13 @@ func applyDatasetProperties(ctx context.Context, name string, dataset config.ZFS
 	return nil
 }
 
-// requireZFSMountsForK0s stops k0s starting before its storage is there.
+// zfsMountPoints lists every path a declared pool or dataset is mounted at, so
+// the k0s unit can be made to wait for them.
 //
-// The same drop-in RAID writes, for the same reason: a pool that failed to
-// import must fail the k0s unit loudly rather than let Kubernetes run against
-// the empty directory on the root disk that the dataset should cover.
-func requireZFSMountsForK0s(cfg *config.Config) error {
+// The drop-in RAID writes, for the same reason: a pool that failed to import
+// must fail the k0s unit loudly rather than let Kubernetes run against the empty
+// directory on the root disk that the dataset should cover.
+func zfsMountPoints(cfg *config.Config) []string {
 	var mountPoints []string
 
 	for _, pool := range cfg.ZFS {
@@ -257,38 +255,7 @@ func requireZFSMountsForK0s(cfg *config.Config) error {
 		}
 	}
 
-	if len(mountPoints) == 0 {
-		return nil
-	}
-
-	unit := k0s.ServiceName(cfg.Role)
-	dir := filepath.Join("/etc/systemd/system", unit+".d")
-
-	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // systemd unit drop-in directories are 0755
-		return fmt.Errorf("creating %s: %w", dir, err)
-	}
-
-	content := "# Written by corium-agent from corium.zfs.\n" +
-		"#\n" +
-		"# Without this, a node whose pool failed to import starts Kubernetes\n" +
-		"# anyway and writes to the empty directory on the root disk that the\n" +
-		"# dataset should have been mounted over.\n" +
-		"[Unit]\n"
-
-	for _, mountPoint := range mountPoints {
-		content += "RequiresMountsFor=" + mountPoint + "\n"
-	}
-
-	path := filepath.Join(dir, "10-corium-zfs.conf")
-
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // unit drop-ins are world-readable
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-
-	slog.Info("k0s will wait for the zfs mounts",
-		"unit", unit, "mountPoints", mountPoints)
-
-	return nil
+	return mountPoints
 }
 
 // poolMountPoint is the path the pool's root dataset mounts at: its configured

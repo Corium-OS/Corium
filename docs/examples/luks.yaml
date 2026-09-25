@@ -1,0 +1,66 @@
+#cloud-config
+#
+# A node whose data disk is encrypted with LUKS2 and unlocked by the machine's
+# TPM, with Kubernetes state on it.
+#
+# The volume is set up at first boot, before k0s is installed -- the same
+# ordering, and the same reason for it, as raid[] and zfs[]: a mount that lands
+# after the kubelet has started is a mount it has already written past, and the
+# data under the mount point is then invisible while still consuming the root
+# disk.
+#
+# Nothing has to be added to the image: cryptsetup, systemd-cryptenroll and the
+# TPM libraries are already in it.
+#
+# What this protects: a disk that leaves the machine. What it does not protect:
+# a machine that leaves the building -- it boots and unlocks itself for whoever
+# has it. See docs/luks.md and docs/adr/0010-luks-data-disks.md before telling
+# anyone the node is encrypted.
+
+corium:
+  role: controller+worker
+
+  luks:
+    - name: data
+
+      # A whole disk, by ID rather than by kernel name. /dev/sdb is assigned in
+      # discovery order, which is not promised to be stable across boots --
+      # least of all on the first boot, the one that decides which disk gets a
+      # new LUKS header written over whatever was there.
+      device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+
+      # unlock is absent, so it is tpm2: the key is sealed to this machine's TPM
+      # and the node boots unattended with nothing stored in the clear.
+      #
+      # On hardware with no TPM, or when the disk may have to be opened
+      # somewhere else, use a passphrase instead -- resolved as a secret, never
+      # written inline, for the same reason a join token is not:
+      #
+      #   unlock: passphrase
+      #   passphraseFrom:
+      #     url: https://secrets.example.com/nodes/db-1/luks
+      #     waitFor: 10m
+      #
+      # A tpm2 volume opens on this machine and no other. Clear the TPM or
+      # replace the mainboard and the data is gone; Corium enrols no recovery
+      # key, because the only place it could print one at first boot is the
+      # journal. Enrol one by hand if the data is worth it:
+      #
+      #   sudo systemd-cryptenroll --recovery-key /dev/disk/by-id/...
+
+      filesystem: ext4
+      mountPoint: /var/lib/corium/data
+
+      # wipe is absent, so it is false.
+      #
+      # The disk already carrying a filesystem or a partition table stops the
+      # bootstrap with an error naming what it found. A disk already carrying a
+      # LUKS header is adopted and unlocked, never reformatted -- whatever wipe
+      # says, because luksFormat replaces the header in place and there is no
+      # undo. Set wipe: true only when you mean "this disk is expendable".
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

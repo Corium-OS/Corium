@@ -1,0 +1,251 @@
+# Disk encryption
+
+Corium can encrypt a node's data disks with LUKS2, declared in the same
+`corium:` block as everything else and set up at first boot, before k0s. The
+volume is unlocked either by the machine's TPM — unattended, nothing to type —
+or by a passphrase resolved as a secret.
+
+Two things are worth knowing before you start, and both are limits rather than
+features.
+
+- **It does not cover the root disk.** This is data disks only. Encrypting root
+  is an install-time decision, made by the installer before `corium-agent`
+  exists. Corium refuses a device the running system has mounted, so this cannot
+  be aimed at the booted disk by accident. See
+  [ADR 10](adr/0010-luks-data-disks.md).
+- **It protects a disk that leaves the machine, not a machine that leaves the
+  building.** That is the honest threat model, and it is the same for both
+  unlock methods. [Read the section below](#what-this-actually-protects) before
+  you tell anyone the node is encrypted.
+
+Nothing has to be added to the image: `cryptsetup`, `systemd-cryptenroll` and
+the TPM libraries are all in the base image already.
+
+---
+
+## A volume
+
+```yaml
+#cloud-config
+corium:
+  role: controller+worker
+  luks:
+    - name: data
+      device: /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+      mountPoint: /var/lib/corium/data
+```
+
+At first boot the node checks the disk is not in use, encrypts it, seals the key
+to the TPM, writes an `/etc/crypttab` entry so later boots unlock it, formats it
+ext4, mounts it, writes an `/etc/fstab` entry, and writes a drop-in so k0s waits
+for that mount.
+
+`unlock` defaults to `tpm2`, which is why it does not appear above. Every field
+is in the [configuration reference](reference.md#318-luks).
+
+### A passphrase instead
+
+On hardware with no TPM, or when you may need to open the disk somewhere else:
+
+```yaml
+corium:
+  role: controller+worker
+  luks:
+    - name: data
+      device: /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+      unlock: passphrase
+      passphraseFrom:
+        url: https://secrets.example.com/nodes/db-1/luks
+        waitFor: 10m
+      mountPoint: /var/lib/corium/data
+```
+
+`passphraseFrom` is an ordinary [secret source](reference.md#316-secret-sources):
+an HTTPS URL or a local file, with the same `waitFor` and `authFile` as a join
+token. There is a `passphrase:` key that takes the value inline — it is for
+labs. An inline passphrase sits in instance metadata, readable by anything that
+can reach the metadata service, which leaves the encryption protecting nothing.
+
+Corium writes the passphrase to `/etc/luks-keys/<name>.key`, mode `0600`, so
+later boots are unattended. Read
+[what this actually protects](#what-this-actually-protects) before deciding that
+is acceptable; for most nodes it is, for the same reason `tpm2` is.
+
+### On top of a RAID array
+
+Volumes are set up after arrays, so a volume may sit on one — redundant storage
+that is also encrypted:
+
+```yaml
+corium:
+  role: controller+worker
+  raid:
+    - name: mirror
+      level: 1
+      devices:
+        - /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+        - /dev/disk/by-id/wwn-0x5000c500a0b1c2d4
+      filesystem: none          # the volume carries the filesystem, not the array
+  luks:
+    - name: data
+      device: /dev/md/mirror
+      mountPoint: /var/lib/corium/data
+```
+
+The array must be `filesystem: none`, or the two would format over each other.
+Corium rejects the combination at validation rather than letting it fail at
+first boot.
+
+The reverse does not work: a `zfs[]` pool cannot be built on an encrypted
+volume, because pools are created before volumes are unlocked. ZFS has its own
+[native encryption](zfs.md), which is the answer there.
+
+---
+
+## What this actually protects
+
+"Encryption at rest" invites people to assume more than they bought. What a
+Corium LUKS volume gives you:
+
+| Scenario | Protected? |
+|---|---|
+| The data disk is pulled, RMA'd, sold or stolen on its own | **Yes.** It is ciphertext anywhere else |
+| The whole machine is stolen | **No.** It boots and unlocks itself for the thief |
+| Someone gets root on the running node | **No.** The volume is mounted; it is plain files |
+| A backup of the node's root disk leaks | The volume's data is not on it; the *key file* may be |
+
+This is the same for both unlock methods, and it is worth saying why.
+
+**`tpm2`** seals the key to the TPM, so the key cannot be copied off the
+machine. But the TPM unseals for whoever boots the machine. Binding the key to
+PCRs so it only unseals under a measured, Secure Boot–verified boot chain is
+what would change that, and Corium does not configure any of it.
+
+**`passphrase`** keeps the key in a `0600` file on an unencrypted root, next to
+the volume it opens. Anyone with the whole machine has both.
+
+So: both are protection against a disk leaving the machine. `tpm2` is the
+default because it reaches that without leaving a readable key lying about;
+`passphrase` exists for hardware with no TPM, and for a disk you may need to
+open elsewhere. Neither is protection against an attacker holding the running
+machine, and neither is a substitute for not putting secrets on a node.
+
+---
+
+## It refuses to destroy data
+
+Two separate refusals, and the second is the important one.
+
+**A device that already holds something** — a filesystem, a partition table,
+another array's metadata — stops the bootstrap:
+
+```
+device /dev/sdb already holds a filesystem or array member signature (TYPE=ext4);
+refusing to overwrite it. Set wipe: true on this array to consent to erasing
+these devices
+```
+
+`wipe: true` on the volume is the consent, off by default, exactly as for
+[`raid[]`](raid.md): a node that refuses to finish bootstrapping is an
+afternoon; a disk silently turned into ciphertext nobody has the key to is not.
+
+**A device that already carries a LUKS header is adopted**, never reformatted,
+whatever `wipe` says. `cryptsetup luksFormat` writes a new header in place, and
+the old header held the only copy of the key for every byte behind it. There is
+no undo, so there is no flag.
+
+**A device the running system is using** is refused outright:
+
+```
+device /dev/vda is in use: it carries the mounted filesystem(s) /boot, /sysroot,
+/var; corium.luks covers data disks, never the disk the OS booted from
+```
+
+A device may belong to `luks[]`, `raid[]` **or** `zfs[]`, never two of them.
+Listing one twice is rejected at validation, before anything touches a disk.
+
+Re-running bootstrap on a node whose volume already exists adopts and unlocks
+it. A second bootstrap is a no-op.
+
+---
+
+## Why this is not just cloud-init
+
+cloud-init has no notion of encryption, so the honest alternative is a `runcmd`
+calling `cryptsetup`, and it gets the same three things wrong a `mdadm` `runcmd`
+does (see [software RAID](raid.md#why-this-is-not-just-cloud-init)):
+
+**The volume is mounted before k0s starts.** A `runcmd` races the kubelet; lose
+the race and containerd writes into the directory on the *root* disk that the
+volume is about to be mounted over, where it is invisible afterwards while still
+filling root. Corium sets volumes up before k0s and writes a drop-in so the k0s
+unit waits:
+
+```ini
+# /etc/systemd/system/k0scontroller.service.d/10-corium-luks.conf
+[Unit]
+RequiresMountsFor=/var/lib/corium/data
+```
+
+**It refuses to destroy data**, as above. `cryptsetup luksFormat --batch-mode`
+by hand does not ask.
+
+**The passphrase is a secret.** In `runcmd` it is cleartext in instance
+metadata. `passphraseFrom` resolves it the same way a join token is resolved,
+and it is never logged, never echoed into an error, and never passed as a
+command-line argument — an argument is readable in `/proc` by every process on
+the machine while the command runs.
+
+---
+
+## Checking a volume
+
+```bash
+sudo cryptsetup status data
+sudo cryptsetup luksDump /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+findmnt /var/lib/corium/data
+cat /etc/crypttab
+```
+
+`luksDump` lists the key slots. A TPM-unlocked volume shows one keyslot and a
+`systemd-tpm2` token; the slot the volume was formatted with is gone, removed by
+the enrolment.
+
+## Adding a recovery key
+
+Corium does not generate one, deliberately: the only place it could print a
+recovery key at first boot is the journal, and a recovery key in the journal is
+a recovery key in your log aggregator. Enrol one by hand, once, and write the
+printed key down somewhere that is not the node:
+
+```bash
+sudo systemd-cryptenroll --recovery-key /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+```
+
+This matters more than it sounds for a `tpm2` volume. **Clear the TPM, replace
+the mainboard, or reinstall the machine, and the data is gone.** There is no
+other way in. A data disk is not a backup, and this makes that truer than usual.
+
+## Rotating a passphrase
+
+The `corium:` block is not consulted again after the first boot, so this is an
+operator action and nothing undoes it:
+
+```bash
+sudo cryptsetup luksChangeKey /dev/disk/by-id/wwn-0x... \
+    --key-file /etc/luks-keys/data.key
+# then replace the key file with the new passphrase, mode 0600, no trailing newline
+```
+
+The missing newline is not a detail: `cryptsetup` uses the file's bytes as the
+key, so one would become part of it.
+
+---
+
+## See also
+
+- [Configuration reference §3.18](reference.md#318-luks)
+- [ADR 10: LUKS covers data disks](adr/0010-luks-data-disks.md)
+- [Software RAID](raid.md) — redundancy, and what to put underneath a volume
+- [ZFS on data disks](zfs.md) — the other storage feature, with its own encryption
+- [`systemd-cryptenroll(1)`](https://www.freedesktop.org/software/systemd/man/systemd-cryptenroll.html)

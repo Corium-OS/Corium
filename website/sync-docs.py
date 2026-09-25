@@ -60,6 +60,10 @@ PAGES = [
      "Declaring ZFS pools on a node's data disks with the ZFS image variant, "
      "why the module is baked against the image's kernel, and how it differs "
      "from software RAID."),
+    ("luks.md", "guides", "luks", "Disk encryption", 132,
+     "Encrypting a node's data disks with LUKS from the luks: field: TPM-backed "
+     "unlock, a passphrase resolved as a secret, and what encryption at rest "
+     "does and does not protect against."),
     ("derived-images.md", "guides", "derived-images", "Building your own image", 135,
      "Deriving a Corium image to add your own agents, certificates or drivers: "
      "where things have to live, how to sign it so nodes accept it, and the "
@@ -144,6 +148,11 @@ PAGES = [
      "What replaces the archived bootc-image-builder: which of its successor's "
      "paths are drop-in, why the ISO is not, where a custom kickstart goes, "
      "and what pinning buys in the meantime."),
+    ("adr/0010-luks-data-disks.md", "decisions", "adr-0010-luks-data-disks",
+     "ADR 10 — LUKS on data disks", 1000,
+     "Why disk encryption covers data disks and not root, why TPM unlock is the "
+     "default, and what a key file on an unencrypted root protects against -- a "
+     "stolen disk, not a stolen machine."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes

@@ -136,13 +136,9 @@ func TestDescribeSignature(t *testing.T) {
 func TestFstabEntry(t *testing.T) {
 	t.Parallel()
 
-	array := config.RAIDArray{
-		Name:       "data",
-		Level:      1,
-		MountPoint: "/var/lib/corium/data",
-	}
+	target := mountTarget{Owner: "raid", Name: "data", MountPoint: "/var/lib/corium/data"}
 
-	got := fstabEntry(&array, "abcd-1234")
+	got := fstabEntry(target, "abcd-1234")
 
 	// By UUID, not by /dev/md/data: the device name is a label mdadm honours,
 	// the UUID is a property of the filesystem itself.
@@ -162,7 +158,7 @@ func TestFstabEntry(t *testing.T) {
 		t.Errorf("fstabEntry() = %q, want the default filesystem filled in", got)
 	}
 
-	if !strings.Contains(got, fstabMarker) {
+	if !strings.Contains(got, target.marker()) {
 		t.Errorf("fstabEntry() = %q, want the marker that makes it rewritable", got)
 	}
 }
@@ -179,11 +175,11 @@ func TestUpsertFstabReplacesItsOwnLine(t *testing.T) {
 		t.Fatalf("seeding fstab: %v", err)
 	}
 
-	array := config.RAIDArray{Name: "data", MountPoint: "/data"}
+	array := mountTarget{Owner: "raid", Name: "data", MountPoint: "/data"}
 
 	// Bootstrapping twice must not leave two mounts for the same array behind.
 	for _, uuid := range []string{"uuid-one", "uuid-two"} {
-		if err := upsertFstab(&array, uuid); err != nil {
+		if err := upsertFstab(array, uuid); err != nil {
 			t.Fatalf("upsertFstab(%s): %v", uuid, err)
 		}
 	}
@@ -210,8 +206,8 @@ func TestUpsertFstabReplacesItsOwnLine(t *testing.T) {
 	}
 
 	// A second array must coexist rather than replace the first.
-	other := config.RAIDArray{Name: "scratch", MountPoint: "/scratch"}
-	if err := upsertFstab(&other, "uuid-three"); err != nil {
+	other := mountTarget{Owner: "raid", Name: "scratch", MountPoint: "/scratch"}
+	if err := upsertFstab(other, "uuid-three"); err != nil {
 		t.Fatalf("upsertFstab(scratch): %v", err)
 	}
 

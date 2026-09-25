@@ -53,6 +53,8 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 | [`stretched-controller-calico-wireguard.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-controller-calico-wireguard.yaml) | A controller in a cluster split across two sites |
 | [`stretched-worker.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](/docs/guides/raid/) |
+| [`zfs.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/zfs.yaml) | A node that mirrors its two data disks into a ZFS pool. See [ZFS on data disks](/docs/guides/zfs/) |
+| [`luks.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/luks.yaml) | A node whose data disk is encrypted and unlocked by its TPM. See [Disk encryption](/docs/guides/luks/) |
 
 ## Managed nodes
 

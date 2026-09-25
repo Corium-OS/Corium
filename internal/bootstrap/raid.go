@@ -24,9 +24,32 @@ const mdadmConfPath = "/etc/mdadm.conf"
 // exercise the rewriting against a real file instead of reimplementing it.
 var fstabPath = "/etc/fstab"
 
-// fstabMarker tags the lines this code owns, so they can be rewritten without
+// mountTarget is everything the mount path needs to know about a block device
+// it did not create: which corium: field asked for it, what to call it, what
+// filesystem it should carry, and where it goes.
+//
+// It exists because raid[] and luks[] both arrive at the same three steps --
+// format if blank, record in fstab, mount -- with one word different, and a
+// second copy of the fstab rewriting is a second place for it to go wrong.
+type mountTarget struct {
+	// Owner is the corium: field the device came from: "raid" or "luks". It
+	// tags the fstab line and names the systemd drop-in, so the two fields own
+	// separate lines and separate files rather than overwriting each other.
+	Owner string
+
+	// Name identifies the device within its field.
+	Name string
+
+	// Filesystem is the filesystem to create, empty meaning the default.
+	Filesystem string
+
+	// MountPoint is where it goes.
+	MountPoint string
+}
+
+// marker tags the fstab lines this code owns, so they can be rewritten without
 // disturbing anything an operator or the installer put in the same file.
-const fstabMarker = "# corium-raid"
+func (m mountTarget) marker() string { return "# corium-" + m.Owner }
 
 // arrayDevice is where mdadm publishes an array built with --homehost=any.
 func arrayDevice(name string) string { return "/dev/md/" + name }
@@ -57,7 +80,20 @@ func applyRAID(ctx context.Context, cfg *config.Config) error {
 	// k0s must not start on a node whose storage did not turn up. The mount
 	// itself is nofail, so the machine still boots and can be logged into; this
 	// is what stops Kubernetes writing to the empty directory underneath.
-	return requireMountsForK0s(cfg)
+	return requireMountsForK0s(cfg, "raid", raidMountPoints(cfg))
+}
+
+// raidMountPoints lists the paths the declared arrays are mounted at.
+func raidMountPoints(cfg *config.Config) []string {
+	var mountPoints []string
+
+	for _, array := range cfg.RAID {
+		if array.MountPoint != "" {
+			mountPoints = append(mountPoints, array.MountPoint)
+		}
+	}
+
+	return mountPoints
 }
 
 func applyArray(ctx context.Context, array *config.RAIDArray) error {
@@ -83,7 +119,14 @@ func applyArray(ctx context.Context, array *config.RAIDArray) error {
 		return nil
 	}
 
-	if err := ensureFilesystem(ctx, array, device); err != nil {
+	target := mountTarget{
+		Owner:      "raid",
+		Name:       array.Name,
+		Filesystem: array.Filesystem,
+		MountPoint: array.MountPoint,
+	}
+
+	if err := ensureFilesystem(ctx, target, device); err != nil {
 		return err
 	}
 
@@ -91,7 +134,7 @@ func applyArray(ctx context.Context, array *config.RAIDArray) error {
 		return nil
 	}
 
-	return mountArray(ctx, array, device)
+	return mountDevice(ctx, target, device)
 }
 
 // createArray builds a new array, refusing to overwrite anything first.
@@ -250,32 +293,40 @@ func describeSignature(blkidExport string) string {
 	return strings.Join(found, " and ")
 }
 
-// ensureFilesystem formats the array, unless it already carries a filesystem.
-func ensureFilesystem(ctx context.Context, array *config.RAIDArray, device string) error {
-	// Same rule as assertUsable, and for a sharper reason: this runs against an
-	// array that may have been adopted rather than just created, so mistaking a
-	// failed probe for an empty device would reformat somebody's data.
+// ensureFilesystem formats the device, unless it already carries a filesystem.
+func ensureFilesystem(ctx context.Context, target mountTarget, device string) error {
+	// Same rule as assertUsable, and for a sharper reason: this runs against a
+	// device that may have been adopted rather than just created, so mistaking
+	// a failed probe for an empty device would reformat somebody's data.
 	existing, err := commandOutput(ctx, "blkid", "--probe", "--output", "export", device)
 
 	switch {
 	case err == nil && strings.Contains(existing, "TYPE="):
-		slog.Info("raid array already carries a filesystem, leaving it alone",
-			"name", array.Name, "device", device)
+		slog.Info("device already carries a filesystem, leaving it alone",
+			"owner", target.Owner, "name", target.Name, "device", device)
 
 		return nil
 	case err != nil && !blkidFoundNothing(err):
 		return fmt.Errorf("probing %s before formatting it: %w", device, err)
 	}
 
-	filesystem := array.Filesystem
-	if filesystem == "" {
-		filesystem = config.RAIDFilesystemExt4
-	}
+	filesystem := target.filesystem()
 
-	slog.Info("formatting raid array",
-		"name", array.Name, "filesystem", filesystem)
+	slog.Info("formatting device",
+		"owner", target.Owner, "name", target.Name, "filesystem", filesystem)
 
 	return run(ctx, "mkfs."+filesystem, mkfsArgs(filesystem, device)...)
+}
+
+// filesystem is the filesystem to create, with the default filled in. ext4
+// because it is what the root filesystem is (see ADR 2), so a node needs no
+// second filesystem driver to use its data disks.
+func (m mountTarget) filesystem() string {
+	if m.Filesystem == "" {
+		return config.RAIDFilesystemExt4
+	}
+
+	return m.Filesystem
 }
 
 // mkfsArgs forces a format without prompting, which differs per filesystem.
@@ -287,13 +338,13 @@ func mkfsArgs(filesystem, device string) []string {
 	return []string{"-F", device}
 }
 
-// mountArray mounts the array now and records it for later boots.
-func mountArray(ctx context.Context, array *config.RAIDArray, device string) error {
+// mountDevice mounts the device now and records it for later boots.
+func mountDevice(ctx context.Context, target mountTarget, device string) error {
 	// 0755: a mount point has to be traversable by the services that will use
-	// it, and once the array is mounted the filesystem's own root permissions
+	// it, and once the device is mounted the filesystem's own root permissions
 	// take over from these anyway.
-	if err := os.MkdirAll(array.MountPoint, 0o755); err != nil { //nolint:gosec // mount points must be traversable
-		return fmt.Errorf("creating %s: %w", array.MountPoint, err)
+	if err := os.MkdirAll(target.MountPoint, 0o755); err != nil { //nolint:gosec // mount points must be traversable
+		return fmt.Errorf("creating %s: %w", target.MountPoint, err)
 	}
 
 	uuid, err := commandOutput(ctx, "blkid", "--match-tag", "UUID", "--output", "value", device)
@@ -306,7 +357,7 @@ func mountArray(ctx context.Context, array *config.RAIDArray, device string) err
 		return fmt.Errorf("device %s reported no filesystem UUID", device)
 	}
 
-	if err := upsertFstab(array, uuid); err != nil {
+	if err := upsertFstab(target, uuid); err != nil {
 		return err
 	}
 
@@ -316,24 +367,25 @@ func mountArray(ctx context.Context, array *config.RAIDArray, device string) err
 		return err
 	}
 
-	if mounted(array.MountPoint) {
+	if mounted(target.MountPoint) {
 		return nil
 	}
 
-	slog.Info("mounting raid array",
-		"name", array.Name, "mountPoint", array.MountPoint, "uuid", uuid)
+	slog.Info("mounting device",
+		"owner", target.Owner, "name", target.Name,
+		"mountPoint", target.MountPoint, "uuid", uuid)
 
-	return run(ctx, "mount", array.MountPoint)
+	return run(ctx, "mount", target.MountPoint)
 }
 
-// upsertFstab rewrites this array's entry, leaving every other line untouched.
-func upsertFstab(array *config.RAIDArray, uuid string) error {
+// upsertFstab rewrites this device's entry, leaving every other line untouched.
+func upsertFstab(target mountTarget, uuid string) error {
 	existing, err := os.ReadFile(fstabPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading %s: %w", fstabPath, err)
 	}
 
-	tag := fmt.Sprintf("%s %s", fstabMarker, array.Name)
+	tag := fmt.Sprintf("%s %s", target.marker(), target.Name)
 
 	var kept []string
 
@@ -350,41 +402,33 @@ func upsertFstab(array *config.RAIDArray, uuid string) error {
 		kept = kept[:len(kept)-1]
 	}
 
-	kept = append(kept, fstabEntry(array, uuid), "")
+	kept = append(kept, fstabEntry(target, uuid), "")
 
 	return os.WriteFile(fstabPath, []byte(strings.Join(kept, "\n")), 0o644) //nolint:gosec // fstab is world-readable by design
 }
 
 // fstabEntry renders the mount line.
 //
-// By UUID rather than by /dev/md/<name>: the array name is a label mdadm
-// chooses to honour, the filesystem UUID is a property of the data.
+// By UUID rather than by /dev/md/<name> or /dev/mapper/<name>: those names are
+// labels mdadm and device-mapper choose to honour, the filesystem UUID is a
+// property of the data.
 //
-// nofail, so a missing or degraded-beyond-recovery array does not leave the
+// nofail, so a missing or degraded-beyond-recovery device does not leave the
 // machine sitting at an emergency prompt where nobody can reach it. The
 // protection against Kubernetes running without its storage is not here, it is
 // the RequiresMountsFor drop-in on the k0s unit -- which fails the service
 // loudly while leaving the node reachable enough to fix.
-func fstabEntry(array *config.RAIDArray, uuid string) string {
-	filesystem := array.Filesystem
-	if filesystem == "" {
-		filesystem = config.RAIDFilesystemExt4
-	}
-
+func fstabEntry(target mountTarget, uuid string) string {
 	return fmt.Sprintf("UUID=%s %s %s defaults,nofail 0 2 %s %s",
-		uuid, array.MountPoint, filesystem, fstabMarker, array.Name)
+		uuid, target.MountPoint, target.filesystem(), target.marker(), target.Name)
 }
 
 // requireMountsForK0s stops k0s starting before its storage is there.
-func requireMountsForK0s(cfg *config.Config) error {
-	var mountPoints []string
-
-	for _, array := range cfg.RAID {
-		if array.MountPoint != "" {
-			mountPoints = append(mountPoints, array.MountPoint)
-		}
-	}
-
+//
+// owner names the corium: field that asked for the mounts and picks the
+// drop-in's filename, so raid[], zfs[] and luks[] each own one file instead of
+// overwriting each other's.
+func requireMountsForK0s(cfg *config.Config, owner string, mountPoints []string) error {
 	if len(mountPoints) == 0 {
 		return nil
 	}
@@ -396,25 +440,26 @@ func requireMountsForK0s(cfg *config.Config) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
-	content := "# Written by corium-agent from corium.raid.\n" +
-		"#\n" +
-		"# Without this, a node whose array failed to mount starts Kubernetes\n" +
-		"# anyway and writes to the empty directory on the root disk that the\n" +
-		"# array should have been mounted over.\n" +
-		"[Unit]\n"
+	content := fmt.Sprintf(
+		"# Written by corium-agent from corium.%s.\n"+
+			"#\n"+
+			"# Without this, a node whose storage did not turn up starts Kubernetes\n"+
+			"# anyway and writes to the empty directory on the root disk that the\n"+
+			"# mount should have covered.\n"+
+			"[Unit]\n", owner)
 
 	for _, mountPoint := range mountPoints {
 		content += "RequiresMountsFor=" + mountPoint + "\n"
 	}
 
-	path := filepath.Join(dir, "10-corium-raid.conf")
+	path := filepath.Join(dir, "10-corium-"+owner+".conf")
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // unit drop-ins are world-readable
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
-	slog.Info("k0s will wait for the array mounts",
-		"unit", unit, "mountPoints", mountPoints)
+	slog.Info("k0s will wait for the mounts",
+		"owner", owner, "unit", unit, "mountPoints", mountPoints)
 
 	return nil
 }
