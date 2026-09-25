@@ -75,6 +75,12 @@ type Config struct {
 	// and docs/adr/0007-zfs-data-disks.md.
 	ZFS []ZFSPool `yaml:"zfs,omitempty" json:"zfs,omitempty"`
 
+	// LUKS declares encrypted volumes on this node's data disks, unlocked at
+	// boot by the machine's TPM or by a passphrase resolved as a secret. Like
+	// RAID and ZFS it does not cover the disk the OS booted from. See the
+	// LUKSVolume documentation and docs/adr/0010-luks-data-disks.md.
+	LUKS []LUKSVolume `yaml:"luks,omitempty" json:"luks,omitempty"`
+
 	// WireGuard declares host WireGuard interfaces, brought up before k0s so a
 	// cluster can run over an encrypted overlay between hosts. See the
 	// WireGuardInterface documentation and docs/adr/0006-host-wireguard-overlay.md.
@@ -513,6 +519,121 @@ type ZFSDataset struct {
 	// Properties are ZFS properties set on this dataset, such as compression,
 	// recordsize or quota.
 	Properties map[string]string `yaml:"properties,omitempty" json:"properties,omitempty"`
+}
+
+// LUKS unlock methods, naming where the key that opens a volume comes from.
+const (
+	// LUKSUnlockTPM2 seals the volume's key to the machine's TPM, so the volume
+	// opens on this machine, unattended, with nothing to type and nothing
+	// stored in the clear. It is the default because the alternative on a
+	// server is a node that does not come back from a power cut until somebody
+	// walks to the console.
+	//
+	// What it protects against is a disk leaving the building. It does not
+	// protect against the whole machine leaving the building, which will
+	// happily unlock itself for the thief. See
+	// docs/adr/0010-luks-data-disks.md.
+	LUKSUnlockTPM2 = "tpm2"
+
+	// LUKSUnlockPassphrase opens the volume with a passphrase resolved through
+	// a SecretSource at first boot. It is what a machine with no TPM has, and
+	// what an operator who may need to move the disk to another machine wants,
+	// since a TPM-sealed volume is readable on exactly one machine.
+	//
+	// Corium keeps the passphrase as a key file so later boots are unattended.
+	// That file sits on an unencrypted root, so it protects a disk that leaves
+	// the building and nothing more -- the same threat model as tpm2, reached
+	// less elegantly. The ADR says so plainly rather than leaving it implied.
+	LUKSUnlockPassphrase = "passphrase"
+)
+
+// LUKSVolume declares one LUKS2-encrypted volume on a whole data disk.
+//
+// This covers data disks, never the root filesystem. Encrypting root is an
+// install-time decision made before corium-agent exists: by the time this block
+// is read the root is deployed, mounted, and running the process reading it,
+// and an encrypted root additionally needs its unlock to happen in the
+// initramfs, which nothing here can reach. Corium does not merely decline to
+// aim at the booted disk -- it refuses a device the running system has mounted,
+// because the failure mode of getting this wrong is an unbootable machine whose
+// data is gone. See docs/adr/0010-luks-data-disks.md.
+//
+// What this earns over writing cryptsetup into cloud-init's runcmd, which is
+// the honest alternative since cloud-init's disk_setup has no notion of
+// encryption:
+//
+//   - The volume is unlocked, formatted and mounted before k0s starts. A
+//     runcmd races the kubelet, and losing that race means containerd writes to
+//     the mount point before the volume is mounted over it, where the data is
+//     invisible afterwards and still filling the root disk.
+//   - It refuses to destroy data, and refuses harder here than RAID does. A
+//     device that already carries a LUKS header is adopted and unlocked, never
+//     reformatted: luksFormat replaces the header in place and every byte
+//     behind it becomes unrecoverable, with no wipe: true that should make that
+//     convenient.
+//   - The passphrase is resolved as a secret (see PassphraseFrom) rather than
+//     sitting in cleartext in instance metadata, where anything that can reach
+//     the metadata service can read the key to the disk.
+type LUKSVolume struct {
+	// Name identifies the volume. It becomes /dev/mapper/<name> and the
+	// crypttab entry's first field, so it must be unique on the node.
+	Name string `yaml:"name" json:"name"`
+
+	// Device is the block device to encrypt, by path. A whole disk
+	// (/dev/sdb), not a partition.
+	//
+	// Prefer stable paths -- /dev/disk/by-id/... -- over kernel names, for the
+	// reason RAID gives: kernel names are assigned in discovery order and can
+	// name a different disk on the first boot than the one you meant, and the
+	// first boot is the one that decides which disk gets a new LUKS header.
+	//
+	// A /dev/md/<name> from raid[] is allowed: arrays are assembled before
+	// volumes are unlocked, so an encrypted volume may sit on top of one. That
+	// array must carry filesystem: none, or the two would format each other.
+	// A device claimed by a raid[] array or a zfs[] pool may not also be
+	// claimed here.
+	Device string `yaml:"device" json:"device"`
+
+	// Unlock selects how the volume is opened at boot: tpm2 (default) or
+	// passphrase. Exactly one method per volume; there is no fallback chain,
+	// because a volume with two ways in has the weaker of the two as its real
+	// security and nothing says which that is.
+	Unlock string `yaml:"unlock,omitempty" json:"unlock,omitempty"`
+
+	// Passphrase is the volume's passphrase supplied inline. Convenient for a
+	// lab and a liability anywhere else, exactly like an inline join token:
+	// anything that can read the instance metadata can read the key to the
+	// disk, which leaves the encryption protecting nothing. Prefer
+	// PassphraseFrom.
+	//
+	// Leading and trailing whitespace is stripped, so a passphrase cannot end
+	// in a newline that nobody can see and nobody can retype.
+	Passphrase string `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
+
+	// PassphraseFrom resolves the passphrase at first boot, so it need not sit
+	// in instance metadata. Exactly one of Passphrase or PassphraseFrom is set,
+	// and only when Unlock is passphrase.
+	PassphraseFrom *SecretSource `yaml:"passphraseFrom,omitempty" json:"passphraseFrom,omitempty"`
+
+	// Filesystem to create inside the volume: ext4 (default) or xfs. Set it to
+	// "none" to leave the opened volume unformatted, for a workload that wants
+	// the raw encrypted block device.
+	Filesystem string `yaml:"filesystem,omitempty" json:"filesystem,omitempty"`
+
+	// MountPoint is where the opened volume is mounted, and the entry written
+	// to /etc/fstab so later boots mount it too. Empty means the volume is
+	// unlocked but not mounted, which only makes sense with filesystem: none.
+	MountPoint string `yaml:"mountPoint,omitempty" json:"mountPoint,omitempty"`
+
+	// Wipe permits encrypting a device that already holds data.
+	//
+	// Off by default, and the default is the point, exactly as for RAIDArray:
+	// a node that refuses to boot is cheaper than one that silently turned
+	// somebody's disk into ciphertext nobody has the key to. It has no bearing
+	// on a device that already carries a LUKS header -- that one is adopted
+	// whatever this says, because reformatting it is the one mistake with no
+	// recovery at all.
+	Wipe bool `yaml:"wipe,omitempty" json:"wipe,omitempty"`
 }
 
 // WireGuardAddresses is one or more interface addresses in CIDR form.

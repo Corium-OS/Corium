@@ -12,6 +12,32 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **Data disks can be encrypted from the `corium:` block**, with a new `luks[]`
+  field beside `raid[]` and `zfs[]`. Name a disk, say how it is unlocked, and
+  the node encrypts it at first boot, unlocks it, formats it and mounts it
+  before k0s starts — with an `/etc/crypttab` entry so every later boot unlocks
+  it too. Unlock is by the machine's TPM by default (`systemd-cryptenroll
+  --tpm2-device=auto`, so the node boots unattended with no key stored in the
+  clear) or by a passphrase resolved as a secret, the same way a join token is.
+  Nothing has to be added to the image.
+
+  Three things are worth knowing before you use it. It covers **data disks
+  only**: a device the running system has mounted is refused, and an encrypted
+  root is still an install-time decision. A device that already carries a LUKS
+  header is **adopted and unlocked, never reformatted**, whatever `wipe` says —
+  there is no undo for replacing a header. And a **TPM-unlocked volume opens on
+  one machine and no other**: Corium enrols no recovery key, so clear the TPM
+  or replace the mainboard and the data is gone unless you enrolled one
+  yourself.
+
+  What it protects against is a disk that leaves the machine, not a machine
+  that leaves the building — [disk encryption](docs/luks.md) and
+  [ADR 10](docs/adr/0010-luks-data-disks.md) say exactly where that line is.
+  `cctl apply` refuses a day-two change to `luks`, as it does for the other
+  disk fields.
+
 ### Changed
 
 - **The disk and ISO builder is pinned, and comes from image-builder.**

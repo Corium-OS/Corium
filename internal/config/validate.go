@@ -34,6 +34,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateUpgrades()...)
 	problems = append(problems, c.validateRAID()...)
 	problems = append(problems, c.validateZFS()...)
+	problems = append(problems, c.validateLUKS()...)
 	problems = append(problems, c.validateWireGuard()...)
 	problems = append(problems, c.validateAPI()...)
 
@@ -469,7 +470,7 @@ func (c *Config) validateRAID() []error {
 
 		problems = append(problems, validateRAIDLevel(field, array)...)
 		problems = append(problems, validateRAIDDevices(field, array, seenDevices)...)
-		problems = append(problems, validateRAIDFilesystem(field, array)...)
+		problems = append(problems, validateFilesystem(field, array.Filesystem, array.MountPoint)...)
 	}
 
 	return problems
@@ -523,27 +524,30 @@ func validateRAIDDevices(field string, array RAIDArray, seen map[string]string) 
 	return problems
 }
 
-func validateRAIDFilesystem(field string, array RAIDArray) []error {
+// validateFilesystem checks the filesystem and mount point pair that raid[] and
+// luks[] share: both lay an ordinary filesystem on a block device Corium
+// produced, and both accept "none" for a workload that wants the raw device.
+func validateFilesystem(field, filesystem, mountPoint string) []error {
 	var problems []error
 
-	switch array.Filesystem {
+	switch filesystem {
 	case "", RAIDFilesystemExt4, RAIDFilesystemXFS:
 	case RAIDFilesystemNone:
-		// An unformatted array cannot be mounted, and quietly ignoring the
+		// An unformatted device cannot be mounted, and quietly ignoring the
 		// mount point would leave someone waiting for a filesystem that is
 		// never going to appear there.
-		if array.MountPoint != "" {
+		if mountPoint != "" {
 			problems = append(problems, fmt.Errorf(
 				"%s.mountPoint: set but filesystem is none, so there is nothing to mount", field))
 		}
 	default:
 		problems = append(problems, fmt.Errorf(
-			"%s.filesystem: unknown value %q; use ext4, xfs or none", field, array.Filesystem))
+			"%s.filesystem: unknown value %q; use ext4, xfs or none", field, filesystem))
 	}
 
-	if array.MountPoint != "" && !strings.HasPrefix(array.MountPoint, "/") {
+	if mountPoint != "" && !strings.HasPrefix(mountPoint, "/") {
 		problems = append(problems, fmt.Errorf(
-			"%s.mountPoint: %q must be an absolute path", field, array.MountPoint))
+			"%s.mountPoint: %q must be an absolute path", field, mountPoint))
 	}
 
 	return problems
@@ -706,6 +710,161 @@ func validateZFSMountPoint(field, mountPoint string) []error {
 	}
 
 	return nil
+}
+
+// luksVolumeNamePattern keeps a volume name usable as a device-mapper name and
+// as the first field of a crypttab line. Deliberately the same pattern raid[]
+// uses: both end up as a name under /dev, and two rules for one constraint is
+// one rule too many.
+var luksVolumeNamePattern = raidNamePattern
+
+// raidArrayDevicePrefix is where mdadm publishes an array Corium built. A luks[]
+// volume may name one, because arrays are assembled before volumes are unlocked.
+const raidArrayDevicePrefix = "/dev/md/"
+
+func (c *Config) validateLUKS() []error {
+	var problems []error
+
+	seenNames := make(map[string]bool, len(c.LUKS))
+
+	// One claim space across raid[], zfs[] and luks[]. A disk named by two of
+	// them is a disk whichever ran first at boot has already destroyed for the
+	// other, and the survivor's error message will not say so. validateZFS
+	// seeds itself from raid[] for the same reason; this is the third corner of
+	// the same triangle.
+	seenDevices := c.claimedDiskDevices()
+
+	arrays := make(map[string]RAIDArray, len(c.RAID))
+	for _, array := range c.RAID {
+		arrays[array.Name] = array
+	}
+
+	for i, volume := range c.LUKS {
+		field := fmt.Sprintf("luks[%d]", i)
+
+		if volume.Name == "" {
+			problems = append(problems, fmt.Errorf("%s.name: required", field))
+		} else {
+			if !luksVolumeNamePattern.MatchString(volume.Name) {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q must be letters, digits, dashes or underscores",
+					field, volume.Name))
+			}
+
+			if seenNames[volume.Name] {
+				problems = append(problems, fmt.Errorf(
+					"%s.name: %q is used by more than one volume", field, volume.Name))
+			}
+
+			seenNames[volume.Name] = true
+		}
+
+		problems = append(problems, validateLUKSDevice(field, volume, seenDevices, arrays)...)
+		problems = append(problems, validateLUKSUnlock(field, volume)...)
+		problems = append(problems, validateFilesystem(field, volume.Filesystem, volume.MountPoint)...)
+	}
+
+	return problems
+}
+
+// claimedDiskDevices maps every device raid[] and zfs[] have already spoken for
+// to the field that claimed it.
+func (c *Config) claimedDiskDevices() map[string]string {
+	claimed := make(map[string]string)
+
+	for i, array := range c.RAID {
+		for _, device := range append(append([]string{}, array.Devices...), array.Spares...) {
+			claimed[device] = fmt.Sprintf("raid[%d]", i)
+		}
+	}
+
+	for i, pool := range c.ZFS {
+		for j, vdev := range pool.Vdevs {
+			for _, device := range vdev.Devices {
+				claimed[device] = fmt.Sprintf("zfs[%d].vdevs[%d]", i, j)
+			}
+		}
+	}
+
+	return claimed
+}
+
+func validateLUKSDevice(
+	field string,
+	volume LUKSVolume,
+	seen map[string]string,
+	arrays map[string]RAIDArray,
+) []error {
+	if volume.Device == "" {
+		return []error{fmt.Errorf("%s.device: required", field)}
+	}
+
+	if !strings.HasPrefix(volume.Device, "/dev/") {
+		return []error{fmt.Errorf(
+			"%s.device: %q must be an absolute device path under /dev", field, volume.Device)}
+	}
+
+	if owner, taken := seen[volume.Device]; taken {
+		return []error{fmt.Errorf(
+			"%s.device: %q is already claimed by %s", field, volume.Device, owner)}
+	}
+
+	seen[volume.Device] = field
+
+	// A volume on top of one of this node's own arrays is allowed, and useful --
+	// redundant storage that is also encrypted -- but only if the array was left
+	// unformatted. Otherwise raid[] lays a filesystem on it and luks[] then
+	// refuses to overwrite that filesystem, which is a first-boot failure the
+	// operator can be told about now instead.
+	name, onArray := strings.CutPrefix(volume.Device, raidArrayDevicePrefix)
+	if !onArray {
+		return nil
+	}
+
+	if array, declared := arrays[name]; declared && array.Filesystem != RAIDFilesystemNone {
+		return []error{fmt.Errorf(
+			"%s.device: raid array %q is formatted, so encrypting it would have to "+
+				"overwrite that filesystem; set filesystem: none on the array and put "+
+				"the filesystem on the volume instead", field, name)}
+	}
+
+	return nil
+}
+
+func validateLUKSUnlock(field string, volume LUKSVolume) []error {
+	var problems []error
+
+	hasInline := volume.Passphrase != ""
+	hasSource := volume.PassphraseFrom != nil
+
+	switch volume.Unlock {
+	case "", LUKSUnlockTPM2:
+		// A passphrase that would never be used is a passphrase somebody
+		// believes is protecting something. Refuse it rather than ignore it.
+		if hasInline || hasSource {
+			problems = append(problems, fmt.Errorf(
+				"%s: unlock is tpm2, so the passphrase would never be used; "+
+					"remove it, or set unlock: passphrase", field))
+		}
+	case LUKSUnlockPassphrase:
+		switch {
+		case hasInline && hasSource:
+			problems = append(problems, fmt.Errorf(
+				"%s: set either passphrase or passphraseFrom, not both", field))
+		case !hasInline && !hasSource:
+			problems = append(problems, fmt.Errorf(
+				"%s: unlock is passphrase, so set passphrase or passphraseFrom", field))
+		}
+	default:
+		problems = append(problems, fmt.Errorf(
+			"%s.unlock: unknown value %q; use tpm2 or passphrase", field, volume.Unlock))
+	}
+
+	if hasSource {
+		problems = append(problems, volume.PassphraseFrom.validate(field+".passphraseFrom")...)
+	}
+
+	return problems
 }
 
 func (c *Config) validateAPI() []error {

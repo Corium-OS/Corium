@@ -125,6 +125,15 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 
+		// Encrypted volumes last of the three, and before k0s for the same
+		// reason again. Last because a volume may sit on top of a /dev/md/<name>
+		// raid[] has just assembled, so the arrays have to exist first; nothing
+		// runs the other way round, which is why zfs[] pools cannot be built on
+		// an encrypted volume.
+		if err := applyLUKS(ctx, cfg); err != nil {
+			return err
+		}
+
 		// The overlay before k0s, for the same reason as the disks: the node
 		// registers over it and joins over it, so the interface has to be up
 		// before k0s decides its address or reaches the control plane.

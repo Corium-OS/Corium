@@ -137,6 +137,19 @@ list entry are written with `[]`, the way you would index them.
 | `zfs[].datasets[].properties` | [§3.17 `zfs`](#317-zfs) |
 | `zfs[].wipe` | [§3.17 `zfs`](#317-zfs) |
 
+### `luks`
+
+| Field | Section |
+|---|---|
+| `luks[].name` | [§3.18 `luks`](#318-luks) |
+| `luks[].device` | [§3.18 `luks`](#318-luks) |
+| `luks[].unlock` | [§3.18 `luks`](#318-luks) |
+| `luks[].passphrase` | [§3.18 `luks`](#318-luks) |
+| `luks[].passphraseFrom` | [§3.18 `luks`](#318-luks), [§3.16 Secret sources](#316-secret-sources) |
+| `luks[].filesystem` | [§3.18 `luks`](#318-luks) |
+| `luks[].mountPoint` | [§3.18 `luks`](#318-luks) |
+| `luks[].wipe` | [§3.18 `luks`](#318-luks) |
+
 ### `wireguard`
 
 | Field | Section |
@@ -1081,6 +1094,60 @@ label stops the bootstrap rather than being consumed.
 
 Prefer `/dev/disk/by-id/...` over `/dev/sdb`, for the reason [`raid`](#310-raid)
 gives: kernel names are handed out in discovery order.
+
+### 3.18 `luks`
+
+A list of LUKS2-encrypted volumes on this node's **data disks**,
+set up at first boot, before k0s. It does not cover the disk the OS booted
+from — a device the running system has mounted is refused. See
+[disk encryption](/docs/guides/luks/) for the guide and
+[ADR 10](/docs/decisions/adr-0010-luks-data-disks/) for what it does and does not protect
+against. Nothing has to be added to the image.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | — | **Required.** Becomes `/dev/mapper/<name>` and the crypttab entry |
+| `device` | string | — | **Required.** A whole disk by absolute path, or a `/dev/md/<name>` from `raid[]` |
+| `unlock` | enum | `tpm2` | `tpm2` or `passphrase`. Exactly one method per volume; there is no fallback |
+| `passphrase` | string | — | Inline passphrase. Lab use only — it sits in instance metadata |
+| `passphraseFrom` | block | — | [Secret source](#316-secret-sources) for the passphrase. Only with `unlock: passphrase` |
+| `filesystem` | enum | `ext4` | `ext4`, `xfs`, or `none` for a raw encrypted device |
+| `mountPoint` | string | — | Absolute path; also written to `/etc/fstab` |
+| `wipe` | bool | `false` | Consent to encrypting a device that holds data |
+
+```yaml
+corium:
+  role: controller+worker
+  luks:
+    - name: data
+      device: /dev/disk/by-id/wwn-0x5000c500a0b1c2d3
+      mountPoint: /var/lib/corium/data
+```
+
+> **Warning.** `wipe` is off by default, exactly as for `raid[]`. A device
+> carrying a filesystem or a partition table stops the bootstrap. A device
+> carrying a **LUKS header is adopted and unlocked, never reformatted**,
+> whatever `wipe` says: `luksFormat` replaces the header in place and every byte
+> behind it becomes unrecoverable, so there is no consent flag for it.
+
+> **Warning.** A `tpm2` volume opens on one machine and no other. Clear the TPM
+> or replace the mainboard and the data is gone — Corium enrols no recovery key,
+> because the only place it could print one at first boot is the journal.
+> [Enrol one by hand](/docs/guides/luks/#adding-a-recovery-key).
+
+Rejected at validation, before anything touches a disk: a device claimed by
+two volumes, or by a `raid[]` array or a `zfs[]` pool as well; two volumes
+sharing a name; a passphrase on a `tpm2` volume, or a `passphrase` volume with
+no passphrase; both `passphrase` and `passphraseFrom`; a `mountPoint` on a
+volume with `filesystem: none`; and a volume on a `raid[]` array that carries a
+filesystem, which the two would otherwise format over each other.
+
+Ordering is `raid[]`, then `zfs[]`, then `luks[]`. A volume may therefore sit on
+top of an array — encrypted redundant storage, with `filesystem: none` on the
+array — but a pool cannot be built on a volume.
+
+Prefer `/dev/disk/by-id/...` over `/dev/sdb`, and here more than anywhere: the
+first boot is the one that decides which disk gets a new LUKS header.
 
 ---
 
