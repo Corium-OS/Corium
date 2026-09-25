@@ -41,7 +41,7 @@ ext4, mounts it, writes an `/etc/fstab` entry, and writes a drop-in so k0s waits
 for that mount.
 
 `unlock` defaults to `tpm2`, which is why it does not appear above. Every field
-is in the [configuration reference](reference.md#318-luks).
+is in the [configuration reference](reference.md#320-luks).
 
 ### A passphrase instead
 
@@ -244,7 +244,7 @@ key, so one would become part of it.
 
 ## See also
 
-- [Configuration reference §3.18](reference.md#318-luks)
+- [Configuration reference §3.20](reference.md#320-luks)
 - [ADR 10: LUKS covers data disks](adr/0010-luks-data-disks.md)
 - [Software RAID](raid.md) — redundancy, and what to put underneath a volume
 - [ZFS on data disks](zfs.md) — the other storage feature, with its own encryption

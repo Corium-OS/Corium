@@ -110,6 +110,15 @@ list entry are written with `[]`, the way you would index them.
 | `upgrades.automatic` | [§3.10 `upgrades`](#310-upgrades) |
 | `upgrades.schedule` | [§3.10 `upgrades`](#310-upgrades) |
 
+### `backup`
+
+| Field | Section |
+|---|---|
+| `backup.enabled` | [§3.18 `backup`](#318-backup) |
+| `backup.schedule` | [§3.18 `backup`](#318-backup) |
+| `backup.path` | [§3.18 `backup`](#318-backup) |
+| `backup.keep` | [§3.18 `backup`](#318-backup) |
+
 ### `raid`
 
 | Field | Section |
@@ -141,14 +150,14 @@ list entry are written with `[]`, the way you would index them.
 
 | Field | Section |
 |---|---|
-| `luks[].name` | [§3.18 `luks`](#318-luks) |
-| `luks[].device` | [§3.18 `luks`](#318-luks) |
-| `luks[].unlock` | [§3.18 `luks`](#318-luks) |
-| `luks[].passphrase` | [§3.18 `luks`](#318-luks) |
-| `luks[].passphraseFrom` | [§3.18 `luks`](#318-luks), [§3.16 Secret sources](#316-secret-sources) |
-| `luks[].filesystem` | [§3.18 `luks`](#318-luks) |
-| `luks[].mountPoint` | [§3.18 `luks`](#318-luks) |
-| `luks[].wipe` | [§3.18 `luks`](#318-luks) |
+| `luks[].name` | [§3.20 `luks`](#320-luks) |
+| `luks[].device` | [§3.20 `luks`](#320-luks) |
+| `luks[].unlock` | [§3.20 `luks`](#320-luks) |
+| `luks[].passphrase` | [§3.20 `luks`](#320-luks) |
+| `luks[].passphraseFrom` | [§3.20 `luks`](#320-luks), [§3.16 Secret sources](#316-secret-sources) |
+| `luks[].filesystem` | [§3.20 `luks`](#320-luks) |
+| `luks[].mountPoint` | [§3.20 `luks`](#320-luks) |
+| `luks[].wipe` | [§3.20 `luks`](#320-luks) |
 
 ### `wireguard`
 
@@ -947,6 +956,9 @@ and `cctl` pins it for you.
 | `addons[].namespace` | `default` |
 | `upgrades.automatic` | `none` |
 | `upgrades.schedule` | `daily` |
+| `backup.schedule` | `daily`, and only once `backup.enabled` is set |
+| `backup.path` | `/var/lib/corium/backups`, likewise |
+| `backup.keep` | `7`, likewise |
 | `node.name` | Derived from the machine ID (§4) |
 | `zfs[].vdevs[].type` | `stripe` |
 | `zfs[].mountPoint` | `/<name>` (ZFS's own default) |
@@ -954,6 +966,10 @@ and `cctl` pins it for you.
 Applying defaults is idempotent and never overwrites an explicit value. The ZFS
 vdev type is applied when the pool is built rather than written into the
 document, so a rendered configuration shows it unset.
+
+The `backup` defaults apply only to a block that asked for something. Filling
+them in unconditionally would give every node a `backup` block it never wrote,
+and every worker would then be rejected for carrying one.
 
 ### 3.15 `k0s.patch` — the escape hatch
 
@@ -1095,7 +1111,85 @@ label stops the bootstrap rather than being consumed.
 Prefer `/dev/disk/by-id/...` over `/dev/sdb`, for the reason [`raid`](#310-raid)
 gives: kernel names are handed out in discovery order.
 
-### 3.18 `luks`
+### 3.18 `backup`
+
+Recurring `k0s backup` runs on a control-plane node, wired as a systemd timer at
+first boot. Each run writes one archive of the control plane's state — the etcd
+or kine/SQLite datastore, the PKI, `k0s.yaml`, the manifests and the Helm
+configuration — and then deletes the oldest archives beyond `keep`.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `false` | Turns the timer on. Everything else here is inert without it |
+| `schedule` | string | `daily` | systemd `OnCalendar` expression. See systemd.time(7) |
+| `path` | string | `/var/lib/corium/backups` | Absolute directory the archives are written to |
+| `keep` | int | `7` | How many archives survive a run, newest first |
+
+```yaml
+corium:
+  role: controller+worker
+  backup:
+    enabled: true
+    schedule: "*-*-* 02:30:00"
+    path: /mnt/backups
+    keep: 14
+```
+
+The archive is written `0600` in a `0700` directory, and the directory is
+created if it does not exist. It holds the cluster CA's private key and every
+Secret in etcd, so treat it exactly as you would a kubeconfig. Corium logs the
+path and the size of each run and nothing else.
+
+Archives are named `corium-backup-<UTC timestamp>.tar.gz`. Corium coins that
+name itself so that retention can identify what it wrote: a run deletes only
+regular files matching that exact shape, and never touches anything else in the
+directory — including a `k0s backup` you took by hand.
+
+`path` defaults to the node's own disk, which survives an operator mistake and
+nothing else. Point it at a mount that leaves the machine if the backups are
+meant to matter; Corium creates the directory, not the mount.
+
+Rejected at validation: a `backup` block on a `role: worker` node, because
+`k0s backup` reads a control plane and refuses to run without one — the timer
+would fail on every tick while you believed the node was backed up. Also
+rejected: a relative `path`, a negative `keep`, a `schedule` that is not a
+calendar expression (`0 3 * * *` is cron, and systemd wants `*-*-* 03:00:00`),
+and a block configured with `enabled: false`, which would silently do nothing.
+
+There is no "keep everything". A directory that only ever grows fills the
+filesystem holding `/var/lib/k0s`, which takes the cluster down to protect
+backups of it. Set a large `keep` for a long history; the bound is the point.
+
+What is **not** in the archive: PersistentVolumes, workload data, and an
+external datastore. See the [k0s backup
+documentation](https://docs.k0sproject.io/stable/backup/) for the exact list.
+
+#### Restore is manual
+
+There is no `restore` field and there will not be one. `k0s restore` is a
+destructive act performed on a stopped node — usually a fresh one — by somebody
+who has decided which archive is the right one. Automating that is how a cluster
+loses a day of state to a timer.
+
+The command an operator runs, on a machine where k0s is installed but not
+running:
+
+```bash
+# On the node being restored, as root.
+systemctl stop k0scontroller
+k0s restore /mnt/backups/corium-backup-20260925T023000Z.tar.gz
+k0s install controller --enable-worker   # the same arguments the node had
+systemctl start k0scontroller
+```
+
+Two things decide whether this works. The cluster's external address must be the
+same as it was when the backup was taken, because it is in the certificates. And
+on a multi-controller cluster you restore onto one fresh controller, start it,
+then join the others with a new token — you do not restore three machines.
+
+---
+
+### 3.20 `luks`
 
 A list of LUKS2-encrypted volumes on this node's **data disks**,
 set up at first boot, before k0s. It does not cover the disk the OS booted

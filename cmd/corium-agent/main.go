@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/Corium-OS/Corium/internal/bootstrap"
@@ -38,6 +39,7 @@ Commands:
   bootstrap    Configure this node and start k0s (run once, on first boot)
   validate     Parse and validate a configuration without applying it
   issue        Refresh the console status banner (run on a timer)
+  backup       Snapshot the control plane with k0s backup (run on a timer)
   api set-ca   Replace the operator CA this node obeys, locally
   version      Print version information
 
@@ -78,6 +80,8 @@ func run() error {
 		return validateCommand(ctx, args)
 	case "issue":
 		return issueCommand(ctx, args)
+	case "backup":
+		return backupCommand(ctx, args)
 	case "api":
 		return apiCommand(args)
 	case "version":
@@ -110,6 +114,45 @@ func bootstrapCommand(ctx context.Context, args []string) error {
 		ConfigPath: *configPath,
 		DryRun:     *dryRun,
 	})
+}
+
+// backupCommand snapshots the control plane and applies retention.
+//
+// corium-backup.service is what calls it, with the target and the retention
+// count arriving as environment variables from the drop-in the bootstrap wrote
+// from corium.backup. The flags exist so an operator can take one by hand
+// without editing a unit.
+//
+// There is deliberately no default target. A missing drop-in means the schedule
+// is not the one the node was configured with, and writing the cluster's
+// secrets to a fallback directory nobody asked for is a worse answer than
+// saying so.
+func backupCommand(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	path := fs.String("path", os.Getenv("CORIUM_BACKUP_PATH"),
+		"directory the archive is written to")
+	keep := fs.Int("keep", envInt("CORIUM_BACKUP_KEEP", config.DefaultBackupKeep),
+		"how many archives to keep, newest first")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	return bootstrap.RunBackup(ctx, *path, *keep)
+}
+
+// envInt reads an integer from the environment, falling back to a default.
+//
+// A value systemd cannot have written -- the drop-in only ever holds a decimal
+// integer -- means something edited it by hand and got it wrong, so the default
+// is used and the run still produces a backup.
+func envInt(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil {
+		return fallback
+	}
+
+	return value
 }
 
 // validateCommand parses and validates a configuration without applying it.

@@ -56,6 +56,12 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 | [`zfs.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/zfs.yaml) | A node that mirrors its two data disks into a ZFS pool. See [ZFS on data disks](/docs/guides/zfs/) |
 | [`luks.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/luks.yaml) | A node whose data disk is encrypted and unlocked by its TPM. See [Disk encryption](/docs/guides/luks/) |
 
+## Day two
+
+| Example | What it builds |
+|---|---|
+| [`backup.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](/docs/reference/configuration/#318-backup) |
+
 ## Managed nodes
 
 | Example | What it builds |

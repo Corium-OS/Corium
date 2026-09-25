@@ -47,6 +47,12 @@ See [HA cluster](install/ha-cluster.md) for the procedure these belong to.
 | [`zfs.yaml`](examples/zfs.yaml) | A node that mirrors its two data disks into a ZFS pool. See [ZFS on data disks](zfs.md) |
 | [`luks.yaml`](examples/luks.yaml) | A node whose data disk is encrypted and unlocked by its TPM. See [Disk encryption](luks.md) |
 
+## Day two
+
+| Example | What it builds |
+|---|---|
+| [`backup.yaml`](examples/backup.yaml) | A controller that snapshots its own control plane every night onto an NFS mount, keeping two weeks. See [reference §3.18](reference.md#318-backup) |
+
 ## Managed nodes
 
 | Example | What it builds |

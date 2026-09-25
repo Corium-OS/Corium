@@ -89,6 +89,11 @@ type Config struct {
 	// Upgrades controls whether the node updates itself.
 	Upgrades Upgrades `yaml:"upgrades,omitempty" json:"upgrades,omitempty"`
 
+	// Backup schedules recurring `k0s backup` runs on a control-plane node.
+	// Meaningless, and rejected, on a plain worker. See the Backup
+	// documentation.
+	Backup Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
+
 	// API configures the node's management API. It is off unless asked for.
 	API API `yaml:"api,omitempty" json:"api,omitempty"`
 
@@ -765,6 +770,58 @@ type Upgrades struct {
 	// Schedule is a systemd OnCalendar expression saying when to check.
 	// Defaults to daily. See systemd.time(7) for the syntax.
 	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+}
+
+// Backup schedules recurring snapshots of this node's control plane state.
+//
+// k0s already knows how to take one: `k0s backup` archives the etcd or
+// kine/SQLite datastore, the PKI, the manifests and the configuration into a
+// single tarball. What it has no opinion about is when to run, where the
+// archive goes, or what removes last month's. Those are the three decisions
+// that separate a cluster with backups from a cluster with a backup command,
+// and every one of them is a line of cron somebody forgot to write.
+//
+// What this earns over a `runcmd` that installs a timer is what every other
+// field in this file earns: the `corium:` block is read from the whole source
+// chain, so it reaches a node with no cloud-init datasource; it is validated
+// offline, before a node that cannot write to the target path discovers that
+// at three in the morning; and the archive lands 0600 in a 0700 directory
+// rather than under whatever umask a shell inherited.
+//
+// It covers only what k0s covers. PersistentVolumes, workload data and an
+// external datastore are not in the archive and are not in scope — see the k0s
+// documentation for exactly what a backup holds.
+//
+// Restore is deliberately absent. `k0s restore` is a destructive act performed
+// on a stopped node, usually a fresh one, by somebody who has decided which
+// archive is the right one. Automating that is how a cluster loses a day of
+// state to a timer. It stays a manual operator action; the reference
+// documentation shows the command.
+type Backup struct {
+	// Enabled turns the timer on. Everything else here is inert without it,
+	// and a block that sets the other fields without this one is rejected
+	// rather than silently doing nothing.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// Schedule is a systemd OnCalendar expression saying when to run.
+	// Defaults to daily. See systemd.time(7) for the syntax.
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+
+	// Path is the directory the archives are written to, absolute. It defaults
+	// to /var/lib/corium/backups, which is on the node's own disk — enough to
+	// survive an operator mistake, and no help at all when the machine burns
+	// down. Point it at a mount that leaves the node if the backups are meant
+	// to matter; Corium creates the directory but does not create the mount.
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+
+	// Keep is how many archives survive a run, newest first. Defaults to 7.
+	//
+	// There is no value meaning "keep everything". A directory that only ever
+	// grows fills the filesystem holding /var/lib/k0s, which takes the cluster
+	// down to protect backups of it — and it does so on the node's quietest
+	// week, when nobody is looking. Set a large number if you want a long
+	// history; the bound is the point.
+	Keep int `yaml:"keep,omitempty" json:"keep,omitempty"`
 }
 
 // APIMode is what corium-apid does on a node, derived from the API block

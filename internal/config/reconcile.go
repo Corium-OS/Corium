@@ -60,8 +60,8 @@ func (p ReconcilePlan) Empty() bool {
 // day-two, because it defines the node's identity (`role`, `node`), its cluster
 // (`cluster`, `join`, `ha`), its network or disks (`network`, `storage`,
 // `raid`, `luks`, `wireguard`), or is not yet reconciled here (`upgrades`,
-// `api`).
-// Changing any of those is a provisioning act. See ADR 8; the set the node
+// `backup`, `api`). Changing any of those is a provisioning act. See ADR 8;
+// the set the node
 // calls safe is expected to grow.
 func PlanReconcile(old, next *Config) ReconcilePlan {
 	var plan ReconcilePlan
@@ -85,6 +85,7 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 		{"luks", old.LUKS, next.LUKS},
 		{"wireguard", old.WireGuard, next.WireGuard},
 		{"upgrades", old.Upgrades, next.Upgrades},
+		{"backup", old.Backup, next.Backup},
 		{"api", old.API, next.API},
 	}
 
