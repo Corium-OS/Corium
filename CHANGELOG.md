@@ -12,6 +12,31 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **`manifests[]` ships plain Kubernetes YAML with the node.** Declare a stack
+  and the files in it, and `corium-agent` writes them to
+  `/var/lib/k0s/manifests/<stack>/` before k0s starts, where k0s's
+  [Manifest Deployer](https://docs.k0sproject.io/stable/manifests/) applies
+  them and keeps them applied. This is for the objects that have no chart of
+  their own — a MetalLB `IPAddressPool`, a cert-manager `ClusterIssuer`, a
+  `StorageClass` — which previously meant a `write_files` entry, or publishing
+  a chart to ship three lines of YAML. `addons[]` is still where anything with
+  a chart belongs.
+
+  The names and the content are checked offline by `corium-agent validate`,
+  before a node boots: a stack or file name with a slash, `..` or a leading
+  dot, a duplicate, empty content, or content that is not YAML is reported with
+  every other problem in the document. A file name ending in `.yml` is refused
+  too, because the deployer reads `.yaml` and no other extension — that one
+  would otherwise be skipped in silence.
+
+  Like every field but `addons` and `k0s.patch`, `manifests[]` cannot be
+  changed on a node that has already bootstrapped: `cctl apply` refuses it and
+  says so. Change a live stack with `kubectl`. See
+  [`docs/examples/manifests.yaml`](docs/examples/manifests.yaml) and
+  [the reference](docs/reference.md#318-manifests).
+
 ### Changed
 
 - **The disk and ISO builder is pinned, and comes from image-builder.**

@@ -4,12 +4,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Validate checks the configuration and returns every problem it finds, joined
@@ -30,6 +33,7 @@ func (c *Config) Validate() error {
 	problems = append(problems, c.validateJoin()...)
 	problems = append(problems, c.validateNode()...)
 	problems = append(problems, c.validateAddons()...)
+	problems = append(problems, c.validateManifests()...)
 	problems = append(problems, c.validateHA()...)
 	problems = append(problems, c.validateUpgrades()...)
 	problems = append(problems, c.validateRAID()...)
@@ -302,6 +306,127 @@ func (c *Config) validateAddons() []error {
 	}
 
 	return problems
+}
+
+// manifestNamePattern keeps a stack directory name, and a file name within it,
+// to something that names exactly one entry in one directory. Rejecting a
+// leading dot, "..", and any slash is three rules one pattern already covers:
+// the deployer does not descend into nested directories, so a name that escapes
+// its stack does not land somewhere else useful, it lands somewhere nothing
+// reads.
+var manifestNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// manifestFileExtension is the only extension the k0s manifest deployer reads.
+// A file named .yml is not an error upstream -- it is skipped in silence, which
+// is why this is checked here and reported with the reason.
+const manifestFileExtension = ".yaml"
+
+func (c *Config) validateManifests() []error {
+	var problems []error
+
+	// The manifest deployer runs on controllers. A worker declaring a stack
+	// would have the files written into a directory nothing on that machine
+	// ever reads.
+	if len(c.Manifests) > 0 && !c.Role.IsController() {
+		problems = append(problems, fmt.Errorf(
+			"manifests: only a controller applies bundled manifests, but role is %q", c.Role))
+	}
+
+	seen := make(map[string]bool, len(c.Manifests))
+
+	for i, stack := range c.Manifests {
+		field := fmt.Sprintf("manifests[%d]", i)
+
+		switch {
+		case stack.Name == "":
+			problems = append(problems, fmt.Errorf("%s.name: required", field))
+		case !manifestNamePattern.MatchString(stack.Name):
+			problems = append(problems, fmt.Errorf(
+				"%s.name: %q must be a plain directory name: letters, digits, dashes, "+
+					"underscores or dots, no slash, and not starting with a dot",
+				field, stack.Name))
+		case seen[stack.Name]:
+			problems = append(problems, fmt.Errorf(
+				"%s.name: %q is used by more than one stack", field, stack.Name))
+		default:
+			seen[stack.Name] = true
+		}
+
+		problems = append(problems, validateManifestFiles(field, stack)...)
+	}
+
+	return problems
+}
+
+func validateManifestFiles(field string, stack ManifestStack) []error {
+	var problems []error
+
+	if len(stack.Files) == 0 {
+		problems = append(problems, fmt.Errorf("%s.files: at least one file is required", field))
+	}
+
+	seen := make(map[string]bool, len(stack.Files))
+
+	for j, file := range stack.Files {
+		ffield := fmt.Sprintf("%s.files[%d]", field, j)
+
+		switch {
+		case file.Name == "":
+			problems = append(problems, fmt.Errorf("%s.name: required", ffield))
+		case !manifestNamePattern.MatchString(file.Name):
+			problems = append(problems, fmt.Errorf(
+				"%s.name: %q must be a plain file name: letters, digits, dashes, "+
+					"underscores or dots, no slash, and not starting with a dot",
+				ffield, file.Name))
+		case !strings.HasSuffix(file.Name, manifestFileExtension):
+			problems = append(problems, fmt.Errorf(
+				"%s.name: %q must end in %s; the k0s manifest deployer reads that "+
+					"extension and no other, so anything else is skipped without a word",
+				ffield, file.Name, manifestFileExtension))
+		case seen[file.Name]:
+			problems = append(problems, fmt.Errorf(
+				"%s.name: %q is declared more than once in this stack", ffield, file.Name))
+		default:
+			seen[file.Name] = true
+		}
+
+		if strings.TrimSpace(file.Content) == "" {
+			problems = append(problems, fmt.Errorf("%s.content: required", ffield))
+
+			continue
+		}
+
+		if err := validManifestYAML(file.Content); err != nil {
+			problems = append(problems, fmt.Errorf("%s.content: %w", ffield, err))
+		}
+	}
+
+	return problems
+}
+
+// validManifestYAML checks that the content is a parseable YAML stream.
+//
+// A stream rather than a document, because a stack file routinely holds a
+// Namespace and the objects inside it separated by `---`, which a single-document
+// decode rejects outright. The check stops at the syntax: Corium has no schema
+// for a Kubernetes object and will not pretend to. What it buys is that a typo
+// is reported by `corium-agent validate`, offline, instead of by a deployer
+// retrying every minute in a controller log nobody is tailing.
+func validManifestYAML(content string) error {
+	decoder := yaml.NewDecoder(strings.NewReader(content))
+
+	for {
+		var document yaml.Node
+
+		err := decoder.Decode(&document)
+
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case err != nil:
+			return fmt.Errorf("not valid YAML: %w", err)
+		}
+	}
 }
 
 // keepalivedAuthPassLimit is how many characters of a VRRP password keepalived

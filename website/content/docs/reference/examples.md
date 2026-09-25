@@ -54,6 +54,12 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 | [`stretched-worker.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](/docs/guides/raid/) |
 
+## Extensions
+
+| Example | What it builds |
+|---|---|
+| [`manifests.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/manifests.yaml) | MetalLB installed as a chart and configured with plain Kubernetes YAML in the same document, through `manifests[]` |
+
 ## Managed nodes
 
 | Example | What it builds |

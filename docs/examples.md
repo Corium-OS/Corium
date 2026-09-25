@@ -45,6 +45,12 @@ See [HA cluster](install/ha-cluster.md) for the procedure these belong to.
 | [`stretched-worker.yaml`](examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](raid.md) |
 
+## Extensions
+
+| Example | What it builds |
+|---|---|
+| [`manifests.yaml`](examples/manifests.yaml) | MetalLB installed as a chart and configured with plain Kubernetes YAML in the same document, through `manifests[]` |
+
 ## Managed nodes
 
 | Example | What it builds |
