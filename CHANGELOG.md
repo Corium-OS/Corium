@@ -59,6 +59,15 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Fixed
 
+- **`cctl apply` silently ignored a change to `zfs[]` on a running node.** The
+  field was missing from the set the node refuses day-two, so a document that
+  added, removed or altered a pool was reported as applied while nothing on the
+  machine changed — the one outcome an operator cannot see, since neither a
+  refusal nor an effect shows up. It is now refused by name, alongside `raid[]`
+  and every other field that defines what the node is, and a test now fails the
+  build if a field is ever added to the `corium:` block without being classified
+  one way or the other.
+
 - **The ZFS image stopped building whenever Fedora shipped a new kernel.** The
   variant compiles the OpenZFS module against the exact kernel the base image
   ships, and installs `kernel-devel` pinned to it. Fedora's `updates` repository
