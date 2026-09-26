@@ -238,9 +238,12 @@ var reconcileClassification = map[string]bool{
 	"backup":    true,
 	"api":       true,
 
-	// The safe subset. Both render into k0s.yaml, which k0s reconciles.
-	"addons": false,
-	"k0s":    false,
+	// The safe subset. addons and k0s render into k0s.yaml, which k0s
+	// reconciles; kubernetes replaces the binary underneath k0s, which the node
+	// does itself by stopping and starting it. See ADR 10.
+	"addons":     false,
+	"k0s":        false,
+	"kubernetes": false,
 }
 
 // TestPlanReconcileClassifiesEveryField fails when a field is added to Config
@@ -364,4 +367,67 @@ func nonZero(t *testing.T, fieldType reflect.Type) reflect.Value {
 	}
 
 	return value
+}
+
+func TestPlanReconcileKubernetes(t *testing.T) {
+	t.Parallel()
+
+	base := func() *Config {
+		return &Config{
+			Role:       RoleSingle,
+			Kubernetes: Kubernetes{Version: "v1.36.4+k0s.0"},
+		}
+	}
+
+	t.Run("a version change is reconcilable", func(t *testing.T) {
+		t.Parallel()
+
+		// It does not define what the node is: same machine, same cluster,
+		// same name, a different build of the thing that serves it. ADR 10.
+		next := base()
+		next.Kubernetes.Version = "v1.36.4+k0s.1"
+
+		plan := PlanReconcile(base(), next)
+
+		if !plan.Kubernetes {
+			t.Error("a version change was not reported")
+		}
+
+		if !plan.Reconcilable() {
+			t.Errorf("a version change was refused: %v", plan.Immutable)
+		}
+
+		if plan.Empty() {
+			t.Error("a version change was reported as no change at all")
+		}
+	})
+
+	t.Run("a mirror change alone moves nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// The node already runs the version it was told to; where the artefact
+		// came from is settled. It is read again at the next version change.
+		next := base()
+		next.Kubernetes.Mirror = "registry.internal.example/corium/k0s"
+
+		plan := PlanReconcile(base(), next)
+
+		if plan.Kubernetes {
+			t.Error("a mirror change was reported as a version change")
+		}
+
+		if !plan.Empty() {
+			t.Error("a mirror change was reported as something to apply")
+		}
+	})
+
+	t.Run("an unchanged version is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		plan := PlanReconcile(base(), base())
+
+		if !plan.Empty() {
+			t.Error("an identical document was reported as a change")
+		}
+	})
 }

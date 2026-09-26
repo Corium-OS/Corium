@@ -53,6 +53,7 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure these belong to.
 | [`stretched-controller-calico-wireguard.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-controller-calico-wireguard.yaml) | A controller in a cluster split across two sites |
 | [`stretched-worker.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](/docs/guides/raid/) |
+| [`kubernetes-version.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/kubernetes-version.yaml) | A node pinned to a Kubernetes version other than its image's floor, pulled from an internal mirror. See [ADR 10](/docs/decisions/adr-0010-kubernetes-version-axis/) |
 
 ## Day two
 

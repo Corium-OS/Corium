@@ -58,3 +58,29 @@ fi
 
 chmod 0755 "${DEST}"
 echo "install-k0s: installed ${DEST} (${floor}, floor version)"
+
+# --- The window, as the node will read it ----------------------------------
+#
+# A node has to know which versions its image will run, and the lock file does
+# not ship: it is a build-time trust anchor carrying checksums the node has no
+# use for, since an extension is verified by its signature rather than by a
+# hash of the binary inside it. What the node needs is the floor and the list,
+# so that is what goes into /usr -- read-only, replaced wholesale on upgrade,
+# and therefore always describing the image actually booted.
+readonly WINDOW="/usr/lib/corium/k0s.window"
+mkdir -p "$(dirname "${WINDOW}")"
+
+{
+	echo "# The k0s versions this image supports. Generated from build/k0s.lock."
+	echo "#"
+	echo "# Moving outside this window is an OS upgrade: the Kubernetes version is"
+	echo "# an axis of its own, but it is not unbounded."
+	echo "# See docs/adr/0010-kubernetes-version-axis.md."
+	echo
+	echo "K0S_FLOOR=${floor}"
+	echo
+	awk 'NF == 3 { print $1 }' "${LOCK_FILE}" | sort -u
+} > "${WINDOW}"
+
+chmod 0644 "${WINDOW}"
+echo "install-k0s: wrote ${WINDOW} ($(grep -c '^v' "${WINDOW}") versions)"

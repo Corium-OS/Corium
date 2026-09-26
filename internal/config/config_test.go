@@ -620,3 +620,64 @@ func TestValidateAcceptsGoodRAID(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateKubernetes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		version, mirror string
+		wantValid       bool
+	}{
+		{name: "nothing declared runs the floor", wantValid: true},
+		{name: "a version alone", version: "v1.36.4+k0s.1", wantValid: true},
+		{
+			name:    "a version and a mirror",
+			version: "v1.36.4+k0s.1", mirror: "registry.internal.example/corium/k0s",
+			wantValid: true,
+		},
+		{
+			name:    "a mirror with a port",
+			version: "v1.36.4+k0s.1", mirror: "registry.internal.example:5000/corium/k0s",
+			wantValid: true,
+		},
+
+		{name: "a version that is not a k0s tag", version: "1.36.4"},
+		{name: "a bare kubernetes version", version: "v1.36.4"},
+		{name: "a floating tag", version: "latest"},
+		{
+			name:    "a mirror carrying a tag",
+			version: "v1.36.4+k0s.1", mirror: "registry.example/corium/k0s:v1.36.4",
+		},
+		{
+			name: "a mirror with no version to pull",
+			// Half-finished configuration rather than intent: nothing would
+			// ever be pulled from it.
+			mirror: "registry.internal.example/corium/k0s",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &Config{
+				Role: RoleSingle,
+				Kubernetes: Kubernetes{
+					Version: test.version,
+					Mirror:  test.mirror,
+				},
+			}
+
+			err := cfg.Validate()
+
+			if test.wantValid && err != nil {
+				t.Fatalf("Validate() = %v, want it accepted", err)
+			}
+
+			if !test.wantValid && err == nil {
+				t.Fatal("Validate() = nil, want it refused")
+			}
+		})
+	}
+}
