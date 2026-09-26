@@ -270,9 +270,9 @@ run = 'sudo rm -rf "${OUTPUT_DIR}"'
 
 # ---------------------------------------------------------------- k0s
 
-[tasks."k0s-lock"]
-description = "Repin build/k0s.lock to a k0s release"
-usage = 'arg "<version>" help="k0s release tag, for example v1.36.4+k0s.0"'
+[tasks."k0s-window"]
+description = "Add a k0s release to the supported window in build/k0s.lock"
+usage = 'arg "<version>" help="k0s release tag, for example v1.36.4+k0s.1"'
 run = '''
 set -eu
 
@@ -284,6 +284,10 @@ set -eu
 # That is the same conclusion build/k0s.lock already states from the other
 # direction -- the lock file is the trust anchor, and changing it is a
 # reviewable event. Read the diff; it is the only control there is.
+#
+# This adds a version to the window. It deliberately does not touch K0S_FLOOR:
+# which version an image bakes in is a decision about the image, made by editing
+# that one line, not a side effect of pinning a checksum.
 version="${usage_version}"
 
 # A k0s tag contains a '+', which is not legal unencoded in a URL path.
@@ -304,7 +308,7 @@ sha256() {
 }
 
 fetch() {
-	echo "k0s-lock: fetching k0s ${version} (${1}), around 250 MB" >&2
+	echo "k0s-window: fetching k0s ${version} (${1}), around 250 MB" >&2
 	curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
 		--output "${work}/k0s-${1}" "${release}/k0s-${version}-${1}"
 	sha256 "${work}/k0s-${1}"
@@ -315,15 +319,64 @@ arm64="$(fetch arm64)"
 
 # Rewritten in place rather than regenerated, so the header explaining why this
 # file exists stays owned by the file and not by this task.
-awk -v v="${version}" -v a="${amd64}" -v b="${arm64}" '
-	/^K0S_VERSION=/      { print "K0S_VERSION=" v; next }
-	/^K0S_SHA256_amd64=/ { print "K0S_SHA256_amd64=" a; next }
-	/^K0S_SHA256_arm64=/ { print "K0S_SHA256_arm64=" b; next }
-	{ print }
-' build/k0s.lock > "${work}/k0s.lock"
+#
+# The header (comments, blank lines, K0S_FLOOR) keeps its order; the table is
+# rewritten sorted, so a diff shows which version changed rather than where it
+# happened to land. An existing entry for this version is dropped first, which
+# is what makes re-running this on a version already pinned a no-op rather than
+# a duplicate.
+{
+	grep -E '^(#|$|K0S_FLOOR=)' build/k0s.lock
+	{
+		awk -v v="${version}" 'NF == 3 && $1 != v' build/k0s.lock
+		printf '%-17s %-7s %s\n' "${version}" amd64 "${amd64}"
+		printf '%-17s %-7s %s\n' "${version}" arm64 "${arm64}"
+	} | sort
+} > "${work}/k0s.lock"
+
 mv "${work}/k0s.lock" build/k0s.lock
 
-echo "k0s-lock: build/k0s.lock now pins ${version}"
+echo "k0s-window: build/k0s.lock now pins ${version}"
+'''
+
+[tasks."k0s-sysext"]
+description = "Build a k0s system extension image"
+usage = '''
+arg "<version>" help="k0s release tag from the window, for example v1.36.4+k0s.1"
+arg "<arch>" help="amd64 or arm64"
+'''
+# Built inside a container because it needs mkfs.erofs, which is a Linux tool a
+# developer on macOS will not have. It does not need to run on the target
+# architecture: a filesystem image is not architecture-specific, only the binary
+# inside it is, and that one is downloaded rather than compiled.
+#
+# label=disable is required, not incidental. podman mounts a container's
+# filesystem with a fixed SELinux `context=`, under which per-file
+# security.selinux xattrs cannot be written -- setfiles then reports success and
+# changes nothing, and the extension ships with the build container's labels on
+# usr/bin. Disabling the container's own labelling is what lets the build write
+# the labels the *target* node needs.
+run = '''
+set -eu
+mkdir -p "${OUTPUT_DIR}/sysext"
+
+# A named volume, because the staging tree needs a filesystem that accepts
+# security.selinux xattrs: the container rootfs is mounted with a fixed
+# `context=` and refuses them, and a bind mount from macOS arrives over virtiofs
+# and drops them. This one is backed by an ordinary Linux filesystem.
+podman volume create corium-sysext-work >/dev/null 2>&1 || true
+
+podman run --rm \
+	--security-opt label=disable \
+	-v corium-sysext-work:/work \
+	-e WORK_ROOT=/work \
+	-v "${PWD}:/src" \
+	-w /src \
+	docker.io/library/fedora:44 \
+	bash -c "dnf install -y -q erofs-utils policycoreutils \
+		selinux-policy-targeted attr >/dev/null && \
+		OUT_DIR=output/sysext ./build/scripts/build-k0s-sysext.sh \
+		'${usage_version}' '${usage_arch}'"
 '''
 
 # ---------------------------------------------------------------- Site

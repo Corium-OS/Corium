@@ -97,6 +97,25 @@ COPY build/scripts/install-k0s.sh /tmp/install-k0s.sh
 RUN --mount=type=bind,source=build/k0s.lock,target=/run/corium-build/k0s.lock \
 	/tmp/install-k0s.sh && rm -f /tmp/install-k0s.sh
 
+# --- The system extension contract -----------------------------------------
+#
+# What the k0s installed above is, is the *floor*: the version a node runs when
+# it has been told nothing. A signed system extension may overlay /usr/bin/k0s
+# with another version from the supported window, which is how the Kubernetes
+# version became an axis of its own. See docs/adr/0010-kubernetes-version-axis.md.
+#
+# SYSEXT_LEVEL is what an extension is matched against, and declaring it here is
+# what makes the whole mechanism work. Without it systemd falls back to matching
+# VERSION_ID, which binds every extension to a Fedora major -- and since bootc
+# never touches /var, an extension installed before an OS rebase survives it and
+# then silently stops matching, leaving a node quietly back on its floor with
+# nothing said. This number is Corium's own contract between an image and the
+# extensions built for it; bumping it is a reviewable event, like the lock file.
+#
+# Appended to /usr/lib/os-release, which /etc/os-release symlinks to, because
+# os-release has no drop-in mechanism.
+RUN echo 'SYSEXT_LEVEL=1' >> /usr/lib/os-release
+
 # --- Writable /opt ---------------------------------------------------------
 #
 # Kubernetes expects /opt/cni/bin to be writable: k0s, like every other

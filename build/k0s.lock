@@ -1,12 +1,39 @@
-# Pinned k0s release.
+# Pinned k0s releases.
 #
 # The checksums live in git, not alongside the download. A checksum fetched from
 # the same place as the artefact protects against corruption, not against a
 # compromised release — this file is the trust anchor and changing it is a
 # reviewable event.
 #
-# Refresh with: mise run k0s-lock vX.Y.Z+k0s.N
+# There is nothing to copy from upstream even if we wanted to: a k0s release
+# carries the bare binaries and 345-byte cosign signatures with no bundle or
+# certificate beside them. Neither a checksum file nor a verifiable signature is
+# published. Read the diff; it is the only control there is.
+#
+# This file pins two different things, and the distinction is ADR 10's:
+#
+#   K0S_FLOOR is the version baked into /usr/bin/k0s at image build time. It is
+#   what a node runs when it has been told nothing, when it cannot reach a
+#   mirror, or when its system extension has stopped matching. Every image has
+#   exactly one.
+#
+#   The table is the supported window: the versions this image will build and
+#   accept system extensions for. Three minors, a width taken from k0s's own
+#   version skew policy — upgrades go one minor at a time, controllers first,
+#   and workers may trail controllers by one, so a cluster mid-rollout
+#   legitimately spans two. The third is the one an operator can move to without
+#   first taking an OS upgrade they did not ask for.
+#
+# Refresh the floor or add a version with: mise run k0s-window vX.Y.Z+k0s.N
 
-K0S_VERSION=v1.36.4+k0s.0
-K0S_SHA256_amd64=ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f
-K0S_SHA256_arm64=6301f64d98f9e4f6fbc2892bc66d137bb4ad5840685300772d8391614d47b8aa
+K0S_FLOOR=v1.36.4+k0s.0
+
+# version         arch    sha256
+v1.34.11+k0s.1    amd64   a93f1983f7424e2bc64d56adda733971198fd432d3de9abdf8e368fc68b5e07b
+v1.34.11+k0s.1    arm64   33c748f04f91eb65209f36663a679b94af505b6c9a237429ff1a39f954d32921
+v1.35.8+k0s.1     amd64   09e5c5b9ba0a6218fe46dafde799ccd62270f83fe5c3ea695beb1b4098baed67
+v1.35.8+k0s.1     arm64   76a91efef3af3a0cd4214c54d04db2e0be3da0d2136e2c5f434bf3146031d22d
+v1.36.4+k0s.0     amd64   ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f
+v1.36.4+k0s.0     arm64   6301f64d98f9e4f6fbc2892bc66d137bb4ad5840685300772d8391614d47b8aa
+v1.36.4+k0s.1     amd64   18c304d53cdd70095e99c6b859b269b4fef0bb84579d7e7185271a9135694a31
+v1.36.4+k0s.1     arm64   04f685c8c9c29262da64acf26fd928452f19d449ac58729592f686f915882319
