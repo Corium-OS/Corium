@@ -126,6 +126,16 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | Restore | n/a | Manual. `k0s restore` on a stopped node is an operator decision, not a timer's. See [reference §3.18](reference.md#318-backup) |
 | Workload data | n/a | Out of scope: a `k0s backup` holds the control plane, not PersistentVolumes |
 
+### Kubernetes version
+
+| Feature | Field | Notes |
+|---|---|---|
+| Pin a Kubernetes version | `kubernetes.version` | Independent of the OS image: a signed system extension overlays `/usr/bin/k0s`. Empty runs the version the image ships. See [ADR 10](adr/0010-kubernetes-version-axis.md) |
+| Pull from an internal registry | `kubernetes.mirror` | For a site that cannot reach the default. A mirror changes where an artefact comes from, not whether it has to be signed |
+| Supported window | n/a | Three Kubernetes minors per image, listed in `/usr/lib/corium/k0s.window`. Reaching another is an OS upgrade |
+| Skew enforcement | n/a | One minor at a time, no going back a minor — k0s's own rules, refused with the rule named before anything is stopped |
+| Rolling a version back | n/a | Not the free operation an OS rollback is: k0s does not support downgrading a minor, so reverting is a second forward move |
+
 ### Disks
 
 | Feature | Field | Notes |

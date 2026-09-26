@@ -79,7 +79,10 @@ mkdir -p "$(dirname "${WINDOW}")"
 	echo
 	echo "K0S_FLOOR=${floor}"
 	echo
-	awk 'NF == 3 { print $1 }' "${LOCK_FILE}" | sort -u
+	# Comments are excluded explicitly: a prose line in the lock file can
+	# have three fields too, and "# reviewable event." harvested as a version
+	# is the kind of thing that stays invisible until something parses it.
+	awk '!/^#/ && NF == 3 { print $1 }' "${LOCK_FILE}" | sort -u
 } > "${WINDOW}"
 
 chmod 0644 "${WINDOW}"

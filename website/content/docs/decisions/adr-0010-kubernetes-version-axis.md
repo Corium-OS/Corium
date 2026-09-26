@@ -130,6 +130,28 @@ give integrity without provenance — it protects against corruption in transit,
 not against the place the artefact came from, which is the distinction
 `build/k0s.lock` already draws in its own header.
 
+**Amended 2026-09-26: `skopeo` ships in the image.** Writing this record, the
+promise above had no mechanism behind it. A Corium node carries no container
+engine — the `Containerfile` says so deliberately — so nothing on it could pull
+an artefact, and nothing could apply `policy.json`, which is not a file the node
+interprets but a contract implemented by the `containers/image` library.
+Promising verification "by the same policy.json" while shipping no code that
+reads it would have made this section aspirational.
+
+`skopeo` is that library's command line, and it is added to the image for this.
+It is worth being precise about what it is not: it copies images between
+registries and local layouts and runs nothing, so the objection the
+`Containerfile` raises against a container engine — that a second one would
+fight k0s for cgroups and CNI state — does not reach it. There is no daemon, no
+runtime, and nothing that starts at boot.
+
+The alternative was to write a registry client and sigstore verification in Go,
+and decision 13 is the argument against it: signature verification is exactly
+the class of format whose hand-rolled implementation "is wrong in ways nobody
+notices until a node trusts a key it should not". This is the shape of exception
+that rule allows, and it is a package in an image rather than an entry in
+`go.mod`.
+
 ### 3. A new `corium.kubernetes:` block
 
 ```yaml

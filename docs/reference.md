@@ -42,8 +42,8 @@ list entry are written with `[]`, the way you would index them.
 
 | Field | Section |
 |---|---|
-| `kubernetes.version` | [§3.18 `kubernetes`](#318-kubernetes) |
-| `kubernetes.mirror` | [§3.18 `kubernetes`](#318-kubernetes) |
+| `kubernetes.version` | [§3.20 `kubernetes`](#320-kubernetes) |
+| `kubernetes.mirror` | [§3.20 `kubernetes`](#320-kubernetes) |
 
 ### `network`
 
@@ -336,7 +336,7 @@ referred to indirectly in the journal.
 |---|---|---|---|---|
 | `role` | enum | conditional | — | Required unless the API is on and the node is waiting to be told (§3.2) |
 | `cluster` | object | no | — | Identity and reachability (§3.3) |
-| `kubernetes` | object | no | — | Which k0s version this node runs (§3.18) |
+| `kubernetes` | object | no | — | Which k0s version this node runs (§3.20) |
 | `network` | object | no | — | Addressing and CNI (§3.4) |
 | `storage` | object | no | — | Datastore (§3.5) |
 | `join` | object | conditional | — | Required for `worker` (§3.6) |
@@ -1267,7 +1267,7 @@ names it. Change a live stack with `kubectl`, or reset the node.
 
 ---
 
-### 3.18 `kubernetes`
+### 3.20 `kubernetes`
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|

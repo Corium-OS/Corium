@@ -131,6 +131,14 @@ func Run(ctx context.Context, opts Options) error {
 		if err := applyWireGuard(ctx, cfg); err != nil {
 			return err
 		}
+
+		// And the k0s version last of the three, but still before k0s itself:
+		// the extension has to fill /usr/bin/k0s before anything runs it, and
+		// it is fetched over the network, which the overlay above may be what
+		// makes reachable.
+		if err := applyKubernetesVersion(ctx, cfg); err != nil {
+			return err
+		}
 	}
 
 	rendered, err := k0s.Render(cfg)

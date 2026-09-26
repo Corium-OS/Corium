@@ -53,6 +53,35 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   [`docs/examples/manifests.yaml`](docs/examples/manifests.yaml) and
   [the reference](docs/reference.md#319-manifests).
 
+- **The Kubernetes version is now an axis of its own.** A node can pin a k0s
+  version with `kubernetes.version`, independently of the OS image it booted:
+
+  ```yaml
+  corium:
+    role: single
+    kubernetes:
+      version: v1.36.4+k0s.1
+  ```
+
+  This is what lets a Fedora security fix land without a Kubernetes minor bump,
+  and a Kubernetes minor bump land without a Fedora rebase — previously the same
+  act, in both directions. The version arrives as a signed system extension that
+  overlays `/usr/bin/k0s`, pulled by `skopeo` and gated by the same
+  `policy.json` that already guards an OS image; `kubernetes.mirror` points a
+  site at a registry it can reach.
+
+  An image supports three Kubernetes minors, listed in
+  `/usr/lib/corium/k0s.window`, and the width comes from k0s's own skew rules.
+  Reaching a version outside the window is still an OS upgrade. A change that
+  breaks those rules — skipping a minor, or going back one — is refused with the
+  rule named, before anything is stopped.
+
+  Nothing changes for a node that says nothing: it runs the version its image
+  ships, needs no network to do it, and existing nodes are unaffected. Note that
+  rolling a Kubernetes version *back* is not the free operation an OS rollback
+  is, because k0s does not support downgrading a minor. The reasoning is in
+  [ADR 10](docs/adr/0010-kubernetes-version-axis.md).
+
 ### Changed
 
 - **The disk and ISO builder is pinned, and comes from image-builder.**
