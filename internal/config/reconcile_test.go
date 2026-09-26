@@ -1,7 +1,9 @@
 package config
 
 import (
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -209,4 +211,157 @@ addons:
 	if plan.Reconcilable() {
 		t.Error("a change touching an immutable field must be refused even when it also touches a safe one")
 	}
+}
+
+// reconcileClassification is every field of the `corium:` block, and whether
+// PlanReconcile treats it as immutable day-two or as part of the safe subset.
+//
+// It exists because the immutable list in PlanReconcile is written out by hand,
+// and a field added to Config but not to that list is not refused and not
+// applied either -- it is silently ignored, which is the one outcome an
+// operator cannot see. That is not hypothetical: `zfs` was absent from the list
+// from the day it was added until this map started failing the build.
+var reconcileClassification = map[string]bool{
+	// field name -> immutable
+	"role":      true,
+	"cluster":   true,
+	"network":   true,
+	"storage":   true,
+	"join":      true,
+	"node":      true,
+	"ha":        true,
+	"raid":      true,
+	"zfs":       true,
+	"manifests": true,
+	"wireguard": true,
+	"upgrades":  true,
+	"backup":    true,
+	"api":       true,
+
+	// The safe subset. Both render into k0s.yaml, which k0s reconciles.
+	"addons": false,
+	"k0s":    false,
+}
+
+// TestPlanReconcileClassifiesEveryField fails when a field is added to Config
+// and nowhere else. Adding one to the map above is the deliberate act the
+// silence used to skip.
+func TestPlanReconcileClassifiesEveryField(t *testing.T) {
+	for _, field := range configFields(t) {
+		if _, classified := reconcileClassification[field]; !classified {
+			t.Errorf("corium.%s is in neither PlanReconcile's immutable list nor "+
+				"the safe subset, so a day-two apply that changes it is ignored "+
+				"rather than refused; classify it in reconcileClassification", field)
+		}
+	}
+
+	for field := range reconcileClassification {
+		if !slices.Contains(configFields(t), field) {
+			t.Errorf("reconcileClassification names %q, which Config no longer has", field)
+		}
+	}
+}
+
+// TestPlanReconcileRefusesEveryImmutableField changes each immutable field in
+// turn and checks the plan names it. The map above says what should happen;
+// this is what proves PlanReconcile agrees.
+func TestPlanReconcileRefusesEveryImmutableField(t *testing.T) {
+	for field, immutable := range reconcileClassification {
+		if !immutable {
+			continue
+		}
+
+		t.Run(field, func(t *testing.T) {
+			old := &Config{Role: RoleSingle}
+
+			next := &Config{Role: RoleSingle}
+			changeField(t, next, field)
+
+			plan := PlanReconcile(old, next)
+
+			if !slices.Contains(plan.Immutable, field) {
+				t.Errorf("changing %s: immutable = %v, want it to name %q",
+					field, plan.Immutable, field)
+			}
+		})
+	}
+}
+
+// configFields lists the `corium:` keys Config declares, in declaration order.
+func configFields(t *testing.T) []string {
+	t.Helper()
+
+	structType := reflect.TypeOf(Config{})
+	fields := make([]string, 0, structType.NumField())
+
+	for i := range structType.NumField() {
+		tag, _, _ := strings.Cut(structType.Field(i).Tag.Get("yaml"), ",")
+		if tag == "" || tag == "-" {
+			t.Fatalf("Config field %s carries no yaml tag", structType.Field(i).Name)
+		}
+
+		fields = append(fields, tag)
+	}
+
+	return fields
+}
+
+// changeField sets one field of a Config to something that is not its zero
+// value, so PlanReconcile has a difference to report.
+func changeField(t *testing.T, cfg *Config, field string) {
+	t.Helper()
+
+	value := reflect.ValueOf(cfg).Elem()
+	structType := value.Type()
+
+	for i := range structType.NumField() {
+		tag, _, _ := strings.Cut(structType.Field(i).Tag.Get("yaml"), ",")
+		if tag != field {
+			continue
+		}
+
+		value.Field(i).Set(nonZero(t, structType.Field(i).Type))
+
+		return
+	}
+
+	t.Fatalf("Config has no field tagged %q", field)
+}
+
+// nonZero builds a value of the given type that differs from its zero value.
+//
+// Only the kinds the schema actually uses are handled: a new kind appearing
+// here means the schema grew something this test cannot vary, which is worth
+// stopping for rather than silently producing a zero value and passing.
+func nonZero(t *testing.T, fieldType reflect.Type) reflect.Value {
+	t.Helper()
+
+	value := reflect.New(fieldType).Elem()
+
+	switch fieldType.Kind() {
+	case reflect.String:
+		value.SetString("changed")
+	case reflect.Bool:
+		value.SetBool(true)
+	case reflect.Int:
+		value.SetInt(1)
+	case reflect.Slice:
+		value.Set(reflect.Append(value, nonZero(t, fieldType.Elem())))
+	case reflect.Map:
+		value.Set(reflect.MakeMap(fieldType))
+		value.SetMapIndex(nonZero(t, fieldType.Key()), nonZero(t, fieldType.Elem()))
+	case reflect.Pointer:
+		value.Set(reflect.New(fieldType.Elem()))
+		value.Elem().Set(nonZero(t, fieldType.Elem()))
+	case reflect.Interface:
+		value.Set(reflect.ValueOf("changed"))
+	case reflect.Struct:
+		// The first field is enough: any difference inside a block is a
+		// difference to the block, which is how PlanReconcile compares them.
+		value.Field(0).Set(nonZero(t, fieldType.Field(0).Type))
+	default:
+		t.Fatalf("no non-zero value for %s (kind %s)", fieldType, fieldType.Kind())
+	}
+
+	return value
 }

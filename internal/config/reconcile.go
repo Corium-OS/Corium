@@ -59,9 +59,9 @@ func (p ReconcilePlan) Empty() bool {
 // the same contract it carries at bootstrap. Every other field stays immutable
 // day-two, because it defines the node's identity (`role`, `node`), its cluster
 // (`cluster`, `join`, `ha`), its network or disks (`network`, `storage`,
-// `raid`, `wireguard`), or is not yet reconciled here (`upgrades`, `backup`,
-// `api`, `manifests`). Changing any of those is a provisioning act. See ADR 8;
-// the set the node calls safe is expected to grow.
+// `raid`, `zfs`, `wireguard`), or is not yet reconciled here (`upgrades`,
+// `backup`, `api`, `manifests`). Changing any of those is a provisioning act.
+// See ADR 8; the set the node calls safe is expected to grow.
 //
 // `manifests` is the one that looks reconcilable and is not yet: the deployer
 // would in fact pick up a rewritten file, and prune what a deleted one created,
@@ -87,6 +87,7 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 		{"node", old.Node, next.Node},
 		{"ha", old.HA, next.HA},
 		{"raid", old.RAID, next.RAID},
+		{"zfs", old.ZFS, next.ZFS},
 		{"wireguard", old.WireGuard, next.WireGuard},
 		{"upgrades", old.Upgrades, next.Upgrades},
 		{"backup", old.Backup, next.Backup},

@@ -317,7 +317,7 @@ provisioning model exists to prevent. See
 [ADR 8](adr/0008-day-two-reconcile.md).
 
 The identity fields are `role`, `cluster`, `join`, `node`, `network`, `storage`,
-`raid`, `wireguard`, `ha`, `upgrades` and `api`. The safe subset today is
+`raid`, `zfs`, `wireguard`, `ha`, `upgrades`, `backup` and `api`. The safe subset today is
 `addons` and the `k0s` escape hatch, and it is expected to grow. A reconcile
 regenerates the node's k0s configuration and cycles the control plane so k0s
 installs or updates the chart, or picks up the patched configuration — an OIDC
