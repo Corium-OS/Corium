@@ -179,9 +179,19 @@ find "${root}" -exec touch -h -d "@${epoch}" {} +
 mkdir -p "${OUT_DIR}"
 image="${OUT_DIR}/${EXT_NAME}-${version}-${arch}.raw"
 
-# -T pins the filesystem-level timestamps; the per-file mtimes set above are
-# what k0s reads, and erofs preserves those.
-mkfs.erofs -T "${epoch}" --quiet "${image}" "${root}"
+# -U pins the filesystem UUID, which mkfs.erofs otherwise generates at random --
+# and which was enough on its own to make two builds of the same version differ
+# byte for byte. Derived from the version, like the timestamp, so the image is
+# reproducible: anyone can rebuild a published extension and check they get the
+# same bytes, which is worth having for a file that becomes a node's kubelet.
+#
+# --mkfs-time, not the default --all-time: -T would otherwise overwrite the
+# per-file mtimes set above, which is exactly the collision k0s's staging check
+# trips over.
+uuid="$(printf '%s' "${version}" | sha256sum | cut -c1-32 | sed \
+	's/\(........\)\(....\)\(....\)\(....\)\(............\)/\1-\2-\3-\4-\5/')"
+
+mkfs.erofs -T "${epoch}" --mkfs-time -U "${uuid}" --quiet "${image}" "${root}"
 
 echo "build-k0s-sysext: built ${image}"
 echo "  version:      ${version}"
