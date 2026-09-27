@@ -84,6 +84,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   change rather than forcing it. There is no automatic rollback if k0s does not
   come back — the node stays cordoned and says why.
 
+  Across a cluster, `cctl k8s upgrade --version <version> --controllers ...
+  --workers ...` moves one node at a time and stops at the first that fails.
+  Controllers go first because k0s requires it, and a worker may never be newer
+  than the controllers it talks to. A stopped rollout leaves the cluster in a
+  state k0s supports — controllers one minor ahead of workers — so there is no
+  hurry to finish it.
+
   Nothing changes for a node that says nothing: it runs the version its image
   ships, needs no network to do it, and existing nodes are unaffected. Note that
   rolling a Kubernetes version *back* is not the free operation an OS rollback
