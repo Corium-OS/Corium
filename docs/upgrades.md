@@ -406,23 +406,40 @@ See [bootc: image signatures](https://bootc.dev/bootc/security.html).
 
 ## Upgrading Kubernetes specifically
 
-The Kubernetes version is whatever `build/k0s.lock` pins, so upgrading it means
-changing that file, rebuilding, and rolling the new image out as above.
+**Most of the time you do not need this section.** Since
+[ADR 10](adr/0010-kubernetes-version-axis.md) the Kubernetes version is an axis
+of its own: set `kubernetes.version`, or roll a cluster with
+`cctl k8s upgrade`, and no OS image changes at all. See
+[reference §3.20](reference.md#320-kubernetes).
+
+What follows is the other axis — changing which version an image *ships*, and
+which versions it will accept extensions for. Both live in `build/k0s.lock`:
 
 ```
-K0S_VERSION=v1.36.4+k0s.0
-K0S_SHA256_amd64=...
+K0S_FLOOR=v1.36.4+k0s.0
+
+# version         arch    sha256
+v1.34.11+k0s.1    amd64   a93f1983...
+v1.35.8+k0s.1     amd64   09e5c5b9...
+v1.36.4+k0s.0     amd64   ca1e9e68...
 ```
 
-`mise run k0s-lock vX.Y.Z+k0s.N` rewrites it: it downloads both architectures'
+`K0S_FLOOR` is baked into `/usr/bin/k0s` and is what a node runs when it has
+been told nothing. The table is the window: the versions this image will build
+and accept system extensions for, three minors wide. Changing the floor means
+rebuilding and rolling the new image out as above; adding a version to the
+window means merging the change, after which the extension is published and
+any node can ask for it without a new image.
+
+`mise run k0s-window vX.Y.Z+k0s.N` adds one: it downloads both architectures'
 binaries and hashes them, rather than trusting a checksum published beside the
-download. Review the resulting diff — it is what every image build verifies
-against from then on.
+download. Review the resulting diff — it is what every build verifies against
+from then on.
 
-CI checks that the image really ships the version the lock file names, so a
-lock file and an image cannot silently disagree.
+CI checks that the image really ships the floor the lock file names, so a lock
+file and an image cannot silently disagree.
 
 Before skipping a Kubernetes minor version, read the
 [k0s release notes](https://docs.k0sproject.io/stable/releases/): k0s follows
 upstream Kubernetes, which does not support skipping minors on the control
-plane.
+plane. A node refuses such a change outright rather than attempting it.
