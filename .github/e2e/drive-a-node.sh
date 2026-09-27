@@ -164,6 +164,104 @@ done
 kubectl get nodes
 kubectl get --raw /readyz
 
+step "the Kubernetes version is an axis of its own"
+# ADR 10. Everything above proves the node runs the Kubernetes its image
+# shipped; this proves the version is separable from the image -- the node
+# pulls a signed extension, swaps the binary underneath k0s, and comes back on
+# it, without a new image and without a reboot.
+#
+# The versions are read from build/k0s.lock rather than written here, so a
+# routine bump of the floor does not turn into a failing test that looks like a
+# regression. The target is another release on the same minor as the floor,
+# which is a legal move under k0s's skew rules.
+LOCK="${LOCK:-$(dirname "$0")/../../build/k0s.lock}"
+
+if [ ! -r "${LOCK}" ]; then
+	fail "cannot read ${LOCK}; this step needs to know which versions the image supports"
+fi
+
+FLOOR="$(awk -F= '/^K0S_FLOOR=/ { print $2 }' "${LOCK}")"
+[ -n "${FLOOR}" ] || fail "no K0S_FLOOR in ${LOCK}"
+
+# Same major.minor as the floor, different release. Sorted so the choice is
+# deterministic rather than whatever order the file happens to be in.
+MINOR="$(cut -d. -f1,2 <<<"${FLOOR}")"
+TARGET="$(awk -v m="${MINOR}." -v f="${FLOOR}" \
+	'!/^#/ && NF == 3 && $1 != f && index($1, m) == 1 { print $1 }' "${LOCK}" |
+	sort -u | tail -1)"
+
+if [ -z "${TARGET}" ]; then
+	# Not a failure: a window can legitimately hold one release per minor, and
+	# a test that invented a version to move to would be testing nothing.
+	echo "no second release on ${MINOR} in the window, so there is nothing safe to move to; skipping"
+else
+	echo "floor is ${FLOOR}, moving to ${TARGET}"
+
+	RUNNING="$("${CCTL}" status "${ADDRESS}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+\+k0s\.[0-9]+' | head -1)"
+	[ "${RUNNING}" = "${FLOOR}" ] ||
+		fail "the node reports ${RUNNING:-nothing} but its image's floor is ${FLOOR}; this step's premise is wrong before it starts"
+
+	# --- the refusals, which cost nothing and happen before anything moves ---
+
+	# Built by insertion rather than with `sed a\`, whose continuation syntax
+	# differs between GNU and BSD -- and this script is meant to be runnable
+	# from a desk as well as from CI.
+	with_version() {
+		{
+			head -1 "${WORK}/node.yaml"
+			printf '  kubernetes:\n    version: %s\n' "$1"
+			tail -n +2 "${WORK}/node.yaml"
+		} > "$2"
+	}
+
+	# A version no image supports. Refused against the window, not attempted and
+	# discovered as a 404.
+	with_version v1.99.0+k0s.0 "${WORK}/outside-window.yaml"
+	if OUT="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/outside-window.yaml" 2>&1)"; then
+		fail "the node accepted a Kubernetes version outside the window its image supports"
+	fi
+	grep -qi "window" <<<"${OUT}" ||
+		fail "a version outside the window was refused without saying so: ${OUT}"
+	echo "refused a version outside the window"
+
+	# --- the change itself ---
+
+	with_version "${TARGET}" "${WORK}/new-version.yaml"
+	grep -q "${TARGET}" "${WORK}/new-version.yaml" ||
+		fail "this script could not write the version into its own document"
+
+	# Minutes, not seconds: a quarter of a gigabyte to pull, then a drain.
+	CHANGED="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/new-version.yaml")" ||
+		fail "the node refused to move from ${FLOOR} to ${TARGET}, which is a legal change within one minor"
+	echo "${CHANGED}"
+
+	grep -q "kubernetes" <<<"${CHANGED}" ||
+		fail "the apply did not report re-applying kubernetes"
+	grep -q "${TARGET}" <<<"${CHANGED}" ||
+		fail "the apply reported success without naming ${TARGET} as what is running; the node must not claim a version it is not on"
+
+	# Asked of the node rather than believed from the apply, because the two
+	# disagreeing is exactly the failure this whole design guards against: an
+	# extension that does not merge leaves the node on its floor with
+	# everything else looking fine.
+	AFTER="$("${CCTL}" status "${ADDRESS}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+\+k0s\.[0-9]+' | head -1)"
+	[ "${AFTER}" = "${TARGET}" ] ||
+		fail "the node reports ${AFTER:-nothing} after being moved to ${TARGET}"
+	echo "the node is running ${AFTER}"
+
+	# And the cluster survived it. A version swap that leaves a node NotReady
+	# has done the thing without achieving it.
+	for attempt in $(seq 1 60); do
+		if kubectl get nodes --no-headers 2>/dev/null | grep -qE '\sReady\s'; then
+			break
+		fi
+		[ "${attempt}" -lt 60 ] ||
+			fail "the node did not return to Ready after the version change. $(kubectl get nodes 2>&1 | tail -3)"
+		sleep 5
+	done
+	kubectl get nodes
+fi
+
 step "ssh access, granted and taken away over the API"
 ssh-keygen -t ed25519 -f "${WORK}/key" -N '' -C 'e2e' -q
 

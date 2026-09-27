@@ -7,8 +7,11 @@
 # refused. This is the cheapest imitation of a running machine that CI can hold.
 #
 # It is off by default and runs only when a pull request carries the `e2e`
-# label, because it builds an image and a disk and then boots them: twenty-odd
-# minutes, against two for the rest of CI.
+# label, because it builds an image and a disk and then boots them: half an hour
+# or so, against two minutes for the rest of CI. The Kubernetes version change
+# at the end adds to that -- it pulls a quarter of a gigabyte onto the node and
+# then drains it -- and is worth the minutes: swapping the binary underneath a
+# running k0s is the one path whose failure modes only exist on a real machine.
 name: End-to-end
 
 on:
@@ -33,7 +36,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.pull_request.labels.*.name, 'e2e')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v7
