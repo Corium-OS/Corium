@@ -122,6 +122,24 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 	}
 
 	if drained {
+		// Wait for the control plane before asking it for anything. On a
+		// controller -- and every single-node cluster is one -- the API server
+		// this node needs in order to uncordon itself is the API server it just
+		// restarted, and it is not up the instant systemd reports the unit
+		// started.
+		//
+		// Without this the uncordon fails on a node that is otherwise perfectly
+		// healthy, and it fails *misleadingly*: the check underneath reports
+		// "only a controller holds cluster admin credentials, and this node is
+		// not one", which is untrue and sends an operator looking at roles
+		// instead of at timing. Found by the end-to-end test, which is the only
+		// place a real control plane is restarted.
+		if err := s.waitForClusterAccess(ctx); err != nil {
+			return running.Raw, fmt.Errorf(
+				"k0s %s is running, but %w; uncordon it with `cctl uncordon`",
+				running, err)
+		}
+
 		if err := s.lifecycle.Uncordon(ctx); err != nil {
 			// The swap worked; only the return to service did not. Reported
 			// rather than swallowed, but named precisely, because "run cctl
@@ -137,6 +155,44 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 	slog.Warn("k0s version swapped", "from", active, "to", running)
 
 	return running.Raw, nil
+}
+
+// clusterSettleTimeout bounds how long a restarted control plane is given to
+// answer before the node gives up on returning itself to service. Generous
+// because the cost of being wrong is asymmetric: a node left cordoned needs a
+// person, while waiting another minute costs nothing.
+const clusterSettleTimeout = 5 * time.Minute
+
+// clusterPollInterval is how often it asks.
+const clusterPollInterval = 5 * time.Second
+
+// waitForClusterAccess blocks until this node can act on its own Node object.
+//
+// It exists because a version change restarts the very control plane the node
+// then needs in order to put itself back into service.
+func (s *Server) waitForClusterAccess(ctx context.Context) error {
+	deadline := time.Now().Add(clusterSettleTimeout)
+
+	ticker := time.NewTicker(clusterPollInterval)
+	defer ticker.Stop()
+
+	for {
+		if s.lifecycle.CanReachCluster(ctx) {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"its control plane did not answer within %s, so the node could "+
+					"not be returned to service", clusterSettleTimeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // drainForSwap takes the node out of service, and reports whether it did.

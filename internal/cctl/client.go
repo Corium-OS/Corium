@@ -190,6 +190,14 @@ type ConfigResult struct {
 	// any. A control-plane restart is brief but real, so it is reported rather
 	// than done silently.
 	Restarted string `json:"restarted,omitempty"`
+
+	// Kubernetes is the k0s version now running, when the apply changed it.
+	//
+	// Reported because it is the one field whose effect an operator cannot see
+	// in the document they just sent: the node refuses to claim a version it is
+	// not actually running, so this is the node's answer rather than an echo of
+	// the request.
+	Kubernetes string `json:"kubernetes,omitempty"`
 }
 
 // ApplyConfig sends a node the corium: document it should bootstrap with.
