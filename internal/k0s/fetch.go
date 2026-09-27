@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -38,17 +39,26 @@ type manifest struct {
 	} `json:"layers"`
 }
 
-// Reference builds the artefact reference for a version.
+// Reference builds the artefact reference for a version on this architecture.
 //
-// The tag is the version with its '+' replaced: a registry tag may not contain
-// one. '_' is the conventional substitute and is what the publishing side uses,
-// so the mapping is mechanical in both directions rather than a lookup.
+// The tag is the version with its '+' replaced -- a registry tag may not
+// contain one, and '_' is the conventional substitute the publishing side uses,
+// so the mapping is mechanical in both directions rather than a lookup -- and
+// then the architecture.
+//
+// One tag per architecture rather than a multi-architecture index. An index
+// would let every node pull the same tag, but an artefact index has to carry
+// platform descriptors for the registry to select on, and a node that pulled
+// the wrong one would find out when the extension failed to merge rather than
+// when it failed to download. The architecture is a thing the node knows for
+// certain; putting it in the tag makes a mismatch a 404 at the point of asking.
 func Reference(mirror string, version Version) string {
 	if mirror == "" {
 		mirror = DefaultMirror
 	}
 
-	return mirror + ":" + strings.ReplaceAll(version.Raw, "+", "_")
+	return fmt.Sprintf("%s:%s-%s",
+		mirror, strings.ReplaceAll(version.Raw, "+", "_"), runtime.GOARCH)
 }
 
 // Fetch downloads a k0s extension into the store, verified.

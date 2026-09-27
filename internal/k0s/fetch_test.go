@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -22,13 +23,16 @@ func TestReference(t *testing.T) {
 		{
 			name: "the default mirror",
 			// A registry tag may not contain '+', so the mapping to '_' is
-			// mechanical in both directions rather than a lookup.
-			want: DefaultMirror + ":v1.36.4_k0s.1",
+			// mechanical in both directions rather than a lookup. The
+			// architecture is in the tag so a mismatch is a 404 when asking,
+			// rather than an extension that fails to merge after downloading.
+			want: DefaultMirror + ":v1.36.4_k0s.1-" + runtime.GOARCH,
 		},
 		{
 			name:   "an internal mirror",
 			mirror: "registry.internal.example/corium/k0s",
-			want:   "registry.internal.example/corium/k0s:v1.36.4_k0s.1",
+			want: "registry.internal.example/corium/k0s:v1.36.4_k0s.1-" +
+				runtime.GOARCH,
 		},
 	}
 

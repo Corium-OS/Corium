@@ -1,0 +1,265 @@
+# Build, publish and sign the k0s system extensions.
+#
+# These are the artefacts that make the Kubernetes version an axis of its own:
+# a node pulls one and it overlays /usr/bin/k0s, replacing the floor version its
+# image ships. See docs/adr/0010-kubernetes-version-axis.md.
+#
+# Separate from the image workflow on purpose. The whole point of ADR 10 is that
+# these two things version independently, and a pipeline that only published
+# extensions when the OS image changed would put the coupling straight back in
+# through the build system.
+name: k0s extensions
+
+on:
+  pull_request:
+    paths:
+      - build/k0s.lock
+      - build/scripts/build-k0s-sysext.sh
+      - .github/workflows/k0s-extensions.yml
+  push:
+    branches: [main]
+    paths:
+      - build/k0s.lock
+      - build/scripts/build-k0s-sysext.sh
+      - .github/workflows/k0s-extensions.yml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Republish one version only, for example v1.36.4+k0s.1"
+        required: false
+
+concurrency:
+  group: k0s-extensions-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  REPOSITORY: corium-os/k0s
+
+jobs:
+  # The window lives in build/k0s.lock and nowhere else, so the matrix is read
+  # from it rather than written out here. A version added to the lock is
+  # published by the next run without this file being touched.
+  plan:
+    name: Work out what to publish
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      publish: ${{ steps.plan.outputs.publish }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the window
+        id: plan
+        run: |
+          set -eu
+
+          # Pull requests build but never publish, for the same reason the image
+          # workflow refuses to: a PR from a fork must not be able to push an
+          # artefact that nodes would later pull and trust.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+          requested="${{ inputs.version }}"
+
+          # Comments are excluded explicitly: a prose line in the lock file can
+          # have three fields too.
+          versions="$(awk '!/^#/ && NF == 3 { print $1 }' build/k0s.lock | sort -u)"
+
+          if [ -n "${requested}" ]; then
+            if ! printf '%s\n' "${versions}" | grep -qxF "${requested}"; then
+              echo "::error::${requested} is not pinned in build/k0s.lock" >&2
+              exit 1
+            fi
+
+            versions="${requested}"
+          fi
+
+          matrix="$(printf '%s\n' "${versions}" | jq -Rrn '
+            [inputs | select(length > 0)] as $versions
+            | { include: [ $versions[] as $v
+                | ("amd64", "arm64") as $a
+                | { version: $v, arch: $a } ] }
+            | tojson')"
+
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### Planned"
+            echo
+            printf '%s\n' "${versions}" | sed 's/^/- /'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  publish:
+    name: ${{ matrix.version }} (${{ matrix.arch }})
+    needs: plan
+    runs-on: ubuntu-latest
+
+    strategy:
+      # One failure should not cancel the others: a version that cannot be
+      # built says nothing about the rest, and publishing the ones that work is
+      # better than publishing none of them.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing: cosign exchanges this token for a short-lived
+      # certificate, so there is no private key to store or rotate.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Invoked directly rather than through `mise run k0s-sysext`, which is how
+      # the image workflow treats `mise run image` too: the workflows here call
+      # the tools, and mise is the developer entry point.
+      #
+      # Under sudo because building writes security.selinux xattrs onto the
+      # staging tree, which needs CAP_SYS_ADMIN, and a rootless podman on the
+      # runner does not reliably have it -- with a silent failure mode, since
+      # setfiles reports success and changes nothing. The script's own label
+      # check is the backstop either way: it refuses to package a tree whose
+      # usr/bin is not bin_t, because merging that would replace the label on a
+      # node's /usr/bin and lock sshd out of it.
+      - name: Build the extension
+        run: |
+          set -eu
+          mkdir -p output/sysext
+          sudo podman volume create corium-sysext-work >/dev/null 2>&1 || true
+          sudo podman run --rm \
+            --security-opt label=disable \
+            -v corium-sysext-work:/work \
+            -e WORK_ROOT=/work \
+            -v "${PWD}:/src" \
+            -w /src \
+            docker.io/library/fedora:44 \
+            bash -c "dnf install -y -q erofs-utils policycoreutils \
+              selinux-policy-targeted attr >/dev/null && \
+              OUT_DIR=output/sysext ./build/scripts/build-k0s-sysext.sh \
+              '${{ matrix.version }}' '${{ matrix.arch }}'"
+
+          sudo chown "$(id -u):$(id -g)" output/sysext/*.raw
+
+      - name: Log in to the registry
+        if: needs.plan.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install oras
+        if: needs.plan.outputs.publish == 'true'
+        uses: oras-project/setup-oras@v2.0.1
+        with:
+          # The newest release this action knows about; see the same pin in
+          # image.yml for why it is capped by the action rather than by ORAS.
+          version: 1.3.3
+
+      - name: Install cosign
+        if: needs.plan.outputs.publish == 'true'
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # cosign v2, not the v3 default, for the reason image.yml records:
+          # v3 only attaches signatures as OCI referrers, and containers-policy
+          # -- what a node consults to enforce a signature -- looks for the
+          # <digest>.sig tag and nothing else. v2 writes the layout enforcement
+          # can actually find.
+          cosign-release: v2.6.5
+
+      - name: Publish and sign
+        if: needs.plan.outputs.publish == 'true'
+        id: publish
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -eu
+
+          repository="${REGISTRY}/${REPOSITORY}"
+
+          # A registry tag may not contain '+', so it becomes '_'. The same
+          # mapping is in internal/k0s.Reference, which is what a node uses to
+          # work out what to ask for; the two have to agree.
+          version="${{ matrix.version }}"
+          tag="${version//+/_}-${{ matrix.arch }}"
+
+          file="output/sysext/corium-k0s-${version}-${{ matrix.arch }}.raw"
+
+          # oras records the file name in org.opencontainers.image.title, and
+          # that is what `oras pull` writes to disk. The node does not read it
+          # -- it takes the blob by digest -- but a human pulling one by hand
+          # should not end up with a file called "blob".
+          oras push \
+            --artifact-type application/vnd.corium.k0s-sysext.v1 \
+            "${repository}:${tag}" \
+            "${file}:application/vnd.corium.k0s-sysext.layer.v1+erofs"
+
+          # Resolved rather than parsed out of the push output: this is the
+          # descriptor the registry stored, which is what gets signed.
+          digest="$(oras manifest fetch --descriptor "${repository}:${tag}" | jq -r .digest)"
+          reference="${repository}@${digest}"
+
+          # Signed by digest, not by tag: tags move, digests do not, and a
+          # signature attached to a tag says nothing about what it points at
+          # now. Signed twice for the reason image.yml gives -- keyless proves
+          # which workflow run produced this and is what a human checks, but a
+          # node cannot enforce it, because containers-policy matches a signer
+          # by subjectEmail and a GitHub Actions certificate carries a URI. The
+          # key signature is the one a node's policy.json can actually require.
+          cosign sign --yes "${reference}"
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${reference}"
+
+          {
+            echo "### ${version} (${{ matrix.arch }})"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`${repository}:${tag}\` |"
+            echo "| Digest | \`${digest}\` |"
+            echo "| Size | $(du -h "${file}" | cut -f1) |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Proves the artefact a node will pull is one skopeo can read and
+      # unpack, rather than assuming it. This is the exact transport
+      # internal/k0s.Fetch uses -- `skopeo copy` into a dir: layout, then the
+      # single blob out of the manifest -- so a change that breaks the node's
+      # side breaks here first, on a runner, instead of on a machine.
+      #
+      # --insecure-policy only because a runner has no Corium policy.json to
+      # consult; the signature it would demand was attached in the step above,
+      # and verifying that properly is the node's job.
+      - name: Check a node could pull it
+        if: needs.plan.outputs.publish == 'true'
+        run: |
+          set -eu
+
+          version="${{ matrix.version }}"
+          tag="${version//+/_}-${{ matrix.arch }}"
+          reference="${REGISTRY}/${REPOSITORY}:${tag}"
+
+          skopeo copy --insecure-policy "docker://${reference}" dir:pulled
+
+          blob="$(jq -r '.layers[0].digest | split(":")[1]' pulled/manifest.json)"
+          layers="$(jq -r '.layers | length' pulled/manifest.json)"
+
+          if [ "${layers}" != "1" ]; then
+            echo "::error::artefact carries ${layers} blobs, the node expects exactly 1" >&2
+            exit 1
+          fi
+
+          built="output/sysext/corium-k0s-${version}-${{ matrix.arch }}.raw"
+
+          if ! cmp -s "pulled/${blob}" "${built}"; then
+            echo "::error::the pulled blob differs from the file that was built" >&2
+            exit 1
+          fi
+
+          echo "pulled ${reference} and recovered the extension byte for byte"
