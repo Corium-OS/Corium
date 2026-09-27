@@ -218,3 +218,15 @@ coverage than it has is worse than a short one.
 - `sha256sum --check --ignore-missing SHA256SUMS` passes against a downloaded
   archive, and `cosign verify-blob --key cosign.pub --signature SHA256SUMS.sig
   SHA256SUMS` verifies.
+
+  **`--signature` is the right flag, and cosign v3 calling it deprecated is not
+  a reason to change this line.** Run against a v3 binary it prints `Flag
+  --signature has been deprecated, please use --bundle`, then verifies and
+  exits 0. `--bundle` would not: it parses its argument as a Sigstore bundle,
+  and `SHA256SUMS.sig` is 96 bytes of base64 DER, so it fails with `invalid
+  character 'M' looking for beginning of value`. Publishing a bundle is a
+  change to the *signing* step — a second artefact out of `cosign sign-blob
+  --bundle`, carried forever beside the one already published for every
+  release to date — and not a change to a verification command. CI signs with
+  v2.6.5 for the reason `image.yml` gives, where the flag is not deprecated at
+  all.
