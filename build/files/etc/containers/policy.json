@@ -23,6 +23,15 @@
                         "type": "matchRepository"
                     }
                 }
+            ],
+            "ghcr.io/corium-os/k0s": [
+                {
+                    "type": "sigstoreSigned",
+                    "keyPath": "/usr/share/corium/cosign.pub",
+                    "signedIdentity": {
+                        "type": "matchRepository"
+                    }
+                }
             ]
         },
         "docker-daemon": {
