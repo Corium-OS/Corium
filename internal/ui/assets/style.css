@@ -1,156 +1,397 @@
-/* One stylesheet, no framework. Light and dark come from the system. */
+/* The dashboard, dressed the way the rest of Corium is.
+ *
+ * The values here are not invented: the teals are sampled from the mark
+ * (#00897b, and the two tones its faces are drawn in), the neutrals, the
+ * .375rem radius and the pill are what the documentation site's Bootstrap 5.3
+ * theme uses, and the fact pills and rounded-pill buttons are lifted from its
+ * homepage. Light and dark follow the operating system, as the site does.
+ *
+ * The typeface is the site's stack, Jost first. The site ships Jost as a
+ * webfont; this does not, and falls back to the system's interface font
+ * instead. Two woff2 files would be 18 KB of binary committed to a repository
+ * that builds an OS image, plus a font licence to carry, to change the shape
+ * of a dozen labels -- and cctl is built into the image. An operator who has
+ * Jost installed gets it; everybody else gets something that belongs on their
+ * machine.
+ */
 
 :root {
-  --bg: #fbfbfa;
-  --panel: #ffffff;
-  --line: #e2e1dd;
-  --ink: #1c1b19;
-  --muted: #6d6a64;
-  --accent: #2f6f4f;
-  --warn: #9a4b16;
-  --bad: #9c2b21;
-  --radius: 8px;
+  color-scheme: light dark;
+
+  /* The mark. */
+  --brand: #00897b;
+  --brand-mid: #38a398;
+  --brand-soft: #7fc4bd;
+  --brand-rgb: 0, 137, 123;
+
+  --font-sans: "Jost", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif;
+  --font-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+
+  --radius: 0.375rem;
+  --pill: 50rem;
+
+  /* Bootstrap 5.3's light mode, which is what the site runs. */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f8f9fa;
+  --line: #dee2e6;
+  --ink: #1d2d35;
+  --muted: rgba(29, 45, 53, 0.75);
+  --dots: #dee2e6;
+
+  --ok: #00897b;
+  --warn: #b45309;
+  --bad: #dc3545;
+  --shadow: 0 8px 24px rgba(var(--brand-rgb), 0.16);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17181a;
-    --panel: #1f2124;
-    --line: #34373b;
-    --ink: #e8e6e3;
-    --muted: #9a9790;
-    --accent: #6fbf90;
-    --warn: #e0a065;
-    --bad: #e2766a;
+    --bg: #17181c;
+    --surface: #1d1f24;
+    --surface-2: #2b3035;
+    --line: #495057;
+    --ink: #c1c3c8;
+    --muted: rgba(193, 195, 200, 0.75);
+    --dots: #414349;
+
+    /* Teal at full strength is too dim on a dark surface to read as a state,
+       so the brand's lighter face does that job instead. */
+    --ok: #4db6ac;
+    --warn: #e8a33d;
+    --bad: #ea868f;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   }
 }
 
 * { box-sizing: border-box; }
 
+/* The symbol the header's logo points at. An <svg> with nothing to draw still
+   claims its default 300x150 box, and `hidden` does not reliably reach an SVG
+   element, so it is taken out of the flow explicitly. */
+.sprite { display: none; }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 400 15px/1.55 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
+
+.mono { font-family: var(--font-mono); }
+
+/* --- header ------------------------------------------------------------ */
 
 header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
-  background: var(--panel);
 }
 
-h1 { margin: 0; font-size: 1.1rem; letter-spacing: .04em; text-transform: uppercase; }
-h2 { margin: 0; font-size: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-h3 { margin: 0 0 .75rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
 
-main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+.logo { filter: drop-shadow(0 4px 10px rgba(20, 120, 110, 0.28)); }
 
-.bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
-.muted { color: var(--muted); font-size: .85rem; }
+/* The site puts a field of dots under its hero. The same gesture, faded out
+   downwards, so the page starts as the site's does. */
+.dots {
+  height: 8rem;
+  margin-bottom: -8rem;
+  background-image: radial-gradient(var(--dots) 15%, transparent 15%);
+  background-size: 1rem 1rem;
+  mask: linear-gradient(to bottom, #fff, transparent);
+  pointer-events: none;
+}
 
-button, select {
-  font: inherit;
-  font-size: .85rem;
-  padding: .3rem .7rem;
+main {
+  position: relative;
+  padding: 1.75rem 1.5rem 3rem;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+h2 { margin: 0; font-size: 1.35rem; font-weight: 500; letter-spacing: -0.01em; }
+h3 {
+  margin: 0 0 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.lead {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+.result { margin: 0.75rem 0 0; min-height: 1.2em; }
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.toggle input { accent-color: var(--brand); margin: 0; }
+
+/* --- facts, the homepage's pills --------------------------------------- */
+
+.facts { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border-radius: var(--pill);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fact::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.fact.plain::before { display: none; }
+.fact.ok { color: var(--ok); border-color: rgba(var(--brand-rgb), 0.35); }
+.fact.warn { color: var(--warn); border-color: currentColor; }
+.fact.bad { color: var(--bad); border-color: currentColor; }
+
+/* --- buttons and selects ----------------------------------------------- */
+
+.btn, select {
+  font: 500 0.8125rem/1.2 var(--font-sans);
+  padding: 0.4rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  background: var(--surface);
   color: var(--ink);
   cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: .45; cursor: not-allowed; }
-button.warn { color: var(--warn); }
+select { border-radius: var(--radius); padding: 0.35rem 0.6rem; }
+
+.btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+
+.btn.solid {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.btn.solid:hover:not(:disabled) {
+  background: var(--brand-mid);
+  border-color: var(--brand-mid);
+  color: #fff;
+}
+
+.btn.ghost { border-color: transparent; color: var(--muted); }
+.btn.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* --- node cards -------------------------------------------------------- */
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: 1rem;
 }
 
 .card {
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--muted);
-  border-radius: var(--radius);
-  background: var(--panel);
-  padding: .9rem 1rem;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
+  position: relative;
   display: block;
+  width: 100%;
+  text-align: left;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.12s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
-.card:hover { border-color: var(--accent); }
-.card.ok { border-left-color: var(--accent); }
-.card.warn { border-left-color: var(--warn); }
-.card.bad { border-left-color: var(--bad); }
+/* The status stripe is a child rather than a left border, so the card's own
+   border stays one colour and the radius is not cut square on one side. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--muted);
+}
 
-.card h4 { margin: 0 0 .1rem; font-size: .95rem; font-family: ui-monospace, Menlo, monospace; }
-.card .addr { color: var(--muted); font-size: .8rem; font-family: ui-monospace, Menlo, monospace; }
-.card dl { margin: .7rem 0 0; display: grid; grid-template-columns: 5.5rem 1fr; gap: .15rem .5rem; font-size: .82rem; }
+.card.ok::before { background: linear-gradient(var(--brand), var(--brand-mid)); }
+.card.warn::before { background: var(--warn); }
+.card.bad::before { background: var(--bad); }
+
+.card:hover {
+  border-color: var(--brand-soft);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.card h4 {
+  margin: 0 0 0.1rem;
+  font-size: 0.98rem;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
+.card .addr { color: var(--muted); font-size: 0.78rem; font-family: var(--font-mono); }
+
+.card dl {
+  margin: 0.85rem 0 0;
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.82rem;
+}
+
 .card dt { color: var(--muted); }
 .card dd { margin: 0; overflow-wrap: anywhere; }
 
-.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 1rem; margin-top: 1rem; }
+/* A node that did not answer reports the whole reason, which is a sentence
+   and a half of Go error. The card keeps its shape and the full text stays
+   available on hover and on the detail page. */
+.card dd.reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--muted);
+}
+
+/* --- detail ------------------------------------------------------------ */
+
+/* Not equal columns: the service list carries unit names like
+   greenboot-healthcheck.service next to a button, and an equal third made
+   both wrap. Lifecycle is three buttons and a sentence, so it gives the room
+   up. Below the breakpoint they stack and the ratios stop mattering. */
+.panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 62rem) {
+  .panels { grid-template-columns: 1.05fr 1.25fr 0.9fr; }
+}
 
 article {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
-  padding: 1rem;
+  background: var(--surface);
+  padding: 1.1rem 1.25rem;
 }
 
 article.wide { margin-top: 1rem; }
 
-dl#detail-fields { margin: 0; display: grid; grid-template-columns: 6.5rem 1fr; gap: .2rem .6rem; font-size: .85rem; }
-dl#detail-fields dt { color: var(--muted); }
-dl#detail-fields dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; }
+.fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
 
-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-td { padding: .3rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
-td:first-child { font-family: ui-monospace, Menlo, monospace; }
-td:last-child { text-align: right; }
+.fields dt { color: var(--muted); }
+.fields dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 0.8rem; }
 
-.state { font-size: .78rem; color: var(--muted); }
-.state.running { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+td { padding: 0.5rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.35; }
+td:last-child { text-align: right; width: 1%; white-space: nowrap; }
+
+/* The state sits under the unit name rather than beside it. Three columns of
+   a unit name, a state and a button is one column too many for a panel this
+   wide, and it wrapped all three. */
+.state { display: block; margin-top: 0.15rem; font-size: 0.72rem; font-family: var(--font-sans); color: var(--muted); }
+.state.active { color: var(--ok); }
 .state.failed { color: var(--bad); }
 
-.actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
-.error {
-  border: 1px solid var(--bad);
+.notice {
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  color: var(--bad);
-  padding: .6rem .8rem;
-  margin: 1rem 0 0;
-  font-size: .85rem;
+  padding: 0.7rem 0.9rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  background: var(--surface-2);
 }
+
+.notice.bad { border-color: var(--bad); color: var(--bad); background: transparent; }
+
+/* --- journal ------------------------------------------------------------ */
 
 .logs {
-  margin: .75rem 0 0;
-  max-height: 24rem;
+  margin: 0.85rem 0 0;
+  padding: 0.85rem 1rem;
+  max-height: 26rem;
   overflow: auto;
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font: 12px/1.5 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: var(--ink);
 }
 
-.logs .err { color: var(--bad); }
+.logs .err, .logs .crit, .logs .alert, .logs .emerg { color: var(--bad); }
 .logs .warning { color: var(--warn); }
 .logs .time, .logs .unit { color: var(--muted); }
+.logs:empty::before { content: "Press Read."; color: var(--muted); }
 
-.tag {
-  font-size: .75rem;
-  font-family: ui-monospace, Menlo, monospace;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: .1rem .55rem;
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  .card:hover { transform: none; }
 }

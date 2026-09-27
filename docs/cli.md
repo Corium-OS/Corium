@@ -536,6 +536,10 @@ gives the full `cctl status` report, the service list, and a journal window.
 Fields the node could not determine are left out here exactly as they are in
 the terminal.
 
+Which node is open is in the URL, so a reload comes back to the node rather
+than to the list, the browser's back button does what it looks like it does,
+and the page follows your system's light or dark setting.
+
 **What it does.** Restart a unit, cordon, uncordon, drain. That is the
 `corium:operator` half of the API and no more: the dashboard fetches no
 kubeconfig and no join token, and it cannot reboot, shut down, reset, apply a

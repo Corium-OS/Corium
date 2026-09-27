@@ -18,6 +18,13 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 
+// Both views refresh, so both say when they last did. A stale page that does
+// not admit it is worse than no page at all when somebody is deciding whether
+// a node came back.
+const stamp = () => {
+  el("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
+};
+
 async function api(path, options) {
   const response = await fetch(path, {
     ...options,
@@ -54,17 +61,23 @@ function duration(seconds) {
   if (!seconds) return "";
 
   const units = [["d", 86400], ["h", 3600], ["m", 60], ["s", 1]];
+  const counts = [];
   let rest = Math.floor(seconds);
-  const parts = [];
 
   for (const [suffix, size] of units) {
-    const count = Math.floor(rest / size);
-    if (count > 0) parts.push(`${count}${suffix}`);
-    rest -= count * size;
-    if (parts.length === 2) break;
+    counts.push([suffix, Math.floor(rest / size)]);
+    rest %= size;
   }
 
-  return parts.join(" ") || "0s";
+  // The two most significant units, and the second only when it says
+  // something: three days and one second is three days, not "3d 1s".
+  const first = counts.findIndex(([, count]) => count > 0);
+  if (first < 0) return "0s";
+
+  const parts = [counts[first]];
+  if (first + 1 < counts.length && counts[first + 1][1] > 0) parts.push(counts[first + 1]);
+
+  return parts.map(([suffix, count]) => `${count}${suffix}`).join(" ");
 }
 
 const shortDigest = (digest) => (digest ? digest.slice(0, 19) + "…" : "");
@@ -91,7 +104,7 @@ async function loadOverview() {
     const body = await api("/api/overview");
     state.nodes = body.nodes || [];
     renderOverview();
-    el("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
+    stamp();
   } catch (error) {
     el("refreshed").textContent = error.message;
   }
@@ -104,6 +117,36 @@ function renderOverview() {
   for (const summary of state.nodes) {
     grid.append(card(summary));
   }
+
+  renderFacts();
+}
+
+// The homepage states the shape of the project in a row of pills before you
+// scroll. The same gesture: the shape of the fleet, before you read a card.
+function renderFacts() {
+  const counted = { ok: 0, warn: 0, bad: 0 };
+  for (const summary of state.nodes) counted[health(summary)] += 1;
+
+  const facts = el("facts");
+  facts.replaceChildren();
+
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+  facts.append(pill("plain", plural(state.nodes.length, "node")));
+
+  // Only what is true. A fleet with nothing wrong should not carry two pills
+  // reading zero, which is the same restraint the node reports fields with.
+  if (counted.ok) facts.append(pill("ok", `${counted.ok} healthy`));
+  if (counted.warn) facts.append(pill("warn", plural(counted.warn, "warning")));
+  if (counted.bad) facts.append(pill("bad", `${counted.bad} unreachable or failed`));
+}
+
+function pill(kind, text) {
+  const span = document.createElement("span");
+  span.className = "fact " + kind;
+  span.textContent = text;
+
+  return span;
 }
 
 function card(summary) {
@@ -118,15 +161,22 @@ function card(summary) {
   name.textContent = node.hostname || summary.address;
   button.append(name);
 
-  const address = document.createElement("div");
-  address.className = "addr";
-  address.textContent = summary.address;
-  button.append(address);
+  // A node that did not answer has no hostname to head the card with, so the
+  // address is already the title. Repeating it underneath says nothing.
+  if (node.hostname) {
+    const address = document.createElement("div");
+    address.className = "addr";
+    address.textContent = summary.address;
+    button.append(address);
+  }
 
   const list = document.createElement("dl");
 
   if (summary.error) {
     set(list, "unreachable", summary.error);
+    const reason = list.lastElementChild;
+    reason.className = "reason";
+    reason.title = summary.error;
   } else if (!node.bootstrapped) {
     set(list, "state", "not bootstrapped");
     set(list, "os", node.os && node.os.name);
@@ -149,21 +199,41 @@ function card(summary) {
 
 // --- detail -------------------------------------------------------------
 
+// Which node is open lives in the URL fragment, so a reload comes back to the
+// node rather than to the list, the browser's back button does what it looks
+// like it does, and a tab left open on a machine is a link somebody can send.
+// The fragment never leaves the browser, which is why the node goes here and
+// the token does not.
 function select(address) {
+  window.location.hash = encodeURIComponent(address);
+}
+
+function back() {
+  window.location.hash = "";
+}
+
+function route() {
+  const address = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+
+  if (!address) {
+    state.selected = null;
+    el("detail").hidden = true;
+    el("overview").hidden = false;
+    loadOverview();
+
+    return;
+  }
+
+  if (address === state.selected) return;
+
   state.selected = address;
   el("overview").hidden = true;
   el("detail").hidden = false;
   el("detail-title").textContent = address;
   el("action-result").textContent = "";
   el("logs").replaceChildren();
+  showDetailError("");
   loadDetail();
-}
-
-function back() {
-  state.selected = null;
-  el("detail").hidden = true;
-  el("overview").hidden = false;
-  loadOverview();
 }
 
 function showDetailError(message) {
@@ -183,7 +253,10 @@ async function loadDetail() {
   try {
     const body = await api(at);
     state.role = body.role || "";
-    el("detail-role").textContent = state.role ? "as " + state.role : "";
+
+    const badge = el("detail-role");
+    badge.textContent = state.role ? "as " + state.role : "";
+    badge.hidden = !state.role;
     renderFields(body.node || {});
     gateActions();
   } catch (error) {
@@ -193,6 +266,7 @@ async function loadDetail() {
   try {
     const body = await api(at + "/services");
     renderServices(body.services || []);
+    stamp();
   } catch (error) {
     showDetailError(error.message);
   }
@@ -254,15 +328,13 @@ function renderServices(services) {
     const row = document.createElement("tr");
 
     const name = document.createElement("td");
-    name.textContent = service.name;
-    row.append(name);
+    name.append(document.createTextNode(service.name));
 
-    const status = document.createElement("td");
     const tag = document.createElement("span");
     tag.className = "state " + (service.active || "");
     tag.textContent = [service.active, service.sub].filter(Boolean).join(" / ");
-    status.append(tag);
-    row.append(status);
+    name.append(tag);
+    row.append(name);
 
     const action = document.createElement("td");
 
@@ -272,6 +344,7 @@ function renderServices(services) {
     if (service.restartable !== false) {
       const button = document.createElement("button");
       button.type = "button";
+      button.className = "btn";
       button.textContent = "Restart";
       button.dataset.needs = "operator";
       button.addEventListener("click", () => restart(service.name));
@@ -420,5 +493,7 @@ for (const button of document.querySelectorAll("[data-act]")) {
   });
 }
 
-loadOverview();
+window.addEventListener("hashchange", route);
+
+route();
 schedule();
