@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corium</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>Corium</h1>
+  <div class="bar">
+    <span id="refreshed" class="muted"></span>
+    <label><input type="checkbox" id="auto" checked> refresh</label>
+    <button id="reload" type="button">Reload</button>
+  </div>
+</header>
+
+<main>
+  <section id="overview">
+    <div id="nodes" class="grid"></div>
+  </section>
+
+  <section id="detail" hidden>
+    <div class="bar">
+      <button id="back" type="button">&larr; All nodes</button>
+      <h2 id="detail-title"></h2>
+      <span id="detail-role" class="tag"></span>
+    </div>
+
+    <div id="detail-error" class="error" hidden></div>
+
+    <div class="panels">
+      <article>
+        <h3>Node</h3>
+        <dl id="detail-fields"></dl>
+      </article>
+
+      <article>
+        <h3>Services</h3>
+        <table id="services"><tbody></tbody></table>
+      </article>
+
+      <article>
+        <h3>Lifecycle</h3>
+        <p class="muted">Cordon and drain work on controllers only. A drain a
+        pod disruption budget refuses is not forced; the node stays cordoned.</p>
+        <div class="actions">
+          <button data-act="cordon" type="button">Cordon</button>
+          <button data-act="uncordon" type="button">Uncordon</button>
+          <button data-act="drain" type="button" class="warn">Drain</button>
+        </div>
+        <p id="action-result" class="muted"></p>
+      </article>
+    </div>
+
+    <article class="wide">
+      <h3>Journal</h3>
+      <div class="bar">
+        <select id="log-unit"><option value="">every unit</option></select>
+        <select id="log-since">
+          <option value="15m">15m</option>
+          <option value="1h" selected>1h</option>
+          <option value="24h">24h</option>
+          <option value="">everything</option>
+        </select>
+        <button id="log-load" type="button">Read</button>
+      </div>
+      <pre id="logs" class="logs"></pre>
+    </article>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

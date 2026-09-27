@@ -14,6 +14,21 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **`cctl ui` shows your nodes in a browser.** A dashboard served from your own
+  machine, on `127.0.0.1:7500`: one card per node with role, cluster, k0s
+  version and whether its service is running, greenboot, uptime, and a mark
+  when an image is staged and waiting for a reboot. A node that did not answer
+  keeps its card and says why. Opening one gives the full `cctl status` report,
+  the service list, and a journal window. It can restart a unit, cordon,
+  uncordon and drain — the `corium:operator` half of the API — and nothing
+  irreversible: no reboot, shutdown, reset, apply or upgrade, and it fetches no
+  kubeconfig and no join token. Naming no node shows every node `~/.corium`
+  already knows a fingerprint for. Nothing changes on a node because you opened
+  a browser: it is your client certificate talking to the same mutual-TLS API
+  `cctl` has always used, and no machine gains a port. The link it prints
+  carries a token that lives as long as the process; see
+  [the CLI guide](docs/cli.md#a-dashboard-in-the-browser).
+
 - **A node can back its own control plane up, on a schedule.** A new `backup:`
   block in the `corium:` document turns `k0s backup` into a systemd timer:
   `enabled`, an `OnCalendar` `schedule` (default daily), a target `path`

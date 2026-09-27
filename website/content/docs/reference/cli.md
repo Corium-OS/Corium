@@ -503,6 +503,64 @@ will restart (first-boot configuration; runs once)
 tell "the node refused" from "the node obeyed" — both look like a connection
 that died.
 
+### A dashboard in the browser
+
+`cctl ui` serves a page that shows every node at once, and lets you press the
+buttons `restart`, `cordon` and `drain` are. It runs **on your machine**: the
+server binds loopback, holds your client certificate, and talks to nodes over
+the same mutual-TLS API every other command uses. No node gains a port, a
+password or a session because you opened a browser — which is the same reason
+[ADR 4](/docs/decisions/adr-0004-management-api/) put the management API on the node and the
+fleet's view nowhere.
+
+```console
+$ cctl ui
+cctl ui: 3 node(s)
+
+  http://127.0.0.1:7500/?token=hizbucmhfayrnhm2wiiyevbkefdyxf6u
+
+Ctrl-C to stop.
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--listen` | `127.0.0.1:7500` | Where the dashboard binds. A non-loopback address is allowed and warned about |
+| `--fingerprint` | — | Records a fingerprint for a single named node, as the other commands do |
+
+Naming no node shows every node `~/.corium/config.yaml` already holds a
+fingerprint for (§5) — the set this directory can reach without being told
+anything more. It is not an inventory: a node somebody else enrolled is absent
+until you name it once.
+
+```console
+$ cctl ui 192.168.1.51 192.168.1.52
+$ cctl ui 192.168.1.51 --fingerprint SHA256:2Qn... # a node claimed from cloud-init
+```
+
+**What it shows.** One card per node — hostname, role, cluster, k0s version and
+whether its service is running, greenboot, uptime, and a mark when an image is
+staged and waiting for a reboot. A node that did not answer keeps its card and
+says why, because which machine is down is usually the question. Opening a card
+gives the full `cctl status` report, the service list, and a journal window.
+Fields the node could not determine are left out here exactly as they are in
+the terminal.
+
+**What it does.** Restart a unit, cordon, uncordon, drain. That is the
+`corium:operator` half of the API and no more: the dashboard fetches no
+kubeconfig and no join token, and it cannot reboot, shut down, reset, apply a
+configuration or upgrade anything. Those are irreversible, or they are rollouts
+across several nodes with an order that matters, and a button is the wrong
+shape for both. Buttons your certificate cannot press are disabled rather than
+tried.
+
+> **The token is the credential.** Anyone who reaches the port *and* has the
+> token acts as you do. It is printed once, moved into an `HttpOnly` cookie on
+> first load, and lives only as long as the process. The server also refuses a
+> `Host` header that is not its own loopback address, which is what stops a
+> hostile page resolving a name to `127.0.0.1` and talking to it, and refuses a
+> request the browser labels cross-site. Passing `--listen` a real interface
+> puts all of that on your network; the warning it prints says so.
+
 ### SSH access
 
 The API grants no shell of its own (§7), but it can trust an SSH key for a user

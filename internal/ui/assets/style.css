@@ -1,0 +1,156 @@
+/* One stylesheet, no framework. Light and dark come from the system. */
+
+:root {
+  --bg: #fbfbfa;
+  --panel: #ffffff;
+  --line: #e2e1dd;
+  --ink: #1c1b19;
+  --muted: #6d6a64;
+  --accent: #2f6f4f;
+  --warn: #9a4b16;
+  --bad: #9c2b21;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a;
+    --panel: #1f2124;
+    --line: #34373b;
+    --ink: #e8e6e3;
+    --muted: #9a9790;
+    --accent: #6fbf90;
+    --warn: #e0a065;
+    --bad: #e2766a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+h1 { margin: 0; font-size: 1.1rem; letter-spacing: .04em; text-transform: uppercase; }
+h2 { margin: 0; font-size: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+h3 { margin: 0 0 .75rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+
+main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+
+.bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.muted { color: var(--muted); font-size: .85rem; }
+
+button, select {
+  font: inherit;
+  font-size: .85rem;
+  padding: .3rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.warn { color: var(--warn); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: .9rem 1rem;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  display: block;
+}
+
+.card:hover { border-color: var(--accent); }
+.card.ok { border-left-color: var(--accent); }
+.card.warn { border-left-color: var(--warn); }
+.card.bad { border-left-color: var(--bad); }
+
+.card h4 { margin: 0 0 .1rem; font-size: .95rem; font-family: ui-monospace, Menlo, monospace; }
+.card .addr { color: var(--muted); font-size: .8rem; font-family: ui-monospace, Menlo, monospace; }
+.card dl { margin: .7rem 0 0; display: grid; grid-template-columns: 5.5rem 1fr; gap: .15rem .5rem; font-size: .82rem; }
+.card dt { color: var(--muted); }
+.card dd { margin: 0; overflow-wrap: anywhere; }
+
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 1rem; margin-top: 1rem; }
+
+article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1rem;
+}
+
+article.wide { margin-top: 1rem; }
+
+dl#detail-fields { margin: 0; display: grid; grid-template-columns: 6.5rem 1fr; gap: .2rem .6rem; font-size: .85rem; }
+dl#detail-fields dt { color: var(--muted); }
+dl#detail-fields dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; }
+
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+td { padding: .3rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td:first-child { font-family: ui-monospace, Menlo, monospace; }
+td:last-child { text-align: right; }
+
+.state { font-size: .78rem; color: var(--muted); }
+.state.running { color: var(--accent); }
+.state.failed { color: var(--bad); }
+
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+.error {
+  border: 1px solid var(--bad);
+  border-radius: var(--radius);
+  color: var(--bad);
+  padding: .6rem .8rem;
+  margin: 1rem 0 0;
+  font-size: .85rem;
+}
+
+.logs {
+  margin: .75rem 0 0;
+  max-height: 24rem;
+  overflow: auto;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.logs .err { color: var(--bad); }
+.logs .warning { color: var(--warn); }
+.logs .time, .logs .unit { color: var(--muted); }
+
+.tag {
+  font-size: .75rem;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .1rem .55rem;
+}
