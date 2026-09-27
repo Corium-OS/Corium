@@ -90,6 +90,11 @@ curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v${version}/build
 cosign verify-blob --key cosign.pub --signature SHA256SUMS.sig SHA256SUMS
 ```
 
+A recent `cosign` prints `Flag --signature has been deprecated, please use
+--bundle` before it answers. Ignore it — the verification is the `Verified OK`
+on the next line. `--bundle` is not the flag to reach for instead: it expects a
+Sigstore bundle, and what is published here is a plain signature.
+
 There is no Windows build. Not a decision against it — nobody has run `cctl`
 there once, and a download page that lists a platform nobody has started is a
 download page worth less on every other line.
