@@ -60,6 +60,32 @@ including the escape hatches.
 
 ---
 
+## Managing a node
+
+Every node runs a small management API, off by default, that answers for itself and nothing
+else. [`cctl`](docs/cli.md) is the client: it claims a node, reads what it is, restarts a
+service, drains it, and rolls it on to a new image. `cctl ui` is the same thing with a page
+in front of it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
+    <img src="docs/assets/dashboard-light.png"
+         alt="The cctl dashboard: six node cards showing role, cluster, k0s version, greenboot and uptime, one with an image staged and one unreachable"
+         width="880">
+  </picture>
+</p>
+
+**It runs on your machine, not on the nodes.** The server binds loopback, holds your client
+certificate, and talks to each node over the same mutual TLS every other command uses. No
+machine gains a port, a password or a session because somebody opened a browser — which is
+what keeps [what it is not](#what-it-is-not) true. It reads, and it restarts a unit, cordons, uncordons
+and drains. It cannot reboot, reset, apply a configuration or upgrade anything: those are
+irreversible, or they are rollouts whose order across nodes matters, and a button is the
+wrong shape for both.
+
+---
+
 ## The idea
 
 Three properties, chosen together because each one reinforces the others.

@@ -64,6 +64,7 @@ Commands:
   kubeconfig    Fetch the cluster's administrator kubeconfig from a node
   worker-config Mint a join token on a controller and print a worker's corium: block
   health        Check a node answers, and what it authenticated you as
+  ui            Serve a dashboard for your nodes in a browser, on this machine
   version       Print version information
 
 Run 'cctl <command> -h' for command-specific flags.
@@ -127,6 +128,8 @@ func run() error {
 		return workerConfigCommand(ctx, args)
 	case "health":
 		return healthCommand(ctx, args)
+	case "ui":
+		return uiCommand(ctx, args)
 	case "version":
 		fmt.Printf("cctl %s (%s)\n", version, commit)
 
