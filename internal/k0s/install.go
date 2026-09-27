@@ -116,6 +116,17 @@ func Start(ctx context.Context, role config.Role) error {
 	return run(ctx, "systemctl", "start", ServiceName(role))
 }
 
+// Stop stops the k0s service.
+//
+// Here rather than through internal/systemd's Manager, which is the allowlist
+// the API offers an operator: stopping k0s is not something this node exposes
+// as a verb, it is one step of a sequence that puts it back. A unit an operator
+// may cycle and a unit this code stops on its way to starting it again are
+// different questions.
+func Stop(ctx context.Context, role config.Role) error {
+	return run(ctx, "systemctl", "stop", ServiceName(role))
+}
+
 // run executes a command and folds its output into the returned error.
 //
 // k0s reports why it refused to do something on stderr; dropping that and

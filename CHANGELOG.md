@@ -76,6 +76,14 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   breaks those rules — skipping a minor, or going back one — is refused with the
   rule named, before anything is stopped.
 
+  Day two, `kubernetes.version` is re-applied by `cctl apply` alongside `addons`
+  and `k0s.patch`. It is the one apply that takes a node out of service: it
+  drains, stops k0s, swaps the extension, clears the staged binaries, starts k0s
+  and uncordons. The download happens before any of that, so an unreachable
+  registry costs nothing, and a drain a pod disruption budget refuses cancels the
+  change rather than forcing it. There is no automatic rollback if k0s does not
+  come back — the node stays cordoned and says why.
+
   Nothing changes for a node that says nothing: it runs the version its image
   ships, needs no network to do it, and existing nodes are unaffected. Note that
   rolling a Kubernetes version *back* is not the free operation an OS rollback

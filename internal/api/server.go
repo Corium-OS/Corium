@@ -112,6 +112,11 @@ type Server struct {
 	// is allowed to write.
 	k0sConfigPath string
 
+	// k0sWindowPath is the set of k0s versions the booted image supports, which
+	// a day-two version change is checked against. A field for the same reason:
+	// a test has no /usr to write one into.
+	k0sWindowPath string
+
 	// booted is the document this node started with, or nil on a node that
 	// found none. It is read to answer one question and no other: would
 	// claiming this node release it into building something? A field so a test
@@ -184,6 +189,7 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		configPath:    ConfigPath,
 		appliedPath:   nodeinfo.AppliedConfigFile,
 		k0sConfigPath: k0s.ConfigPath,
+		k0sWindowPath: k0s.WindowPath,
 		sessionDir:    session,
 	}
 

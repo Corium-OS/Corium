@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/config"
 )
@@ -123,6 +124,24 @@ func (s *Server) handleApplyConfig(w http.ResponseWriter, r *http.Request) {
 // which is the same answer this endpoint has always given here, now with the
 // reason and the field.
 func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg *config.Config, document []byte) {
+	// A Kubernetes version change is the one apply that can legitimately take
+	// minutes: a quarter of a gigabyte to download, then a drain bounded by its
+	// own timeout. The server's write deadline is shorter than that, so it is
+	// cleared here the way handleDrain clears it.
+	//
+	// Keyed on the field being set rather than on the plan, which is not known
+	// until the diff has run inside reconcile. A document that names the version
+	// the node is already on clears the deadline for an apply that turns out to
+	// be a no-op, which costs nothing.
+	if cfg.Kubernetes.Version != "" {
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+			writeError(w, http.StatusInternalServerError,
+				"this server cannot hold a long request open")
+
+			return
+		}
+	}
+
 	result, err := s.reconcile(r.Context(), cfg, document)
 	if err != nil {
 		var refused *refusedApplyError
@@ -152,6 +171,7 @@ func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg 
 		"api":        cfg.API.Mode() != config.APIModeDisabled,
 		"reconciled": result.changed,
 		"restarted":  result.restarted,
+		"kubernetes": result.kubernetes,
 	})
 }
 
