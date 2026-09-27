@@ -606,6 +606,51 @@ reboot stays yours to schedule. A node that has only ever booted one image has
 nowhere to go back to, and says so. It takes the two shared flags and nothing
 else.
 
+### Kubernetes version rollouts
+
+`cctl upgrade` moves nodes to another *OS* image. `cctl k8s upgrade` moves a
+cluster to another *Kubernetes* version, which since
+[ADR 10](/docs/decisions/adr-0010-kubernetes-version-axis/) is an axis of its own.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--version` | — | Required. The k0s release to move to, such as `v1.36.4+k0s.1` |
+| `--controllers` | — | Required. Comma-separated, upgraded first, one at a time |
+| `--workers` | — | Comma-separated, upgraded after every controller |
+| `--mirror` | — | Override where the extension is pulled from |
+| `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
+
+```console
+$ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
+[1/5] node-1:7443 (controller)
+        on k0s v1.35.8+k0s.1, moving to v1.36.4+k0s.1
+        up on k0s v1.36.4+k0s.1
+[2/5] node-2:7443 (controller)
+...
+```
+
+**Controllers and workers are named separately, and the order is not a
+preference.** k0s requires controllers to be upgraded before workers, and a
+worker may never be newer than the controllers it talks to. Naming them is you
+stating the shape of the cluster before anything moves, rather than the rollout
+discovering a mistake in the address list half way through.
+
+Each node downloads the extension *before* it is taken out of service, so an
+unreachable registry or a signature that does not verify costs nothing. Then it
+drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
+pod disruption budget refuses cancels the change on that node rather than
+forcing it.
+
+> **A stopped rollout is a safe place to stand.** Like `cctl upgrade`, this
+> stops at the first node that fails. Unlike it, the half-finished state is one
+> k0s explicitly supports: controllers one minor ahead of workers. There is no
+> hurry to finish, which is worth knowing at the moment you are deciding
+> whether to push on.
+
+There is no automatic rollback if k0s does not come back on a node: it stays
+cordoned and says why. k0s does not support downgrading a minor, so reversing
+it unasked would risk making a recoverable problem permanent.
+
 ### Getting a kubeconfig
 
 | Flag | Default | Notes |

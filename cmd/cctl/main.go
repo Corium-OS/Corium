@@ -53,6 +53,7 @@ Commands:
   logs          Read a node's journal, optionally following it
   upgrade       Move nodes to another OS image, one at a time
   rollback      Mark a node's previous image as the next to boot
+  k8s upgrade   Move a cluster to another Kubernetes version, controllers first
   cordon        Stop new pods being scheduled on a node (--undo to reverse)
   drain         Evict a node's workloads, cordoning it first
   reboot        Restart a node
@@ -106,6 +107,8 @@ func run() error {
 		return upgradeCommand(ctx, args)
 	case "rollback":
 		return rollbackCommand(ctx, args)
+	case "k8s":
+		return kubernetesCommand(ctx, args)
 	case "cordon":
 		return cordonCommand(ctx, args)
 	case "drain":
@@ -652,6 +655,91 @@ func upgradeCommand(ctx context.Context, args []string) error {
 	}
 
 	return rollout.Run(ctx)
+}
+
+// kubernetesCommand moves a cluster to another k0s version.
+//
+// Controllers and workers are named separately rather than worked out from the
+// nodes themselves, and that is deliberate. k0s requires controllers to go
+// first and forbids a worker being newer than its controllers, so the order is
+// load-bearing -- and asking each node its role before starting would mean the
+// rollout discovers a mistake in the address list half way through, with a
+// cluster part-upgraded. Naming them is the operator stating the shape of the
+// cluster up front, where it can be read back before anything moves.
+func kubernetesCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl k8s upgrade", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		version     = flags.String("version", "", "the k0s version to move to; required")
+		mirror      = flags.String("mirror", "", "override where the extension is pulled from")
+		controllers = flags.String("controllers", "",
+			"comma-separated controller addresses, upgraded first")
+		workers = flags.String("workers", "",
+			"comma-separated worker addresses, upgraded after the controllers")
+		timeout = flags.Duration("timeout", cctl.DefaultKubernetesTimeout,
+			"how long one node is allowed to take")
+	)
+
+	rest, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
+	if len(rest) == 0 || rest[0] != "upgrade" {
+		return errors.New(
+			"usage: cctl k8s upgrade --version <version> " +
+				"--controllers <address>[,...] [--workers <address>[,...]]")
+	}
+
+	if *version == "" {
+		return errors.New("--version is required")
+	}
+
+	if *controllers == "" {
+		return errors.New(
+			"--controllers is required: k0s upgrades controllers before workers, " +
+				"and a worker may never be newer than the control plane it talks to")
+	}
+
+	store, err := openStore(*dir)
+	if err != nil {
+		return err
+	}
+
+	rollout := &cctl.KubernetesRollout{
+		Version:     *version,
+		Mirror:      *mirror,
+		Controllers: addressList(*controllers),
+		Workers:     addressList(*workers),
+		Timeout:     *timeout,
+		Out:         os.Stdout,
+		Connect: func(address string) (*cctl.Client, error) {
+			return connectWith(store, address, "")
+		},
+	}
+
+	return rollout.Run(ctx)
+}
+
+// addressList splits a comma-separated list, giving each entry the default
+// port. An empty string is no addresses rather than one empty one.
+func addressList(list string) []string {
+	if strings.TrimSpace(list) == "" {
+		return nil
+	}
+
+	parts := strings.Split(list, ",")
+
+	addresses := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			addresses = append(addresses, withDefaultPort(trimmed))
+		}
+	}
+
+	return addresses
 }
 
 func rollbackCommand(ctx context.Context, args []string) error {

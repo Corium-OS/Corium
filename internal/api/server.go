@@ -387,6 +387,11 @@ func (s *Server) routes() http.Handler {
 	// only one.
 	mux.HandleFunc("POST /v1/config", require(RoleAdmin, s.handleApplyConfig))
 
+	// The Kubernetes version, as a verb of its own. Admin, like POST /v1/config:
+	// it changes what the node runs and takes it out of service to do it.
+	mux.HandleFunc("POST /v1/kubernetes",
+		require(RoleAdmin, s.handleKubernetesVersion))
+
 	mux.HandleFunc("POST /v1/ca/rotate", require(RoleAdmin, s.handleRotateCA))
 
 	// Admin, and not because it changes anything -- it changes nothing. It

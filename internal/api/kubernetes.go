@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"time"
 
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
@@ -165,4 +169,121 @@ func (s *Server) drainForSwap(ctx context.Context) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// maxKubernetesBody caps the request. A version and a mirror are short strings.
+const maxKubernetesBody = 4 << 10
+
+type kubernetesRequest struct {
+	Version string `json:"version"`
+	Mirror  string `json:"mirror,omitempty"`
+}
+
+// handleKubernetesVersion moves this node to another k0s version.
+//
+// A bounded verb rather than a whole document, and that is the point of it. The
+// general day-two path is `cctl apply`, which sends a configuration and lets the
+// node diff it -- but a rollout across a cluster would then have to hold every
+// node's document and send each one back correctly, and the failure mode of
+// getting that wrong is a node rebuilt with its neighbour's identity. This
+// endpoint cannot make that mistake: it is not able to express anything except
+// the version.
+//
+// It is the fallback ADR 8 names for exactly this reason -- a verb that only
+// changes one thing never has to judge whether the rest of a document was safe.
+func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request) {
+	// The swap downloads a quarter of a gigabyte and then drains, either of
+	// which outlasts the server's write deadline. Cleared as handleDrain
+	// clears it; the bound is the operation's own.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			"this server cannot hold a long request open")
+
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxKubernetesBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the request body")
+
+		return
+	}
+
+	var request kubernetesRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "body is not valid JSON")
+
+		return
+	}
+
+	if request.Version == "" {
+		writeError(w, http.StatusBadRequest, "version is required")
+
+		return
+	}
+
+	// Diffed against what the node recorded applying, for the reason ADR 8
+	// gives: a file in /etc may have been hand-edited into something the node
+	// never acted on.
+	baseline, err := s.baselineConfig()
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+
+		return
+	}
+
+	next := *baseline
+	next.Kubernetes.Version = request.Version
+
+	if request.Mirror != "" {
+		next.Kubernetes.Mirror = request.Mirror
+	}
+
+	// Validated before anything moves, so a malformed mirror is a 400 rather
+	// than a node that drains itself and then cannot pull.
+	if err := next.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+
+		return
+	}
+
+	running, err := s.swapKubernetesVersion(r.Context(), &next)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+
+		return
+	}
+
+	status := "changed"
+	if baseline.Kubernetes.Version == request.Version {
+		status = "unchanged"
+	}
+
+	// Recorded only once the version is actually running, and re-rendered from
+	// the parsed configuration rather than patched as text. That loses an
+	// operator's comments and ordering in /etc, which is a real cost and the
+	// reason this is written the same way `cctl apply` writes its document: a
+	// node whose recorded configuration disagrees with the version it is
+	// running would send the next apply chasing a change that already happened.
+	if status == "changed" {
+		document, err := next.Document()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+
+			return
+		}
+
+		for _, path := range []string{s.configPath, s.appliedPath} {
+			if err := writeConfigDocument(path, document); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+
+				return
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     status,
+		"kubernetes": running,
+	})
 }
