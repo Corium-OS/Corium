@@ -368,6 +368,7 @@ podman volume create corium-sysext-work >/dev/null 2>&1 || true
 
 podman run --rm \
 	--security-opt label=disable \
+	--cap-add SYS_ADMIN \
 	-v corium-sysext-work:/work \
 	-e WORK_ROOT=/work \
 	-v "${PWD}:/src" \

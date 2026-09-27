@@ -121,13 +121,17 @@ jobs:
       # the image workflow treats `mise run image` too: the workflows here call
       # the tools, and mise is the developer entry point.
       #
-      # Under sudo because building writes security.selinux xattrs onto the
-      # staging tree, which needs CAP_SYS_ADMIN, and a rootless podman on the
-      # runner does not reliably have it -- with a silent failure mode, since
-      # setfiles reports success and changes nothing. The script's own label
-      # check is the backstop either way: it refuses to package a tree whose
-      # usr/bin is not bin_t, because merging that would replace the label on a
-      # node's /usr/bin and lock sshd out of it.
+      # Under sudo, and with SYS_ADMIN, because building writes security.selinux
+      # xattrs onto the staging tree. Both are needed and neither is obvious:
+      # podman drops CAP_SYS_ADMIN from its default set even for root, and this
+      # runner has no SELinux, so there is no LSM claiming security.selinux and
+      # the write falls through to the generic rule for security.* xattrs --
+      # which requires exactly that capability. On a host that does have SELinux
+      # it works without this, which is how it passed locally and failed here.
+      #
+      # The script's own label check is the backstop regardless: it refuses to
+      # package a tree whose usr/bin is not bin_t, because merging that would
+      # replace the label on a node's /usr/bin and lock sshd out of it.
       - name: Build the extension
         run: |
           set -eu
@@ -135,6 +139,7 @@ jobs:
           sudo podman volume create corium-sysext-work >/dev/null 2>&1 || true
           sudo podman run --rm \
             --security-opt label=disable \
+            --cap-add SYS_ADMIN \
             -v corium-sysext-work:/work \
             -e WORK_ROOT=/work \
             -v "${PWD}:/src" \
