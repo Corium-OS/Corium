@@ -44,6 +44,7 @@ See [HA cluster](install/ha-cluster.md) for the procedure these belong to.
 | [`stretched-controller-calico-wireguard.yaml`](examples/stretched-controller-calico-wireguard.yaml) | A controller in a cluster split across two sites |
 | [`stretched-worker.yaml`](examples/stretched-worker.yaml) | A worker on the far side of that split |
 | [`raid.yaml`](examples/raid.yaml) | A node that mirrors its two spare disks and puts Kubernetes state on the array. See [Software RAID](raid.md) |
+| [`kubernetes-version.yaml`](examples/kubernetes-version.yaml) | A node pinned to a Kubernetes version other than its image's floor, pulled from an internal mirror. See [ADR 10](adr/0010-kubernetes-version-axis.md) |
 
 ## Day two
 

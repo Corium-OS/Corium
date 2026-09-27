@@ -35,6 +35,24 @@ Prereleases publish only their exact image tag. A release candidate can never
 be picked up by a node following `0.1` or `latest`, which is what makes the
 rehearsal below safe.
 
+### The k0s extensions version separately
+
+Nothing on this page applies to them, and that is the point of
+[ADR 10](../docs/adr/0010-kubernetes-version-axis.md): the Kubernetes version
+is an axis of its own, so tying its artefacts to Corium's release cadence
+would put the coupling back through the build system.
+
+They are published by `.github/workflows/k0s-extensions.yml`, which runs when
+`build/k0s.lock` changes on `main` — not on a tag — and takes its matrix from
+the lock file itself. Adding a version to the window is therefore one
+`mise run k0s-window vX.Y.Z+k0s.N`, reviewed as a diff of checksums, and merging
+it publishes and signs the artefact.
+
+What *is* a release concern is the floor. `K0S_FLOOR` decides which version is
+baked into `/usr/bin/k0s`, so changing that line changes what every node built
+from the next image runs when it is told nothing, and what the supported window
+is centred on. Move it deliberately, and say so in the changelog.
+
 ---
 
 ## Cutting a release

@@ -317,8 +317,9 @@ provisioning model exists to prevent. See
 [ADR 8](adr/0008-day-two-reconcile.md).
 
 The identity fields are `role`, `cluster`, `join`, `node`, `network`, `storage`,
-`raid`, `zfs`, `wireguard`, `ha`, `upgrades`, `backup` and `api`. The safe subset today is
-`addons` and the `k0s` escape hatch, and it is expected to grow. A reconcile
+`raid`, `zfs`, `wireguard`, `ha`, `upgrades`, `backup` and `api`. The safe
+subset today is `addons`, the `k0s` escape hatch and `kubernetes.version`, and
+it is expected to grow. A reconcile
 regenerates the node's k0s configuration and cycles the control plane so k0s
 installs or updates the chart, or picks up the patched configuration — an OIDC
 `extraArgs` on the API server, say — and the change is live rather than deferred
@@ -326,6 +327,22 @@ to the next boot; only a controller does that, because a worker's charts and
 cluster configuration are declared by the controllers and rewriting its copy
 would change nothing it runs. The whole rule is enforced by the node, not by
 `cctl` and not by your role — an `admin` certificate does not get past it either.
+
+Changing `kubernetes.version` is the one apply that takes the node out of
+service, because it replaces the binary underneath k0s rather than a file k0s
+reads. The node drains itself, stops k0s, swaps the system extension, clears the
+staged binaries, starts k0s and uncordons — the sequence k0s documents, in that
+order. The extension is downloaded *before* any of it, so a registry that cannot
+be reached or a signature that does not verify costs nothing; and a drain a pod
+disruption budget refuses cancels the change rather than forcing it. Expect this
+one to take minutes rather than seconds.
+
+There is no automatic rollback if k0s does not come back: the node stops with
+the reason and stays cordoned. A minor upgrade may have migrated state on its
+way up and k0s does not support moving back a minor at all, so reversing it
+unasked, on a node whose control plane is already unhappy, is how a recoverable
+problem becomes an unrecoverable one. See
+[ADR 10](adr/0010-kubernetes-version-axis.md).
 
 `k0s.patch` is passed through verbatim, so it re-applies with the same contract
 it carries at bootstrap: Corium checks only that the result is valid YAML, and a
@@ -580,6 +597,51 @@ reboot stays yours to schedule. A node that has only ever booted one image has
 nowhere to go back to, and says so. It takes the two shared flags and nothing
 else.
 
+### Kubernetes version rollouts
+
+`cctl upgrade` moves nodes to another *OS* image. `cctl k8s upgrade` moves a
+cluster to another *Kubernetes* version, which since
+[ADR 10](adr/0010-kubernetes-version-axis.md) is an axis of its own.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--version` | — | Required. The k0s release to move to, such as `v1.36.4+k0s.1` |
+| `--controllers` | — | Required. Comma-separated, upgraded first, one at a time |
+| `--workers` | — | Comma-separated, upgraded after every controller |
+| `--mirror` | — | Override where the extension is pulled from |
+| `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
+
+```console
+$ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
+[1/5] node-1:7443 (controller)
+        on k0s v1.35.8+k0s.1, moving to v1.36.4+k0s.1
+        up on k0s v1.36.4+k0s.1
+[2/5] node-2:7443 (controller)
+...
+```
+
+**Controllers and workers are named separately, and the order is not a
+preference.** k0s requires controllers to be upgraded before workers, and a
+worker may never be newer than the controllers it talks to. Naming them is you
+stating the shape of the cluster before anything moves, rather than the rollout
+discovering a mistake in the address list half way through.
+
+Each node downloads the extension *before* it is taken out of service, so an
+unreachable registry or a signature that does not verify costs nothing. Then it
+drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
+pod disruption budget refuses cancels the change on that node rather than
+forcing it.
+
+> **A stopped rollout is a safe place to stand.** Like `cctl upgrade`, this
+> stops at the first node that fails. Unlike it, the half-finished state is one
+> k0s explicitly supports: controllers one minor ahead of workers. There is no
+> hurry to finish, which is worth knowing at the moment you are deciding
+> whether to push on.
+
+There is no automatic rollback if k0s does not come back on a node: it stays
+cordoned and says why. k0s does not support downgrading a minor, so reversing
+it unasked would risk making a recoverable problem permanent.
+
 ### Getting a kubeconfig
 
 | Flag | Default | Notes |
@@ -819,7 +881,7 @@ the same answer on your workstation as on the machine.
 | Not there | Why |
 |---|---|
 | `cctl exec` | The moment an API can run any command it is SSH with a worse client, and every argument for keeping its surface small stops applying |
-| Rewriting what a node *is*, in service | A node already running Kubernetes cannot have its role, cluster, name, network or disks rewritten underneath it. `cctl apply` re-applies the safe subset (the add-on set) day-two and refuses each of those, naming it; changing one is `cctl reset`. See [ADR 8](adr/0008-day-two-reconcile.md) |
+| Rewriting what a node *is*, in service | A node already running Kubernetes cannot have its role, cluster, name, network or disks rewritten underneath it. `cctl apply` re-applies the safe subset (the add-on set, the k0s patch, the Kubernetes version) day-two and refuses each of those, naming it; changing one is `cctl reset`. See [ADR 8](adr/0008-day-two-reconcile.md) |
 | A reconcile loop | Nothing watches a document and corrects a running node toward it. `cctl apply` re-applies the safe subset when you ask it to, once, and does nothing between one apply and the next |
 | Anything Kubernetes beyond `kubeconfig` | The API hands over the admin kubeconfig once and does nothing else with Kubernetes. It does not proxy the apiserver, list pods, or keep credentials for you |
 | A fleet inventory | `cctl` acts on addresses you supply. There is no registry and no desired state; a rolling change is a loop over the addresses you name |

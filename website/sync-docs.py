@@ -144,6 +144,12 @@ PAGES = [
      "What replaces the archived bootc-image-builder: which of its successor's "
      "paths are drop-in, why the ISO is not, where a custom kickstart goes, "
      "and what pinning buys in the meantime."),
+    ("adr/0010-kubernetes-version-axis.md", "decisions",
+     "adr-0010-kubernetes-version-axis",
+     "ADR 10 — Kubernetes version axis", 1000,
+     "Why the Kubernetes version stops being a property of the OS image and "
+     "becomes an axis of its own, delivered as a signed system extension that "
+     "overlays the k0s binary the image still ships as a floor."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes

@@ -28,6 +28,7 @@ func (c *Config) Validate() error {
 	var problems []error
 
 	problems = append(problems, c.validateRole()...)
+	problems = append(problems, c.validateKubernetes()...)
 	problems = append(problems, c.validateNetwork()...)
 	problems = append(problems, c.validateStorage()...)
 	problems = append(problems, c.validateJoin()...)
@@ -72,6 +73,60 @@ func (c *Config) validateRole() []error {
 	default:
 		return []error{fmt.Errorf("role: unknown value %q", c.Role)}
 	}
+}
+
+// k0sVersionPattern is a k0s release tag as upstream writes it. It is checked
+// here for shape only: whether a well-formed version is one this image can
+// actually run is a question for the window in /usr, and validation reads
+// nothing from disk so that it works in CI against a node that does not exist.
+var k0sVersionPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+\+k0s\.\d+$`)
+
+// mirrorPattern is a registry reference without a tag or digest: a host, an
+// optional port, and a path. Deliberately stricter than the grammar allows,
+// for the same reason internal/upgrade refuses a loose image reference -- the
+// set of mirrors somebody legitimately needs is much smaller than the set that
+// parses, and this value ends up in a pull.
+var mirrorPattern = regexp.MustCompile(
+	`^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$`)
+
+func (c *Config) validateKubernetes() []error {
+	var problems []error
+
+	if version := c.Kubernetes.Version; version != "" &&
+		!k0sVersionPattern.MatchString(version) {
+		problems = append(problems, fmt.Errorf(
+			"kubernetes.version: %q is not a k0s release tag "+
+				"(expected something like v1.36.4+k0s.1)", version))
+	}
+
+	if mirror := c.Kubernetes.Mirror; mirror != "" {
+		switch {
+		case strings.ContainsAny(mirror, "@:") && !mirrorPattern.MatchString(mirror):
+			// Caught separately because it is the mistake worth naming: a
+			// mirror is where extensions are found, and the version picks one
+			// out of it. A tag here would silently pin every version to one
+			// artefact.
+			problems = append(problems, fmt.Errorf(
+				"kubernetes.mirror: %q carries a tag or digest; "+
+					"a mirror is a repository, and kubernetes.version selects "+
+					"which artefact is pulled from it", mirror))
+		case !mirrorPattern.MatchString(mirror):
+			problems = append(problems, fmt.Errorf(
+				"kubernetes.mirror: %q is not a registry reference", mirror))
+		}
+	}
+
+	// A mirror with nothing to pull from it is a setting that will never be
+	// read. It is more likely to be half-finished configuration than intent,
+	// and a node that says so beats one that ignores it.
+	if c.Kubernetes.Mirror != "" && c.Kubernetes.Version == "" {
+		problems = append(problems, errors.New(
+			"kubernetes.mirror: set without kubernetes.version, so nothing "+
+				"would be pulled from it; a node with no version runs the "+
+				"floor version its image ships"))
+	}
+
+	return problems
 }
 
 func (c *Config) validateNetwork() []error {

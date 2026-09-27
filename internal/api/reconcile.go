@@ -61,6 +61,9 @@ type reconcileResult struct {
 
 	// restarted is the unit bounced to pick the change up, if any.
 	restarted string
+
+	// kubernetes is the k0s version now running, when the apply changed it.
+	kubernetes string
 }
 
 // reconcile re-applies the safe subset of a document to a node that has already
@@ -110,6 +113,11 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 		renderNeeded = true
 	}
 
+	// Written before the version swap, not after. The swap stops and starts
+	// k0s, so a k0s.yaml already in place is read by the version that comes up
+	// -- one restart instead of two, and no window in which the new binary is
+	// running against the old configuration.
+	//
 	// The rendered k0s.yaml is a control-plane concern: on a worker the charts
 	// and the cluster configuration are owned by the controllers, so rewriting
 	// this node's copy changes nothing it runs. Only a controller re-renders and
@@ -130,12 +138,32 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 		// restart is how a changed add-on set or k0s patch is picked up. On a
 		// single node this is a brief control-plane pause; the kubelet and its
 		// pods keep running. See ADR 8.
-		service := k0s.ServiceName(next.Role)
-		if _, err := s.systemd.Restart(ctx, service); err != nil {
-			return reconcileResult{}, fmt.Errorf("restarting %s: %w", service, err)
+		//
+		// Skipped when the version is changing, because that sequence stops and
+		// starts the same service a few lines below: restarting here as well
+		// would take the control plane down twice for one apply.
+		if !plan.Kubernetes {
+			service := k0s.ServiceName(next.Role)
+			if _, err := s.systemd.Restart(ctx, service); err != nil {
+				return reconcileResult{}, fmt.Errorf("restarting %s: %w", service, err)
+			}
+
+			result.restarted = service
+		}
+	}
+
+	// Last of the three, and the only one that takes the node out of service.
+	// It applies to every role: a worker has a k0s binary underneath it too,
+	// even though it renders no k0s.yaml of its own.
+	if plan.Kubernetes {
+		version, err := s.swapKubernetesVersion(ctx, next)
+		if err != nil {
+			return reconcileResult{}, err
 		}
 
-		result.restarted = service
+		result.changed = append(result.changed, "kubernetes")
+		result.kubernetes = version
+		result.restarted = k0s.ServiceName(next.Role)
 	}
 
 	// Persisted last, once the change is live: the document the node acted on
@@ -150,7 +178,9 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 	}
 
 	slog.Warn("configuration reconciled",
-		"changed", result.changed, "restarted", result.restarted)
+		"changed", result.changed,
+		"restarted", result.restarted,
+		"kubernetes", result.kubernetes)
 
 	return result, nil
 }

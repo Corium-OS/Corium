@@ -69,6 +69,15 @@ LABEL org.opencontainers.image.title="Corium" \
 # The kernel module is in-tree and loads on demand. See
 # docs/adr/0006-host-wireguard-overlay.md.
 #
+# skopeo is how a node pulls and verifies a k0s system extension. It is not an
+# exception to the rule below: it copies images between registries and local
+# layouts and runs nothing -- no daemon, no runtime, nothing started at boot.
+# What it brings is containers/image, which is the code that actually implements
+# /etc/containers/policy.json, so the extension a node installs is gated by the
+# same signature requirement that already guards an OS image. Writing that
+# verification ourselves is the kind of thing decision 13 exists to refuse. See
+# docs/adr/0010-kubernetes-version-axis.md.
+#
 # Deliberately absent: any container engine. k0s ships and supervises its own
 # containerd under /var/lib/k0s/bin. A second engine on the host would fight it
 # for cgroups and CNI state.
@@ -82,6 +91,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 		socat \
 		ethtool \
 		wireguard-tools \
+		skopeo \
 		qemu-guest-agent \
 		greenboot \
 		vim \
@@ -93,9 +103,34 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 #
 # The lock file is mounted rather than copied: the build-time trust anchor has
 # no business persisting in the shipped image.
+#
+# ,z relabels the mount for SELinux. Without it the file is unreadable inside
+# the build on any host whose build context is not already labelled for
+# containers -- a podman machine on macOS is one -- and the failure is a bare
+# "Permission denied" from whatever reads it first, which reads like a bug in
+# the script rather than in the mount.
 COPY build/scripts/install-k0s.sh /tmp/install-k0s.sh
-RUN --mount=type=bind,source=build/k0s.lock,target=/run/corium-build/k0s.lock \
+RUN --mount=type=bind,source=build/k0s.lock,target=/run/corium-build/k0s.lock,z \
 	/tmp/install-k0s.sh && rm -f /tmp/install-k0s.sh
+
+# --- The system extension contract -----------------------------------------
+#
+# What the k0s installed above is, is the *floor*: the version a node runs when
+# it has been told nothing. A signed system extension may overlay /usr/bin/k0s
+# with another version from the supported window, which is how the Kubernetes
+# version became an axis of its own. See docs/adr/0010-kubernetes-version-axis.md.
+#
+# SYSEXT_LEVEL is what an extension is matched against, and declaring it here is
+# what makes the whole mechanism work. Without it systemd falls back to matching
+# VERSION_ID, which binds every extension to a Fedora major -- and since bootc
+# never touches /var, an extension installed before an OS rebase survives it and
+# then silently stops matching, leaving a node quietly back on its floor with
+# nothing said. This number is Corium's own contract between an image and the
+# extensions built for it; bumping it is a reviewable event, like the lock file.
+#
+# Appended to /usr/lib/os-release, which /etc/os-release symlinks to, because
+# os-release has no drop-in mechanism.
+RUN echo 'SYSEXT_LEVEL=1' >> /usr/lib/os-release
 
 # --- Writable /opt ---------------------------------------------------------
 #

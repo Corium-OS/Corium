@@ -20,6 +20,22 @@ type ReconcilePlan struct {
 	// RemovedAddons.
 	Addons bool
 
+	// Kubernetes is true when `kubernetes.version` changed.
+	//
+	// It is in the safe subset for the reason ADR 10 gives: it does not define
+	// what the node *is*. The node is the same machine, in the same cluster,
+	// under the same name and address, running a different build of the thing
+	// that serves it.
+	//
+	// It carries a constraint the rest of the safe subset does not -- k0s's
+	// version skew rules -- and that check is not made here. This package knows
+	// nothing about k0s versions, and importing the package that does would
+	// invert the dependency: internal/k0s reads configuration, not the other
+	// way round. The caller applies k0s.CheckSkew before acting on this field,
+	// which is also where it belongs, because refusing early and naming the
+	// rule is the whole point.
+	Kubernetes bool
+
 	// K0s is true when the k0s escape hatch (`k0s.patch`) changed. Like Addons
 	// it renders into /etc/k0s/k0s.yaml, which k0s reconciles when the
 	// controller restarts, so it is re-applied the same way rather than sending
@@ -46,13 +62,13 @@ func (p ReconcilePlan) Reconcilable() bool {
 // Empty reports that the two configurations are equivalent for reconciliation:
 // nothing immutable and nothing in the safe subset changed.
 func (p ReconcilePlan) Empty() bool {
-	return len(p.Immutable) == 0 && !p.Addons && !p.K0s
+	return len(p.Immutable) == 0 && !p.Addons && !p.K0s && !p.Kubernetes
 }
 
 // PlanReconcile classifies the change from a node's running configuration (old)
 // to a proposed one (new), field by field.
 //
-// The safe subset is `addons` and the `k0s` escape hatch. Both render into
+// The safe subset is `addons`, the `k0s` escape hatch and `kubernetes.version`. Both render into
 // /etc/k0s/k0s.yaml, which k0s reconciles when the controller restarts:
 // `addons` are charts k0s installs, and `k0s.patch` is passed through verbatim,
 // so a patch that rewrites something load-bearing is the operator's to own --
@@ -100,6 +116,12 @@ func PlanReconcile(old, next *Config) ReconcilePlan {
 			plan.Immutable = append(plan.Immutable, field.name)
 		}
 	}
+
+	// Compared on version alone. A mirror change with no version change moves
+	// nothing: the node is already running the version it was told to, and
+	// where the artefact came from is settled. It re-applies with the next
+	// version change, which is the only time it is read.
+	plan.Kubernetes = old.Kubernetes.Version != next.Kubernetes.Version
 
 	plan.Addons = !reflect.DeepEqual(old.Addons, next.Addons)
 	plan.RemovedAddons = removedAddons(old.Addons, next.Addons)

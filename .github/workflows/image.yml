@@ -104,16 +104,33 @@ jobs:
             bootc install print-configuration | grep -q '"root-fs-type"'
           echo "image size: $(podman images --format '{{.Size}}' localhost/corium:ci)"
 
-      - name: Verify the pinned k0s version matches the lock file
+      - name: Verify the image ships the floor version the lock file names
         run: |
-          # shellcheck disable=SC1091
-          . build/k0s.lock
+          # The lock file stopped being a single assignment when the Kubernetes
+          # version became an axis of its own: it now names a floor, which is
+          # what the image bakes into /usr/bin/k0s, and a window of versions
+          # extensions may be built for. Only the floor is in the image.
+          # See docs/adr/0010-kubernetes-version-axis.md.
+          floor="$(awk -F= '/^K0S_FLOOR=/ { print $2 }' build/k0s.lock)"
           actual="$(podman run --rm localhost/corium:ci k0s version)"
-          if [ "${actual}" != "${K0S_VERSION}" ]; then
-            echo "image ships k0s ${actual} but build/k0s.lock pins ${K0S_VERSION}" >&2
+
+          if [ "${actual}" != "${floor}" ]; then
+            echo "image ships k0s ${actual} but build/k0s.lock pins ${floor} as the floor" >&2
             exit 1
           fi
-          echo "k0s ${actual} matches the lock file"
+
+          echo "k0s ${actual} matches the floor in the lock file"
+
+          # The window the image will accept extensions for is generated from
+          # the same file at build time, so a mismatch here means the image and
+          # the lock file disagree about what a node may be asked to run.
+          window="$(podman run --rm localhost/corium:ci cat /usr/lib/corium/k0s.window)"
+          echo "${window}"
+
+          if ! printf '%s' "${window}" | grep -qxF "K0S_FLOOR=${floor}"; then
+            echo "the image's k0s.window does not name ${floor} as its floor" >&2
+            exit 1
+          fi
 
       - name: Log in to the registry
         if: steps.plan.outputs.publish == 'true'

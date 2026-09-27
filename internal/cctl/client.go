@@ -608,6 +608,36 @@ func (c *Client) Apply(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/v1/upgrade/apply", []byte("{}"), nil)
 }
 
+// KubernetesVersion moves a node to another k0s version.
+//
+// A bounded call rather than an Apply carrying a document: a rollout would
+// otherwise have to hold every node's configuration and send each one back to
+// the right machine, and the cost of getting that wrong is a node rebuilt as
+// its neighbour. This cannot express anything but the version.
+//
+// It blocks for as long as the node takes -- a download, then a drain, then k0s
+// coming back -- so the caller's context is what bounds it.
+func (c *Client) KubernetesVersion(ctx context.Context, version, mirror string) (string, error) {
+	request, err := json.Marshal(map[string]string{
+		"version": version,
+		"mirror":  mirror,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encoding the request: %w", err)
+	}
+
+	var reply struct {
+		Status     string `json:"status"`
+		Kubernetes string `json:"kubernetes"`
+	}
+
+	if err := c.call(ctx, http.MethodPost, "/v1/kubernetes", request, &reply); err != nil {
+		return "", err
+	}
+
+	return reply.Kubernetes, nil
+}
+
 // Rollback marks a node's previous image as the one to boot next. It does not
 // reboot.
 func (c *Client) Rollback(ctx context.Context) error {

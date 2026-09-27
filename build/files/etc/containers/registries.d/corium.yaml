@@ -13,6 +13,19 @@ docker:
     use-sigstore-attachments: true
   ghcr.io/corium-os/corium-zfs:
     use-sigstore-attachments: true
+  # The k0s system extensions, pulled by skopeo rather than bootc but gated by
+  # the same policy.json. See docs/adr/0010-kubernetes-version-axis.md.
+  ghcr.io/corium-os/k0s:
+    use-sigstore-attachments: true
+
+# And the same for anywhere else, because the scope that matters is not known
+# at build time: corium.kubernetes.mirror may point at any registry reachable
+# from an operator's site, and a mirror changes where an artefact comes from
+# rather than whether it has to be signed. Enabling the lookup is not the same
+# as requiring a signature -- what is required of one is policy.json's business,
+# and a scope it makes no demand about is unaffected by looking.
+default-docker:
+  use-sigstore-attachments: true
 
 # A note on the matching policy in ../policy.json:
 #

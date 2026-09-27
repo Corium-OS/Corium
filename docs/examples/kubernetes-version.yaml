@@ -1,0 +1,34 @@
+#cloud-config
+#
+# Pinning a Kubernetes version, independently of the OS image.
+#
+# The image bakes one k0s version into /usr/bin/k0s -- the floor -- and this
+# block overlays another from the window that image supports, delivered as a
+# signed system extension. A node that declares no version runs the floor and
+# needs no network to do it.
+#
+# Reaching a version outside the window is still an OS upgrade, and k0s moves
+# one minor at a time: see docs/adr/0010-kubernetes-version-axis.md.
+
+corium:
+  role: single
+
+  kubernetes:
+    # A k0s release tag, exactly as upstream writes it. The +k0s.N suffix is
+    # part of the identity: v1.36.4+k0s.0 and v1.36.4+k0s.1 are the same
+    # Kubernetes and a different k0s build of it.
+    version: v1.36.4+k0s.1
+
+    # Optional. Where the extension is pulled from, for a site that cannot
+    # reach the default registry. A repository, with no tag and no digest --
+    # `version` above is what selects the artefact inside it.
+    #
+    # A mirror changes where an artefact comes from, not whether it has to be
+    # signed.
+    mirror: registry.internal.example/corium/k0s
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

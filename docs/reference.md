@@ -38,6 +38,13 @@ list entry are written with `[]`, the way you would index them.
 | `cluster.endpoint` | [§3.3 `cluster`](#33-cluster) |
 | `cluster.subjectAltNames` | [§3.3 `cluster`](#33-cluster) |
 
+### `kubernetes`
+
+| Field | Section |
+|---|---|
+| `kubernetes.version` | [§3.20 `kubernetes`](#320-kubernetes) |
+| `kubernetes.mirror` | [§3.20 `kubernetes`](#320-kubernetes) |
+
 ### `network`
 
 | Field | Section |
@@ -329,6 +336,7 @@ referred to indirectly in the journal.
 |---|---|---|---|---|
 | `role` | enum | conditional | — | Required unless the API is on and the node is waiting to be told (§3.2) |
 | `cluster` | object | no | — | Identity and reachability (§3.3) |
+| `kubernetes` | object | no | — | Which k0s version this node runs (§3.20) |
 | `network` | object | no | — | Addressing and CNI (§3.4) |
 | `storage` | object | no | — | Datastore (§3.5) |
 | `join` | object | conditional | — | Required for `worker` (§3.6) |
@@ -1258,6 +1266,66 @@ changed on a node that has already bootstrapped: `cctl apply` refuses it and
 names it. Change a live stack with `kubectl`, or reset the node.
 
 ---
+
+### 3.20 `kubernetes`
+
+| Key | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `version` | string | no | the image's floor | A k0s release tag, such as `v1.36.4+k0s.1`. Must be inside the window the booted image supports |
+| `mirror` | string | no | the release default | Registry the extension is pulled from, without a tag or digest |
+
+The Kubernetes version is an axis of its own, separate from the OS image. The
+image bakes one version into `/usr/bin/k0s` — the **floor** — and a signed
+system extension may overlay it with another from the window that image
+supports. That is what lets a Fedora security fix land without a Kubernetes
+minor bump, and a Kubernetes minor bump land without a Fedora rebase.
+
+Both fields are optional. A node that declares neither runs its image's floor
+and needs no network to do it, which is deliberate: reaching a version must
+never become a precondition of being able to boot.
+
+```yaml
+corium:
+  role: single
+  kubernetes:
+    version: v1.36.4+k0s.1
+```
+
+**The window.** An image supports three Kubernetes minors: the one its floor is
+on, and the two adjacent. The width comes from k0s's own skew policy rather than
+from taste — upgrades go one minor at a time, controllers first, and a worker
+may trail its controllers by one, so a cluster mid-rollout legitimately spans
+two. What a booted image supports is listed in `/usr/lib/corium/k0s.window`.
+
+Asking for a version outside the window is refused, and reaching one is an OS
+upgrade. The axes are independent, not unbounded.
+
+**Skew.** k0s is stricter than upstream Kubernetes: one minor at a time,
+controllers before workers, and no going back a minor. A change that breaks
+those rules is refused with the rule named, before anything is stopped — a node
+does not discover mid-upgrade that k0s will not start. Note that rolling *back*
+a Kubernetes version is not the free operation an OS rollback is: reverting is a
+second forward move, and k0s does not support downgrading a minor at all.
+
+**Air-gapped sites** set `mirror` to a registry reachable from where the node
+runs. A mirror changes where an artefact comes from, not whether it has to be
+signed — the signature requirement is the same one that guards an OS image.
+
+```yaml
+corium:
+  role: single
+  kubernetes:
+    version: v1.36.4+k0s.1
+    mirror: registry.internal.example/corium/k0s
+```
+
+`mirror` is a repository, not a reference: it carries no tag and no digest,
+because `version` is what selects the artefact inside it.
+
+Day two, `kubernetes.version` is one of the fields `cctl apply` re-applies on a
+running node, alongside `addons` and `k0s.patch` — see
+[ADR 8](adr/0008-day-two-reconcile.md). The reasoning for the whole design is in
+[ADR 10](adr/0010-kubernetes-version-axis.md).
 
 ## 4. How the hostname is settled
 

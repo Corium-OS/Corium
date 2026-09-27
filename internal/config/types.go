@@ -43,6 +43,11 @@ type Config struct {
 	// Cluster carries cluster-wide identity and reachability settings.
 	Cluster Cluster `yaml:"cluster,omitempty" json:"cluster,omitempty"`
 
+	// Kubernetes selects which version of k0s this node runs, independently of
+	// the OS image it booted. See the Kubernetes documentation and
+	// docs/adr/0010-kubernetes-version-axis.md.
+	Kubernetes Kubernetes `yaml:"kubernetes,omitempty" json:"kubernetes,omitempty"`
+
 	// Network configures pod and service addressing and the CNI.
 	Network Network `yaml:"network,omitempty" json:"network,omitempty"`
 
@@ -98,6 +103,42 @@ type Config struct {
 
 	// K0s is the escape hatch to the underlying k0s configuration.
 	K0s K0s `yaml:"k0s,omitempty" json:"k0s,omitempty"`
+}
+
+// Kubernetes selects the k0s version a node runs.
+//
+// The version is an axis of its own, separate from the OS image: the image
+// ships a floor at /usr/bin/k0s, and a signed system extension may overlay it
+// with another version from the window that image supports. An operator takes a
+// Fedora security fix without a Kubernetes minor bump, and a Kubernetes minor
+// bump without a Fedora rebase, which one axis could express neither of.
+//
+// Both fields are optional. A node that declares nothing runs its image's floor
+// and needs no network to do it, which is what keeps this feature from becoming
+// a dependency of being able to boot at all.
+//
+// See docs/adr/0010-kubernetes-version-axis.md.
+type Kubernetes struct {
+	// Version is the k0s release to run, as upstream tags it: v1.36.4+k0s.1.
+	//
+	// It must fall inside the window the booted image supports, which is
+	// checked at bootstrap rather than here -- the window is a file in /usr, and
+	// validation reads nothing. Moving outside the window is still an OS
+	// upgrade; the axes are independent, not unbounded.
+	//
+	// Empty means the image's floor.
+	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+
+	// Mirror is the registry the extension is pulled from, without a tag: for
+	// example registry.internal.example/corium/k0s.
+	//
+	// This is how an air-gapped site is served. Rather than inventing an
+	// offline mode, a node is pointed at a registry that is reachable from
+	// where it runs, and the signature requirement is unchanged -- a mirror
+	// redirects where an artefact comes from, not whether it has to be signed.
+	//
+	// Empty means the default published by this image's release.
+	Mirror string `yaml:"mirror,omitempty" json:"mirror,omitempty"`
 }
 
 // HA configures a highly available control plane.
