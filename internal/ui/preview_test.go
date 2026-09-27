@@ -2,6 +2,7 @@ package ui_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,12 @@ import (
 
 type previewNode struct {
 	node nodeinfo.Node
-	down bool
+
+	// down makes the connector fail with the message a real unreachable node
+	// produces. Closing an httptest server would do it too, but its error
+	// names the ephemeral port it was listening on, which is confusing in a
+	// picture of a fleet.
+	down string
 }
 
 func (p *previewNode) client(t *testing.T) *cctl.Client {
@@ -63,10 +69,6 @@ func (p *previewNode) client(t *testing.T) *cctl.Client {
 	server := httptest.NewTLSServer(mux)
 	t.Cleanup(server.Close)
 
-	if p.down {
-		server.Close()
-	}
-
 	return cctl.Dial(strings.TrimPrefix(server.URL, "https://"), api.Fingerprint(server.Certificate().Raw))
 }
 
@@ -79,33 +81,46 @@ func TestPreview(t *testing.T) {
 		t.Skip("set CORIUM_UI_PREVIEW=127.0.0.1:7592 to serve the dashboard")
 	}
 
-	fleet := map[string]*previewNode{
-		"192.168.1.51:7443": {node: nodeinfo.Node{
-			Hostname: "corium-00a7a34c", MachineID: "5f2c1b9e4a7d43c8b1e6f0a2d9c37e41",
-			Bootstrapped: true, Role: "single", Cluster: "apitest",
+	const image = "ghcr.io/corium-os/corium:0.3"
+	const digest = "sha256:bd67161f2c4a8e90d1b3"
+
+	controller := func(name string, uptime int64) *previewNode {
+		return &previewNode{node: nodeinfo.Node{
+			Hostname: name, MachineID: "5f2c1b9e4a7d43c8b1e6f0a2d9c37e41",
+			Bootstrapped: true, Role: "controller", Cluster: "apitest",
 			OS: nodeinfo.OS{Name: "Fedora Linux 44 (Forty Four)", Kernel: "7.2.5-200.fc44.x86_64",
-				Booted: &nodeinfo.Deployment{Image: "ghcr.io/corium-os/corium:0.3", Digest: "sha256:bd67161f2c4a8e90d1b3", Version: "0.3.6"}},
+				Booted: &nodeinfo.Deployment{Image: image, Digest: digest, Version: "0.3.6"}},
 			Kubernetes: nodeinfo.Kubernetes{Version: "v1.36.4+k0s.0", Service: "k0scontroller.service", Active: true},
-			Health:     nodeinfo.Health{Greenboot: "passed", UptimeSeconds: 711},
+			Health:     nodeinfo.Health{Greenboot: "passed", UptimeSeconds: uptime},
 			Management: nodeinfo.Management{ClaimedBy: "pairing-code"},
-		}},
-		"192.168.1.52:7443": {node: nodeinfo.Node{
-			Hostname: "corium-w1", Bootstrapped: true, Role: "worker", Cluster: "apitest",
+		}}
+	}
+
+	worker := func(name string, uptime int64) *previewNode {
+		return &previewNode{node: nodeinfo.Node{
+			Hostname: name, Bootstrapped: true, Role: "worker", Cluster: "apitest",
 			OS: nodeinfo.OS{Name: "Fedora Linux 44 (Forty Four)", Kernel: "7.2.5-200.fc44.x86_64",
-				Booted: &nodeinfo.Deployment{Image: "ghcr.io/corium-os/corium:0.3", Digest: "sha256:bd67161f2c4a8e90d1b3"}},
+				Booted: &nodeinfo.Deployment{Image: image, Digest: digest, Version: "0.3.6"}},
 			Kubernetes: nodeinfo.Kubernetes{Version: "v1.36.4+k0s.0", Service: "k0sworker.service", Active: true},
-			Health:     nodeinfo.Health{Greenboot: "passed", UptimeSeconds: 259201},
+			Health:     nodeinfo.Health{Greenboot: "passed", UptimeSeconds: uptime},
 			Management: nodeinfo.Management{ClaimedBy: "configuration"},
-		}},
-		"192.168.1.53:7443": {node: nodeinfo.Node{
-			Hostname: "corium-w2", Bootstrapped: true, Role: "worker", Cluster: "apitest",
-			OS: nodeinfo.OS{Name: "Fedora Linux 44 (Forty Four)", Kernel: "7.2.5-200.fc44.x86_64",
-				Booted: &nodeinfo.Deployment{Image: "ghcr.io/corium-os/corium:0.3", Digest: "sha256:bd67161f2c4a8e90d1b3"},
-				Staged: &nodeinfo.Deployment{Image: "ghcr.io/corium-os/corium:0.4", Digest: "sha256:9ac41e77b0d2f5386c1a"}},
-			Kubernetes: nodeinfo.Kubernetes{Version: "v1.36.4+k0s.0", Service: "k0sworker.service", Active: true},
-			Health:     nodeinfo.Health{Greenboot: "passed", UptimeSeconds: 86_400},
-		}},
-		"192.168.1.54:7443": {down: true},
+		}}
+	}
+
+	// Three states worth seeing: healthy, an image staged and waiting for a
+	// reboot, and a machine that did not answer.
+	staged := worker("corium-w2", 86_400)
+	staged.node.OS.Staged = &nodeinfo.Deployment{
+		Image: "ghcr.io/corium-os/corium:0.4", Digest: "sha256:9ac41e77b0d2f5386c1a",
+	}
+
+	fleet := map[string]*previewNode{
+		"192.168.1.51:7443": controller("corium-c1", 711),
+		"192.168.1.52:7443": controller("corium-c2", 259_140),
+		"192.168.1.53:7443": controller("corium-c3", 259_100),
+		"192.168.1.54:7443": worker("corium-w1", 259_201),
+		"192.168.1.55:7443": staged,
+		"192.168.1.56:7443": {down: "dial tcp 192.168.1.56:7443: connect: no route to host"},
 	}
 
 	addresses := make([]string, 0, len(fleet))
@@ -116,6 +131,10 @@ func TestPreview(t *testing.T) {
 	sort.Strings(addresses)
 
 	server, err := ui.NewServer(listen, addresses, func(address string) (*cctl.Client, error) {
+		if reason := fleet[address].down; reason != "" {
+			return nil, errors.New(reason)
+		}
+
 		return fleet[address].client(t), nil
 	})
 	if err != nil {

@@ -242,7 +242,15 @@ select { border-radius: var(--radius); padding: 0.35rem 0.6rem; }
 
 .card {
   position: relative;
-  display: block;
+
+  /* A column rather than a block: the card is a <button>, and a button centres
+     its content vertically whatever its display is. In a grid row sized by the
+     tallest card that put a short one -- an unreachable node, which has the
+     least to say -- floating in the middle of its own box. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   width: 100%;
   text-align: left;
   padding: 1rem 1.1rem 1.1rem;
