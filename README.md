@@ -13,16 +13,17 @@
   <a href="https://github.com/Corium-OS/Corium/releases/latest"><img src="https://img.shields.io/github/v/release/Corium-OS/Corium?include_prereleases&sort=semver&logo=github&label=release" alt="Latest release"></a>
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/ci.yml?branch=main&label=CI&logo=github" alt="CI"></a>
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/image.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/image.yml?branch=main&label=image&logo=podman&logoColor=white" alt="Image build"></a>
-  <img src="https://img.shields.io/badge/Kubernetes-1.36-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes 1.36">
-  <img src="https://img.shields.io/badge/k0s-v1.36.4%2Bk0s.0-0F1689" alt="k0s v1.36.4+k0s.0">
+  <img src="https://img.shields.io/badge/Kubernetes-1.34%E2%80%931.36-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes 1.34 to 1.36">
+  <img src="https://img.shields.io/badge/k0s%20floor-v1.36.4%2Bk0s.0-0F1689" alt="k0s floor v1.36.4+k0s.0">
   <img src="https://img.shields.io/badge/Fedora-bootc-51A2DA?logo=fedora&logoColor=white" alt="Fedora bootc">
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Corium-OS/Corium?logo=go&logoColor=white&label=Go" alt="Go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Corium-OS/Corium?color=blue" alt="License: MIT"></a>
 </p>
 
 Corium is [Fedora bootc](https://docs.fedoraproject.org/en-US/bootc/) with
-[k0s](https://k0sproject.io/) baked into the read-only system and a small declarative
-configuration layer on top of cloud-init.
+[k0s](https://k0sproject.io/) in the read-only system, a Kubernetes version you can choose
+independently of the OS image, and a small declarative configuration layer on top of
+cloud-init.
 
 > **Status: 0.x.** The architecture is settled and the path works end to end — a node boots,
 > joins, upgrades, drains itself before rebooting, rolls back when it comes up broken, and
@@ -69,10 +70,13 @@ scanner you already run, promote it between environments by moving a tag, and ro
 atomically. There is no separate image-building toolchain to learn, because the one you use
 for your applications already works.
 
-**Kubernetes ships with the OS.** The k0s binary lives in the read-only `/usr`. Upgrading
-Kubernetes means booting a new OS image — one version axis, one upgrade mechanism, one
-rollback path. A node is a disposable artefact rebuilt from a digest, not a machine that
-accumulates state.
+**Kubernetes ships with the OS, and its version is still yours to choose.** The k0s binary
+lives in the read-only `/usr`, so a node always has a working Kubernetes and needs no network
+to get one. What that binary *is* can be overlaid by a signed system extension, which makes
+the Kubernetes version an axis of its own: a Fedora security fix no longer drags a Kubernetes
+minor bump behind it, and moving between Kubernetes releases no longer means rebasing the OS.
+Both axes stay immutable — nothing is ever written in place — and a node remains a disposable
+artefact rebuilt from a digest rather than a machine that accumulates state.
 
 **Configuration is cloud-init, where cloud-init exists.** Not a bespoke API, not a new config
 language: the mechanism every hypervisor and cloud already speaks. Corium adds a `corium:`
@@ -163,7 +167,7 @@ attached to the release itself, and how to check what you got.
 
 **Operating**
 
-- [**Upgrades**](docs/upgrades.md) — moving a node to a new image, rolling back, upgrading a cluster
+- [**Upgrades**](docs/upgrades.md) — moving a node to a new image, changing its Kubernetes version, rolling back
 - [**cctl**](docs/cli.md) — every command of the management CLI, what each role reaches, and how to read a refusal
 - [**Building your own image**](docs/derived-images.md) — deriving an image, signing it so nodes accept it
 - [**Cilium**](docs/cilium.md) — replacing kube-router, including the kube-proxy-free variant

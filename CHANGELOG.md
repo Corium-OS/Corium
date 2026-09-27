@@ -99,6 +99,17 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Changed
 
+- **`build/k0s.lock` changed shape, and `mise run k0s-lock` became
+  `mise run k0s-window`.** The file used to pin one version as a few shell
+  assignments; it now names a `K0S_FLOOR` — the version baked into
+  `/usr/bin/k0s` — above a table of the versions extensions may be built for.
+  This affects nobody running Corium: the lock is a build-time trust anchor and
+  never ships in the image. It does affect anyone **deriving an image** who
+  reads or rewrites that file, or who scripted the old task name, because the
+  old format no longer parses as shell. See
+  [upgrades](docs/upgrades.md#upgrading-kubernetes-specifically) for the new
+  layout and what each half of it decides.
+
 - **The disk and ISO builder is pinned, and comes from image-builder.**
   `bootc-image-builder` was archived upstream in June 2026 and folded into
   [image-builder](https://github.com/osbuild/image-builder), which keeps

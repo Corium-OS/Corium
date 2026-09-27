@@ -169,9 +169,14 @@ It is off unless a node's configuration asks for it. See [cctl](/docs/reference/
 dependencies that keeps its state under `/var/lib/k0s` — which fits the
 filesystem contract exactly: binary in `/usr`, state in `/var`.
 
-One version axis follows. The image determines the Kubernetes version, so
-nothing can move it independently, and upgrading a cluster is
-[rolling a new image](/docs/guides/upgrades/) rather than a separate procedure.
+The image carries a Kubernetes version, but no longer decides it. That binary
+in `/usr` is a *floor* — what a node runs when it is told nothing, and what it
+falls back to — and a signed system extension can overlay it with another
+version from the window the image supports. So the OS and Kubernetes move on
+separate axes: [rolling a new image](/docs/guides/upgrades/) upgrades the OS, and
+`kubernetes.version` or `cctl k8s upgrade` moves Kubernetes, without either
+dragging the other along. Neither is ever written in place. See
+[ADR 10](/docs/decisions/adr-0010-kubernetes-version-axis/).
 
 ## What Corium is not
 
