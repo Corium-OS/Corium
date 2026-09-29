@@ -107,9 +107,11 @@ the firmware's boot order — see [bare metal](install/baremetal.md).
 
 **A PC installed from the ISO boots to a login prompt with no account.** No
 configuration reached it, so `corium-agent` left it unconfigured and Corium
-creates no default user. Nothing is lost: no bootstrap marker was written, so
-plugging in a `CIDATA` seed stick and rebooting configures the node then. See
-[bare metal](install/baremetal.md#if-you-install-without-a-seed).
+creates no default user. That is not a dead end: the node is serving its
+enrolment route and the console shows a pairing code above the prompt, so
+`cctl enroll <address> --code <code> --config node.yaml` gives it both a role
+and a login. A `CIDATA` seed stick and a reboot work too — no bootstrap marker
+was written. See [bare metal](install/baremetal.md#if-you-install-without-a-seed).
 
 **An interrupted install leaves nothing bootable.** Anaconda wipes the disk early.
 Do not stop the VM during an install.

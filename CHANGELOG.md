@@ -20,10 +20,9 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   other. It says which firmware settings matter, why the boot order has to be
   disk first and USB second, and why booting once without the seed costs
   nothing — no bootstrap marker is written, so the node configures itself on
-  the next boot. A section covers installing with no seed at all: what the
-  machine is then (a host with no account, no API listening and k0s stopped),
-  why that is recoverable, and why neither the `corium.config=` kernel argument
-  nor the pairing-code flow is a way to avoid a seed. This path was previously
+  the next boot. A section covers installing with no seed at all, which the
+  API default below turns into a supported path rather than a dead end: the
+  node prints a pairing code and waits to be enrolled. This path was previously
   two rows in a table pointing at the quick start.
 
 ### Changed
