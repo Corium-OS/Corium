@@ -12,6 +12,28 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **An install guide for a PC in front of you.**
+  [Bare metal](docs/install/baremetal.md) covers a desktop, a tower or a
+  mini-PC from two USB sticks: the unattended ISO on one, a NoCloud seed on the
+  other. It says which firmware settings matter, why the boot order has to be
+  disk first and USB second, and why booting once without the seed costs
+  nothing — no bootstrap marker is written, so the node configures itself on
+  the next boot. This path was previously two rows in a table pointing at the
+  quick start.
+
+### Changed
+
+- **Downloads is shorter and in the order you would do it.** Install `cctl`,
+  fetch the artefact, check it, or build it yourself — with the reasoning for
+  why nothing is attached to the GitHub release moved below the instructions
+  instead of interleaved with them. Nothing about how artefacts are published
+  changed.
+- **The documentation's examples name 0.4.0.** Every version in a command, a
+  filename or an image tag was still 0.3.6, and the version ladder still told
+  you to track `0.3`.
+
 ## [0.4.0] - 2026-09-27
 
 ### Added

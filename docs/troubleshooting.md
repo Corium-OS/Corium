@@ -99,7 +99,14 @@ the precedence order in the [configuration reference](reference.md).
 **Installing from the ISO loops forever.** The boot order must be **disk first,
 ISO second**. An empty disk has no UEFI boot entry, so the firmware falls through
 to the ISO and installs; afterwards the disk has an entry and wins. With the ISO
-first, the node reinstalls itself on every reboot.
+first, the node reinstalls itself on every reboot. On a physical machine that is
+the firmware's boot order — see [bare metal](install/baremetal.md).
+
+**A PC installed from the ISO boots to a login prompt with no account.** No
+configuration reached it, so `corium-agent` left it unconfigured and Corium
+creates no default user. Nothing is lost: no bootstrap marker was written, so
+plugging in a `CIDATA` seed stick and rebooting configures the node then. See
+[bare metal](install/baremetal.md#5-configure-it).
 
 **An interrupted install leaves nothing bootable.** Anaconda wipes the disk early.
 Do not stop the VM during an install.

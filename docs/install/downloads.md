@@ -1,79 +1,120 @@
 # Downloads
 
-Every release publishes four things, all signed:
+Every release publishes four artefacts, all signed:
 
-| | What it is | Use it for |
+| Artefact | Where | Use it for |
 |---|---|---|
-| The OS image | `ghcr.io/corium-os/corium` | Upgrading a node that already exists, and building your own artefacts |
-| An installer ISO | `ghcr.io/corium-os/corium-iso` | Bare metal. Installs unattended |
-| A qcow2 disk | `ghcr.io/corium-os/corium-qcow2` | Proxmox, KVM, libvirt. This is what [`deploy/proxmox/`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox) takes as `DISK_IMAGE` |
+| Installer ISO | `ghcr.io/corium-os/corium-iso` | Bare metal. Installs unattended |
+| qcow2 disk | `ghcr.io/corium-os/corium-qcow2` | Proxmox, KVM, libvirt, most clouds' import paths |
+| OS image | `ghcr.io/corium-os/corium` | Upgrading a node, `bootc install`, derived images |
 | `cctl` | Attached to the release page | Managing nodes from your own machine |
 
-**The exact commands for a given version, with its digests, are on that
-version's release page:
-[latest release](https://github.com/Corium-OS/Corium/releases/latest).** The
-coordinates change every release, so they are published with the release
-rather than written down here.
+> **The exact coordinates and digests for a version are on its release page:
+> [latest release](https://github.com/Corium-OS/Corium/releases/latest).** They
+> change every release, so they are published with the release rather than
+> written down here. Substitute your version for `0.4.0` below.
 
-## Before you start
+---
 
-Each route below wants a different handful of tools, and no route wants all of
-them:
+## Install `cctl`
 
-- `curl` and `tar`, for anything fetched by hand.
-- `sha256sum`, to check what you got. macOS has no such command; `shasum -a
-  256` stands in for it everywhere below.
-- [mise](https://mise.jdx.dev), for the one-line `cctl` install.
-- [`cosign`](https://github.com/sigstore/cosign), to verify a signature.
-- [`oras`](https://oras.land) for the registry route, or `jq` for the same
-  bytes with `curl` alone.
+`cctl` runs on your machine, never on a node. Archives are published for linux
+and macOS, on amd64 and arm64. There is no Windows build.
 
-## Installing `cctl`
-
-The client runs on your machine and never on a node. Archives are attached to
-each release for linux and macOS, on amd64 and arm64.
-
-With [mise](https://mise.jdx.dev), which picks the archive matching your
-machine:
+With [mise](https://mise.jdx.dev):
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.6'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.4.0'
 ```
 
-Both the quotes and the version are load-bearing, and leaving either out fails
-in a way whose error message does not point at either.
+Quote it and pin it — both are load-bearing:
 
-The quotes are for your shell: zsh treats `[...]` as a glob, so an unquoted
-command never reaches mise at all — it reports `no matches found` before
-anything runs.
+- **The quotes** are for your shell. zsh treats `[...]` as a glob, so an
+  unquoted command fails with `no matches found` before mise ever runs.
+- **The version** because an unpinned install resolves to the newest tag,
+  **release candidates included**. mise also refuses a release younger than its
+  `age` setting allows, so a freshly published version is briefly not
+  installable (`no versions found ... matching date filter`).
 
-The version is for two reasons. mise refuses a release younger than its `age`
-setting allows, which is a supply-chain guard and means a freshly published
-version is not installable for a while (`no versions found ... matching date
-filter`). And an unpinned install resolves to the newest tag, **release
-candidates included** — pinning is how you say you meant the stable one.
-
-By hand, checking what you downloaded:
+By hand instead:
 
 ```bash
-version=0.3.6
+version=0.4.0
 os=linux          # darwin on macOS
 arch=amd64        # arm64 on Apple silicon, and on 64-bit Arm linux
 base=https://github.com/Corium-OS/Corium/releases/download/v${version}
 
 curl -fsSLO "${base}/cctl_${version}_${os}_${arch}.tar.gz"
 curl -fsSLO "${base}/SHA256SUMS"
-sha256sum --check --ignore-missing SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS    # shasum -a 256 on macOS
 tar -xzf "cctl_${version}_${os}_${arch}.tar.gz"
 ```
 
 `--ignore-missing` because `SHA256SUMS` lists every platform and you downloaded
 one. Without it the check fails on the three archives you do not have, which
-looks exactly like the failure that would matter. On macOS the same check is
-`shasum -a 256 --check --ignore-missing SHA256SUMS`.
+looks exactly like the failure that would matter.
 
-The checksum file is signed with the same key as the OS image, so verifying it
-verifies every binary underneath:
+Or build it: `git clone https://github.com/Corium-OS/Corium.git && mise run
+build` produces `bin/cctl` and `bin/corium-agent`. See [cctl](../cli.md) for
+what it does.
+
+---
+
+## Get the ISO or the qcow2
+
+The disk artefacts live in a registry, not on the release page. Three routes to
+the same bytes — pick whichever you have tooling for.
+
+```bash
+# With oras. One command, and it names the file for you.
+oras pull ghcr.io/corium-os/corium-iso:0.4.0
+```
+
+```bash
+# Without oras. ghcr issues pull tokens anonymously for public packages.
+token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pull" | jq -r .token)
+curl -L -H "Authorization: Bearer ${token}" -o corium-0.4.0-x86_64.iso \
+  https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<layer digest from the release notes>
+```
+
+```
+# From a browser, no tooling. The release notes carry the link.
+https://<cdn>/corium-0.4.0-x86_64.iso
+```
+
+The third is a CDN mirror. It is a convenience, not the release: it is allowed
+to be down, and if it ever disagreed with the registry, the registry is right.
+Nothing published there is overwritten — every file carries its version in its
+name, so a URL that worked once keeps meaning the same bytes. There is no index
+to browse, so the link for a version lives in that version's release notes.
+
+---
+
+## Check what you got
+
+Two different questions, two different answers.
+
+**Who built this, and from what?** The signature, attached to the artefact in
+the registry. It needs no key you have to obtain first:
+
+```bash
+cosign verify ghcr.io/corium-os/corium-iso@sha256:<manifest digest> \
+  --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+A passing check names the workflow run, commit and tag that produced the
+artefact, recorded in a public transparency log.
+
+**Did I receive those exact bytes?** The hash, published in the release notes:
+
+```bash
+sha256sum corium-0.4.0-x86_64.iso
+# must equal the hash printed in the release notes
+```
+
+For `cctl`, the equivalent is the signed checksum file — verifying it verifies
+every binary under it:
 
 ```bash
 curl -fsSLO "${base}/SHA256SUMS.sig"
@@ -86,115 +127,39 @@ A recent `cosign` prints `Flag --signature has been deprecated, please use
 on the next line. `--bundle` is not the flag to reach for instead: it expects a
 Sigstore bundle, and what is published here is a plain signature.
 
-There is no Windows build. Not a decision against it — nobody has run `cctl`
-there once, and a download page that lists a platform nobody has started is a
-download page worth less on every other line.
+---
 
-From a checkout instead, which is what a release binary is built from anyway:
+## Or build them yourself
 
-```bash
-git clone https://github.com/Corium-OS/Corium.git && cd Corium
-mise run build          # produces bin/cctl and bin/corium-agent
-```
+None of the above is required. `mise run artefacts` produces the qcow2, the raw
+disk and the ISO from any image you can pull, including one you have modified.
+It needs a Linux host and `sudo`, because the builder mounts the filesystem it
+creates. See the [quick start](../quickstart.md).
 
-See [cctl](../cli.md) for what it does.
+A raw disk image is not published: it would be roughly 5 GB, and the ISO already
+covers bare metal.
 
 ---
 
-## Three ways to the same bytes
+## Why it is published this way
 
-```bash
-# 1. With oras. One command, and it names the file for you.
-oras pull ghcr.io/corium-os/corium-iso:0.3.6
+**Nothing is attached to the GitHub release.** A release asset must be under
+2 GiB and the ISO is about 2.4 GB. The qcow2 would fit, but publishing only the
+artefact that happens to fit would read as though the ISO had been forgotten.
+The constraint turned out to be worth something: a release asset is an opaque
+blob whose provenance ends at whoever uploaded it, while a registry artefact is
+addressed by digest and carries a signature. That is the difference between
+*this is the file we meant to give you* and *this is a file*.
 
-# 2. Without oras. The registry issues pull tokens anonymously for public
-#    packages, so curl is enough.
-token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pull" | jq -r .token)
-curl -L -H "Authorization: Bearer ${token}" -o corium-0.3.6-x86_64.iso \
-  https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<the digest from the release notes>
+**`cctl` is attached**, because the same reasoning points the other way for it:
+three megabytes, fetched by a person setting up a workstation, and the
+installers people already use read release assets rather than registries.
 
-# 3. From a browser, no tooling at all. The release notes carry the link.
-https://<cdn>/corium-0.3.6-x86_64.iso
-```
-
-The third is a CDN copy. There is no index to browse, so the link for a given
-version lives in that version's release notes rather than being guessable.
-
-## Why the disk artefacts are not attached to the release
-
-A GitHub release asset must be under 2 GiB. The installer ISO is about 2.4 GB,
-so it cannot be one. The qcow2 would fit, but attaching only the disk artefact
-that happens to fit would read as though the ISO had been forgotten rather than
-left out deliberately, so both are published the same way.
-
-That constraint turned out to be worth something. A file attached to a release
-page is an opaque blob whose provenance ends at whoever uploaded it. An
-artefact in a registry is addressed by digest and can carry a signature, which
-is the difference between *this is the file we meant to give you* and *this is
-a file*.
-
-`cctl` is attached, because the same reasoning points the other way for it. It
-is three megabytes, it is fetched by a person setting up a workstation rather
-than by a machine, and the installers people already use —
-`mise use 'github:Corium-OS/Corium[exe=cctl]@0.3.6'` — read release assets and
-not registries.
-Signing it as a blob rather than as an OCI artefact costs one extra file and
-keeps it reachable by the tools that would actually go looking.
-
-## Why there is a mirror
-
-The registry is the right place to keep a release and an awkward place to send
-someone who just wants to try an operating system: route 1 means installing a
-tool, route 2 means a token and a digest. Neither is a link you can send to a
-colleague.
-
-So the same bytes are also served from a CDN. Two things are worth being clear
-about:
-
-- **It is allowed to be down.** If it is, the release still happened and the
-  first two routes still work. Release notes offer a download link only when
-  the upload and a read-back as an anonymous client both succeeded.
-- **It is a convenience, not the release.** If the CDN and the registry ever
-  disagreed, the registry is right. You do not have to take that on trust —
-  the check below is what settles it.
-
-Nothing published there is ever overwritten. Every file carries its version in
-its name, so a URL that worked once keeps meaning the same bytes.
-
-## Checking what you downloaded
-
-Two different questions, and they need two different answers.
-
-**Who built this, and from what?** That is the signature. It is attached to the
-artefact in the registry, and verifying it needs no key you have to obtain from
-somewhere first:
-
-```bash
-cosign verify ghcr.io/corium-os/corium-iso@sha256:<manifest digest> \
-  --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-A passing check tells you which workflow run produced the artefact, from which
-commit and which tag, recorded in a public transparency log.
-
-**Did I receive those exact bytes?** That is the hash. Every release publishes
-the SHA-256 of each artefact in its notes:
-
-```bash
-sha256sum corium-0.3.6-x86_64.iso
-# must equal the hash printed in the release notes
-```
-
-### Why there is no `.sha256` file next to the download
-
-Because it would not prove anything. A checksum file served from the same place
-as the file it describes is only as trustworthy as that place: anyone able to
-replace one can replace the other.
-
-The hash in the release notes is different. It is the digest of the artefact's
-layer, and that digest is named inside the manifest that `cosign` signed. So
-the chain closes:
+**There is no `.sha256` file next to the download**, because it would prove
+nothing — a checksum served from the same place as the file it describes is
+only as trustworthy as that place. The hash in the release notes is different:
+it is the digest of the artefact's layer, and that digest is named inside the
+manifest `cosign` signed. The chain closes:
 
 ```
 cosign verify   ->  this manifest was produced by that workflow run
@@ -202,19 +167,19 @@ the manifest    ->  names this layer digest
 sha256sum       ->  the file you hold has that digest
 ```
 
-Each link is checkable on its own, and none of them depends on the download
-host being honest. That is what makes it reasonable to fetch 2.4 GB from
-whichever route is fastest for you, and why a checksum file sitting beside the
-download would not have added anything.
+No link depends on the download host being honest, which is what makes it
+reasonable to fetch 2.4 GB from whichever route is fastest for you.
 
-## Building them yourself
+---
 
-Nothing above is required. `mise run artefacts` produces the qcow2, the raw disk
-and the ISO locally from any image you can pull, including one you have
-modified. It needs a Linux host and `sudo`, because the builder —
-[image-builder](https://github.com/osbuild/image-builder) for the disks, the
-`bootc-image-builder` entry point it still ships for the ISO — mounts the
-filesystem it creates. See the [quick start](../quickstart.md).
+## Tools these routes want
 
-A raw disk image is not published. It would be roughly 5 GB, and the ISO
-already covers bare metal.
+No route wants all of them.
+
+| Tool | Needed for |
+|---|---|
+| [mise](https://mise.jdx.dev) | The one-line `cctl` install, and building artefacts |
+| `curl`, `tar` | Anything fetched by hand |
+| `sha256sum` | Checking what you got. macOS: `shasum -a 256` |
+| [`cosign`](https://github.com/sigstore/cosign) | Verifying a signature |
+| [`oras`](https://oras.land) or `jq` | The registry routes |

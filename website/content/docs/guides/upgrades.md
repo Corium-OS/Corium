@@ -69,7 +69,7 @@ sudo bootc status
 sudo bootc upgrade
 
 # Or move it to a different image or tag.
-sudo bootc switch ghcr.io/corium-os/corium:0.3
+sudo bootc switch ghcr.io/corium-os/corium:0.4
 ```
 
 From your workstation, `cctl upgrade <node> --image ...` does the same thing
@@ -79,8 +79,8 @@ Neither reboots by default. They stage a deployment for the next boot, which is
 what makes the maintenance window yours to choose:
 
 ```
-Queued for next boot: ghcr.io/corium-os/corium:0.3
-  Version: 0.3.6
+Queued for next boot: ghcr.io/corium-os/corium:0.4
+  Version: 0.4.0
   Digest: sha256:38c2194904b1de400a6f2366760c85dae5e45bb7f5f500612bb428817e850bb6
 ```
 
@@ -248,15 +248,15 @@ accepts.
 | Tag | Moves | You get |
 |---|---|---|
 | `corium@sha256:...` | Never | Exactly one image. The strongest pin |
-| `corium:0.3.6` | Never | One release |
-| `corium:0.3` | On patch releases | Fixes, no new behaviour |
+| `corium:0.4.0` | Never | One release |
+| `corium:0.4` | On patch releases | Fixes, no new behaviour |
 | `corium:latest` | On every release | Whatever is newest |
 | `corium:main` | On every push to `main` | Development builds, unreleased |
 
-**Track `0.3`.** It moves only on patch releases, which do not change
-behaviour, so it picks up fixes without you deciding anything. Pin `0.3.6`
+**Track `0.4`.** It moves only on patch releases, which do not change
+behaviour, so it picks up fixes without you deciding anything. Pin `0.4.0`
 exactly if you would rather choose the moment yourself, and read the changelog
-before moving to `0.4`: a minor release may require a configuration change, and
+before moving to `0.5`: a minor release may require a configuration change, and
 it will say which.
 
 Three things the ladder does not offer. There is no major rung below 1.0,
@@ -264,7 +264,7 @@ because semantic versioning lets a `0.y` minor release break things and a `0`
 tag would promise what the version number withholds. `latest` is a claim about
 recency rather than compatibility — it crosses the releases where breaking
 changes live by definition, so it is not a tag to run a cluster on. And
-prereleases publish only their exact tag: `0.3.0-rc.1` never becomes `0.3` or
+prereleases publish only their exact tag: `0.4.0-rc.1` never becomes `0.4` or
 `latest`, so a node following a stable tag will not pick up a release
 candidate.
 
@@ -350,7 +350,7 @@ signature is attached to the image digest rather than to a tag, because tags
 move and a signature on a moving tag says nothing about what it points at now.
 
 ```bash
-cosign verify ghcr.io/corium-os/corium:0.3 \
+cosign verify ghcr.io/corium-os/corium:0.4 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -358,7 +358,7 @@ cosign verify ghcr.io/corium-os/corium:0.3 \
 Verified output looks like this:
 
 ```
-Verification for ghcr.io/corium-os/corium:0.3 --
+Verification for ghcr.io/corium-os/corium:0.4 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -372,7 +372,7 @@ Running it with an empty `DOCKER_CONFIG` is a quick way to tell:
 
 ```bash
 mkdir -p /tmp/emptycfg && echo '{}' > /tmp/emptycfg/config.json
-DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:0.3 \
+DOCKER_CONFIG=/tmp/emptycfg cosign verify ghcr.io/corium-os/corium:0.4 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -403,7 +403,7 @@ break the cluster rather than secure it.
 Verify it against a node yourself:
 
 ```bash
-cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:0.3
+cosign verify --key /usr/share/corium/cosign.pub ghcr.io/corium-os/corium:0.4
 ```
 
 **Why two signatures rather than one.** A node cannot enforce the keyless one:

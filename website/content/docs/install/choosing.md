@@ -16,9 +16,10 @@ node is told what it is. Pick the row that matches your target.
 |---|---|---|
 | Proxmox, KVM or libvirt | [Proxmox](/docs/install/proxmox/) | cloud-init, from a snippet on the host |
 | An OpenStack cloud | [OpenStack](/docs/install/openstack/) | cloud-init, through the metadata service |
+| A desktop PC, a tower or a mini-PC in front of you | [Bare metal](/docs/install/baremetal/) | A NoCloud seed on a second USB stick |
 | A dedicated server you reach over a provider's rescue system | [Rescue mode](/docs/install/rescue/) | A seed you write to the disk before first boot |
 | Any other cloud or hypervisor | [Quick start](/docs/guides/quickstart/) | cloud-init user-data |
-| Bare metal with no seed device, or PXE | [Quick start](/docs/guides/quickstart/#without-cloud-init) | `/etc/corium/config.yaml` or the kernel command line |
+| PXE, or bare metal with no seed device at all | [Quick start](/docs/guides/quickstart/#without-cloud-init) | `/etc/corium/config.yaml` or the kernel command line |
 
 Once one node works, these build on it:
 
