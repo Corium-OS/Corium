@@ -40,8 +40,11 @@ delivered the user-data, and that a standalone document has no `corium:` wrapper
 See [where configuration comes from](/docs/reference/configuration/).
 
 **The node has no account to log into.** The login user is created by cloud-init.
-A node that boots without configuration has no user, and no password. Reprovision
-it with a configuration that declares one.
+A node that boots without configuration has no user, and no password. It is not
+stranded: since [ADR 11](/docs/decisions/adr-0011-api-on-by-default/) it serves its enrolment
+route and prints a pairing code on the console, so `cctl enroll --config` can
+tell it what it is — including the `users:` that gives you a login. Without a
+console, reprovision it with a configuration that declares one.
 
 **`cctl` says the node is not enrolled.** It is waiting to be claimed:
 `api.enabled: true` with no CA is maintenance mode, and such a node holds its
@@ -113,9 +116,11 @@ the firmware's boot order — see [bare metal](/docs/install/baremetal/).
 
 **A PC installed from the ISO boots to a login prompt with no account.** No
 configuration reached it, so `corium-agent` left it unconfigured and Corium
-creates no default user. Nothing is lost: no bootstrap marker was written, so
-plugging in a `CIDATA` seed stick and rebooting configures the node then. See
-[bare metal](/docs/install/baremetal/#if-you-install-without-a-seed).
+creates no default user. That is not a dead end: the node is serving its
+enrolment route and the console shows a pairing code above the prompt, so
+`cctl enroll <address> --code <code> --config node.yaml` gives it both a role
+and a login. A `CIDATA` seed stick and a reboot work too — no bootstrap marker
+was written. See [bare metal](/docs/install/baremetal/#if-you-install-without-a-seed).
 
 **An interrupted install leaves nothing bootable.** Anaconda wipes the disk early.
 Do not stop the VM during an install.

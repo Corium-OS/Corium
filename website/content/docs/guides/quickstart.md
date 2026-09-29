@@ -217,8 +217,11 @@ persists. Corium ships a management API for the things you actually want —
 reading a node, restarting k0s, upgrading it, getting a kubeconfig — and a
 client called `cctl`.
 
-It is **off unless you ask for it**. A node with no `api:` block runs no daemon
-and binds no port, which is what the four steps above produced.
+It is **on unless you turn it off**. A node with no `api:` block serves its
+enrolment route until it bootstraps, which is how a machine installed from the
+ISO with no configuration can still be reached. Once it has bootstrapped, a node
+with no operator CA has nobody to authenticate and binds no port — which is what
+the four steps above produced, a minute after they finished.
 
 Install `cctl` on your own machine. Archives are attached to each release, for
 linux and macOS on amd64 and arm64:

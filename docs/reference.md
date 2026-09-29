@@ -347,7 +347,7 @@ referred to indirectly in the journal.
 | `raid` | list | no | — | Software RAID on spare disks (§3.11) |
 | `zfs` | list | no | — | ZFS pools on data disks; needs the ZFS image (§3.17) |
 | `wireguard` | list | no | — | Host WireGuard overlay interfaces (§3.12) |
-| `api` | object | no | — | The management API, off by default (§3.13) |
+| `api` | object | no | — | The management API, on by default since ADR 11 (§3.13) |
 | `k0s` | object | no | — | Escape hatch (§3.15) |
 
 ### 3.2 `role`
@@ -389,9 +389,11 @@ or `cctl apply` — and that document has to name a role, because it is the one
 that finishes the wait. A node released with no role still fails, with
 `the configuration this node was given does not name a role`.
 
-It is refused when the API is off, for the same reason `awaitConfig` is: the
-answer could never reach the node, so it would wait for ever with nothing on
-the console to explain why.
+It is refused when the document names no `api:` block at all, for the same
+reason `awaitConfig` is. The API being on by default is not somebody asking to
+wait, and a document with neither a role nor an `api:` block is far more often a
+typo in `role:` than a node meaning to hold — which would otherwise wait for
+ever with nothing on the console to explain why.
 
 A document that *does* name a role builds it. If the API is in maintenance mode
 it builds it the moment the node is claimed, which is why `cctl enroll` asks
@@ -767,8 +769,11 @@ when to prefer which.
 
 ### 3.13 `api`
 
-The node's management API, `corium-apid`. Off unless asked for, and covered in
-full by [ADR 4](adr/0004-management-api.md).
+The node's management API, `corium-apid`. Covered in full by
+[ADR 4](adr/0004-management-api.md), and **on by default since
+[ADR 11](adr/0011-api-on-by-default.md)** — a node with no `api:` block serves
+the enrolment route, authenticated by the pairing code on its console, for as
+long as it has not bootstrapped.
 
 > Shipped in 0.2.0: all four management surfaces, CA rotation and the local
 > recovery path. `cctl` is published with each release — see
@@ -781,11 +786,11 @@ full by [ADR 4](adr/0004-management-api.md).
 
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `enabled` | bool | no | `false` | Setting either key below implies `true`. False masks `corium-apid.service` |
+| `enabled` | bool | no | on | `false` is the only way to have no daemon and no port. `true` with no CA asks for maintenance mode, which also holds the bootstrap |
 | `operatorCA` | string | no | — | PEM certificate of the CA that signs operator client certificates |
 | `operatorCAFrom` | object | no | — | Resolve it at first boot instead (§3.16) |
 | `insecure` | bool | no | `false` | Drop the pairing code. Maintenance mode only |
-| `awaitConfig` | bool | no | `false` | Hold the bootstrap until an operator sends a configuration. Implied by a document with no `role` (§3.2) |
+| `awaitConfig` | bool | no | `false` | Hold the bootstrap until an operator sends a configuration. Needs an explicit `api:` block beside it. Implied by a document with no `role` (§3.2) |
 
 Set at most one of `operatorCA` and `operatorCAFrom`.
 
@@ -806,11 +811,12 @@ document to build, not because of a flag (§3.2).
 `awaitConfig` says the same thing explicitly, and is the only way to say it in
 a document that *does* name a role — a fleet-wide `role: worker` that still
 expects the rest per machine. Without it, a document naming a role builds that
-role: at once if the API is off or already owns the node, and on being claimed
-in maintenance mode.
+role: at once unless the node is in maintenance mode, where it waits to be
+claimed first.
 
-It is refused when the API is off, because the configuration it would be
-waiting for could never arrive.
+It is refused in a document that names no `api:` block. Holding the bootstrap is
+something a document has to ask for, and since ADR 11 the API running is no
+longer that request.
 
 The value is a **certificate**, not a key. The node is never given the private
 key that signs with it, which is why — unlike a join token — it is safe in
@@ -830,14 +836,27 @@ Writing `enabled: false` alongside either key is an error rather than a
 precedence rule. The configuration is saying two contradictory things, and
 guessing which one you meant would leave the other silently doing nothing.
 
-#### The three ways a node is claimed
+#### The four ways a node is claimed
 
 | `api:` | Mode | What happens |
 |---|---|---|
-| absent, or `enabled: false` | off | No daemon, no port. The node bootstraps as it always did |
+| absent | enrollable | **The default.** The daemon serves and the node can be claimed by pairing code, but nothing is held: a document that names a role builds it on first boot exactly as before |
+| `enabled: false` | off | No daemon, no port |
 | `operatorCA` | A | The CA is named inline, in clear. Unattended, and nothing secret is in the metadata: a certificate is public |
 | `operatorCAFrom` | B | The same, resolved at first boot from a `SecretSource` (§3.16) |
 | `enabled: true`, neither key | C | Maintenance mode: the node holds its bootstrap and waits to be claimed |
+
+The default and mode C differ on one thing, and it is the important one: mode C
+**waits**. Enrollable serves the port and gets on with it. Everything that holds
+a node — `awaitConfig`, or omitting `role` — still has to be asked for by name,
+so the moving default changes nothing about a configuration already in service
+beyond opening the port.
+
+**The daemon runs only where it can do something.** Two states have no purpose
+and are exited rather than served: a node that has bootstrapped and names no
+operator CA has its enrolment closed and nobody to authenticate, and
+`enabled: false` asked for nothing. In both, `corium-apid` exits 78 and binds no
+port. Every node is therefore either claimable or already answerable.
 
 Modes A and B claim the node at boot, so it joins its cluster unattended. Mode C
 does not: **a node waiting to be claimed is in no cluster.** It validates its
@@ -851,6 +870,12 @@ credentials while still obeying whoever first reaches an unauthenticated port �
 valuable and unclaimed at once. The rule runs the other way too, which is what
 gives `cctl reset` its meaning: a node cannot return to maintenance mode while
 it is a cluster member, so a reset takes it out of the cluster on the way.
+
+**Enrolment closes when the node bootstraps**, whatever the configuration says,
+which is what keeps that invariant true now the port is open by default. A node
+with no `api:` block is claimable during the minute it takes to bootstrap and
+never again; a node given `enabled: true` after it was already in service cannot
+be claimed at all. Taking a bootstrapped node over means `cctl reset`.
 
 Enrolment carries a CA certificate, and optionally the node's configuration:
 `cctl enroll --config`, or `cctl apply` afterwards. That is bounded by the
@@ -871,7 +896,12 @@ not sanitised. Whatever any software on the node has logged is in there.
 `api.insecure: true` drops the pairing code: the first client to reach an
 unclaimed node claims it, with nothing to prove. It applies to maintenance mode
 only, and setting it anywhere it would do nothing — alongside an operator CA,
-or with the API off — is a validation error rather than being ignored.
+with the API off, or on its own without `enabled: true` — is a validation error
+rather than being ignored.
+
+[ADR 11](adr/0011-api-on-by-default.md) made the **port** default, not this. A
+node with no `api:` block still demands the pairing code, which is on a channel
+an attacker on the network does not have.
 
 What bounds the risk is that an unclaimed node is in no cluster, so whoever
 wins the race gets a bare machine, and enrolment is still one-way, so the
@@ -900,6 +930,8 @@ CA later does not clear it.
 | `enabled: false` with either CA key | Validation error: the configuration says two contradictory things |
 | both CA keys | Validation error, matching `token` and `tokenFrom` |
 | `insecure` outside maintenance mode | Validation error: it would silently do nothing |
+| `awaitConfig` with no explicit `api:` block | Validation error: holding the bootstrap is something a document has to ask for |
+| no `role` and no explicit `api:` block | Validation error: far more often a typo in `role:` than a node meaning to wait |
 
 An inline `operatorCA` is checked at validation time: it must be one PEM
 certificate, it must be a CA, and it must not have expired. **A private key

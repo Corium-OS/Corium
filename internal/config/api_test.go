@@ -59,17 +59,21 @@ func TestAPIMode(t *testing.T) {
 	ca := operatorCA(t)
 
 	tests := []struct {
-		name string
-		api  API
-		want APIMode
-		held bool
+		name     string
+		api      API
+		want     APIMode
+		held     bool
+		declared bool
 	}{
 		{
-			// Every node provisioned before the API existed looks like this,
-			// and none of them may grow a listening port by being upgraded.
-			name: "absent block is off",
+			// ADR 11: an absent block now serves the enrolment route, because
+			// the node most in need of it is the one the installer ISO
+			// produces, which carries no configuration at all. It serves and
+			// nothing more -- held stays false, so a document that names a
+			// role still builds it on first boot.
+			name: "absent block is enrollable and holds nothing",
 			api:  API{},
-			want: APIModeDisabled,
+			want: APIModeEnrollable,
 		},
 		{
 			name: "explicit refusal is off",
@@ -77,25 +81,29 @@ func TestAPIMode(t *testing.T) {
 			want: APIModeDisabled,
 		},
 		{
-			name: "an inline CA implies enabled",
-			api:  API{OperatorCA: ca},
-			want: APIModeConfigured,
+			name:     "an inline CA implies enabled",
+			api:      API{OperatorCA: ca},
+			want:     APIModeConfigured,
+			declared: true,
 		},
 		{
-			name: "a CA source implies enabled",
-			api:  API{OperatorCAFrom: &SecretSource{URL: "https://pki.example.com/ca.pem"}},
-			want: APIModeConfigured,
+			name:     "a CA source implies enabled",
+			api:      API{OperatorCAFrom: &SecretSource{URL: "https://pki.example.com/ca.pem"}},
+			want:     APIModeConfigured,
+			declared: true,
 		},
 		{
-			name: "enabled with no CA waits for an operator",
-			api:  API{Enabled: enabled(true)},
-			want: APIModeMaintenance,
-			held: true,
+			name:     "enabled with no CA waits for an operator",
+			api:      API{Enabled: enabled(true)},
+			want:     APIModeMaintenance,
+			held:     true,
+			declared: true,
 		},
 		{
-			name: "enabled alongside a CA does not wait",
-			api:  API{Enabled: enabled(true), OperatorCA: ca},
-			want: APIModeConfigured,
+			name:     "enabled alongside a CA does not wait",
+			api:      API{Enabled: enabled(true), OperatorCA: ca},
+			want:     APIModeConfigured,
+			declared: true,
 		},
 	}
 
@@ -107,6 +115,13 @@ func TestAPIMode(t *testing.T) {
 
 			if got := tc.api.HoldsBootstrap(); got != tc.held {
 				t.Errorf("HoldsBootstrap() = %v, want %v", got, tc.held)
+			}
+
+			// Declared is what the behaviours that hold a node are gated on,
+			// so that the default running the daemon never turns a typo into a
+			// node that waits for ever.
+			if got := tc.api.Declared(); got != tc.declared {
+				t.Errorf("Declared() = %v, want %v", got, tc.declared)
 			}
 		})
 	}
@@ -336,15 +351,71 @@ func TestARolelessDocumentIsHowANodeSaysItIsWaiting(t *testing.T) {
 }
 
 func TestARolelessDocumentWithNoAPIIsRefused(t *testing.T) {
-	// Nobody could ever tell this node what it is, so it would wait for ever
-	// with nothing on the console to explain why. Refusing at validation is the
-	// one moment somebody is still watching.
+	// Since ADR 11 somebody *could* tell this node what it is -- the daemon is
+	// running. It is refused anyway, because a document that names neither a
+	// role nor an api: block is far more often a typo in role: than a node
+	// meaning to wait, and turning that typo into a machine that waits for ever
+	// is the trade the old rule existed to avoid. Validation is the one moment
+	// somebody is still watching.
 	cfg := Config{}
 	cfg.ApplyDefaults()
 
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "role: required") {
 		t.Errorf("Validate() = %v, want a complaint that role is required", err)
+	}
+}
+
+func TestTheDefaultRunsTheAPIWithoutHoldingAnything(t *testing.T) {
+	// ADR 11's central promise to every configuration already in service: the
+	// port opens, and nothing else about first boot changes.
+	cfg := Config{Role: RoleSingle}
+	cfg.ApplyDefaults()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+
+	if got := cfg.API.Mode(); got != APIModeEnrollable {
+		t.Errorf("Mode() = %q, want %q", got, APIModeEnrollable)
+	}
+
+	if cfg.API.HoldsBootstrap() {
+		t.Error("HoldsBootstrap() = true, want false: nobody asked this node to wait")
+	}
+
+	if cfg.HoldsForConfiguration() {
+		t.Error("HoldsForConfiguration() = true, want false: the document says what the node is")
+	}
+}
+
+func TestHoldingTheBootstrapHasToBeAskedFor(t *testing.T) {
+	// awaitConfig on its own used to be refused because the API was off. The
+	// API is on now, so the refusal needs its own reason: holding a node until
+	// a document arrives is not something a default may do to somebody who
+	// never asked for it.
+	cfg := Config{Role: RoleSingle, API: API{AwaitConfig: true}}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "api.awaitConfig") {
+		t.Errorf("Validate() = %v, want a complaint about api.awaitConfig", err)
+	}
+}
+
+func TestInsecureStillNeedsMaintenanceMode(t *testing.T) {
+	// ADR 11 makes the port default, not the openness. Reaching open enrolment
+	// still takes an explicit api.enabled: true beside it.
+	cfg := Config{Role: RoleSingle, API: API{Insecure: true}}
+	cfg.ApplyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "api.insecure") {
+		t.Errorf("Validate() = %v, want a complaint about api.insecure", err)
+	}
+
+	if cfg.API.OpenEnrolment() {
+		t.Error("OpenEnrolment() = true, want false: the default is the pairing code")
 	}
 }
 

@@ -177,7 +177,7 @@ commands are [cctl](cli.md).
 
 | Feature | Field | Notes |
 |---|---|---|
-| The API itself | `api.enabled` | Off by default. A node with no `api:` block runs no daemon and binds no port |
+| The API itself | `api.enabled` | On by default. `enabled: false` is the only way to run no daemon and bind no port; a node that has bootstrapped and names no operator CA also binds none |
 | Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
 | Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
 | Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |

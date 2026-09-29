@@ -27,3 +27,9 @@ corium:
 # that names no role describes no node, so the bootstrap holds until an
 # operator sends one -- `api.awaitConfig: true` says the same thing out loud,
 # and is only needed in a document that does name a role.
+#
+# `enabled: true` is still written even though ADR 11 runs the API by default,
+# and it is not redundant: the default serves the port without holding anything.
+# Asking for maintenance mode is what makes this node wait, and the same rule is
+# why a document with no role and no `api:` block is refused rather than treated
+# as a node that meant to wait.

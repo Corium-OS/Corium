@@ -3,8 +3,9 @@
 # A worker that can be managed with cctl, showing the ways an operator CA
 # reaches a node -- and the one that puts nothing in this document at all.
 #
-# The API is off unless one of these is present. A node with no `api:` block
-# runs no daemon and binds no port.
+# Since ADR 11 the API runs without any of these: a node with no `api:` block is
+# claimable by pairing code until it bootstraps. What an operator CA buys is
+# ownership from the first boot, with no console visit and no window.
 
 corium:
   role: worker
@@ -48,8 +49,8 @@ corium:
     #
     # enabled: true
 
-    # And the default, which is no API at all. Written explicitly it also masks
-    # the unit, so nothing re-enables it later.
+    # And the one thing that is no longer the default: no API at all. Written
+    # explicitly it also masks the unit, so nothing re-enables it later.
     #
     # enabled: false
 

@@ -300,8 +300,10 @@ before it is written, so a document that would fail at boot is refused while
 somebody is still watching.
 
 > **Warning.** The document is the node's entire configuration, not a patch.
-> Leaving `api:` out of it turns the management API off at the next boot, and
-> `cctl apply` says so when it spots it.
+> Leaving `api:` out of it drops whatever it said — an `operatorCA` most of all,
+> which is what owns the node — and `cctl apply` says so when it spots it. Since
+> ADR 11 that no longer turns the daemon off, but a node that has bootstrapped
+> and no longer names an owner has nobody left to authenticate.
 
 What the command does depends on where the node is in its life:
 

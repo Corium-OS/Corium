@@ -169,45 +169,63 @@ a node has to be claimed before it answers.
 
 ## If you install without a seed
 
-The ISO installs fine on its own. What you get is a healthy host that is in no
-cluster and that nobody can log into:
+You do not have to. The ISO installs a node that then **waits to be told what it
+is**, prints a pairing code on its console, and can be claimed from your own
+machine. The seed stick is the unattended path, not the only one.
 
 | | After the install |
 |---|---|
 | `corium-bootstrap` | Ran, found nothing, wrote no marker |
-| `corium-apid` | Exited 78. The management API is off by default, so nothing listens on 7443 |
-| k0s | Not started |
+| `corium-apid` | Serving on 7443, enrolment open, pairing code on the console |
+| k0s | Not started. A node nobody has claimed is in no cluster |
 | Accounts | None. Corium creates no default user, and `PermitRootLogin` is `no` |
 
-The console says as much, above a login prompt nobody can answer:
+The console carries the code and the fingerprint to check the node against:
 
 ```
   This node is not part of a cluster.
-  address   192.168.0.42
+  address     192.168.0.42
+  pairing     K4M2-8QT9
+  fingerprint SHA256:...
+
+  cctl enroll 192.168.0.42 --code K4M2-8QT9
 ```
 
-**The recovery is the seed stick.** Because no bootstrap marker was written,
-nothing about the node is settled — plug a `CIDATA` stick in, reboot, and step 5
-runs as if it were the first boot. Installing first and configuring afterwards
-is a legitimate order, not a mistake to undo.
+From your own machine, with an operator PKI already made
+([cctl](../cli.md#2-from-nothing-to-a-managed-node) covers making one):
 
-Two things that look like alternatives and are not:
+```bash
+cctl enroll 192.168.0.42 --code K4M2-8QT9 --config node.yaml
+```
 
-- **`corium.config=<url>` on the kernel command line** does configure the node —
-  it is the third source in the chain. It creates no account, so you end up in a
-  cluster you still cannot log into. Worth it only pointing at a document that
-  enables the API, which at least gives you `cctl`.
-- **Waiting to be claimed**, the pairing-code flow from
-  [`awaiting-config.yaml`](../examples/awaiting-config.yaml), needs a document
-  saying `api.enabled: true`. That is a three-line seed, not no seed: with no
-  configuration at all the API never starts, so no pairing code is ever printed.
+`node.yaml` is the same document as the seed in step 2, `users:` included — which
+is what gives the machine an account it never had. The node pins your CA, builds
+the role, and comes up as a cluster.
 
-A machine that boots and waits to be told everything is
-[`deploy/appliance/`](https://github.com/Corium-OS/Corium/tree/main/deploy/appliance),
-which bakes that document into `/usr/share/corium/config.yaml` as an image
-default. It is not published — you build it — and a machine built from it
-belongs to whoever reaches port 7443 first, so read its README before putting
-one on a network you share.
+This is the default since [ADR 11](../adr/0011-api-on-by-default.md).
+Before it, a machine installed this way had no account, no API and no way in
+short of another trip with a USB stick.
+
+**The seed stick still works, and is still the better choice when you have one.**
+It is unattended: no console to read, no code to type, and the node is owned by
+your CA from its first boot rather than for the minute between boot and being
+claimed. Plug a `CIDATA` stick in and reboot — because no bootstrap marker was
+written, step 5 runs as if it were the first boot.
+
+Two limits worth knowing before you rely on enrolment:
+
+- **It closes when the node bootstraps.** A node that has built its role cannot
+  be claimed, whatever its configuration says. That is deliberate — it is what
+  stops a machine running your workloads from being taken over by whoever reads
+  its screen — and it means a node configured by seed is claimable only during
+  the minute it takes to come up. Afterwards, taking it over means `cctl reset`.
+- **It needs the console.** The pairing code is on a channel an attacker on the
+  network does not have, which is the whole of its security. On a headless
+  machine with no IPMI, that channel is a monitor you have to go and plug in.
+
+`corium.config=<url>` on the kernel command line is the third option and the
+weakest: it configures the node but creates no account, so you end up in a
+cluster you still cannot log into.
 
 ---
 

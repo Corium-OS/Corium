@@ -816,10 +816,21 @@ type Backup struct {
 type APIMode string
 
 const (
-	// APIModeDisabled runs no daemon and binds no port. It is what a node with
-	// no api: block does, which is every node provisioned before the API
-	// existed.
+	// APIModeDisabled runs no daemon and binds no port. Reaching it takes an
+	// explicit api.enabled: false -- since ADR 11 it is the only way to have
+	// no listening port at all.
 	APIModeDisabled APIMode = "disabled"
+
+	// APIModeEnrollable is the default: an absent api: block. The daemon runs
+	// and the enrolment route is open, authenticated by the pairing code on
+	// the console, for as long as the node has not bootstrapped.
+	//
+	// It is deliberately not maintenance mode. It serves the port and nothing
+	// else: the bootstrap is not held, no document is waited for, and a node
+	// with a role builds it on first boot exactly as it did before the default
+	// moved. Everything that holds a node still has to be asked for by name.
+	// See docs/adr/0011-api-on-by-default.md.
+	APIModeEnrollable APIMode = "enrollable"
 
 	// APIModeConfigured takes the operator CA from the configuration, inline
 	// or resolved at first boot. Bootstrap is unaffected: the node joins its
@@ -834,19 +845,25 @@ const (
 
 // API configures corium-apid, the node's management API.
 //
-// It is off by default, and that is a decision rather than caution: a
-// privileged daemon listening on every machine in a fleet is a reasonable
-// thing to refuse, and a node that has been running for a year should not
-// acquire a listening port by being upgraded.
+// It is on by default, which ADR 4 refused and ADR 11 reversed for a case ADR 4
+// did not have: the installer ISO produces a complete running node carrying
+// nothing about what it is, with no account to log into and -- while the API
+// was off by default -- no way in at all.
+//
+// The reversal is bounded rather than total. The enrolment route is served only
+// while the node has not bootstrapped, so a node holding cluster credentials is
+// never claimable; and the daemon runs only where it can do something, which is
+// while the node is still enrollable or once it has an owner.
 //
 // Trust is anchored in an operator CA, of which the node is given the
 // certificate and never the key. A certificate is public material, so unlike a
 // join token it can sit in instance metadata in clear without leaking
 // anything. See docs/adr/0004-management-api.md.
 type API struct {
-	// Enabled turns the daemon on. Setting OperatorCA or OperatorCAFrom
-	// implies it, so it only needs writing to ask for maintenance mode, or to
-	// state a refusal that nothing later overrides.
+	// Enabled turns the daemon off, or asks for maintenance mode. Setting
+	// OperatorCA or OperatorCAFrom implies it, and since ADR 11 so does saying
+	// nothing at all, so the two things it is still written for are refusing
+	// the API outright and asking a node to hold until it is claimed.
 	//
 	// It is a pointer because an absent Enabled and an explicit false are
 	// different statements. Absent alongside an operator CA is the common
@@ -912,8 +929,24 @@ func (a API) Mode() APIMode {
 	case a.Enabled != nil && *a.Enabled:
 		return APIModeMaintenance
 	default:
-		return APIModeDisabled
+		// An absent api: block. Before ADR 11 this was disabled; it now serves
+		// the enrolment route without holding anything, which is what makes a
+		// node installed from the ISO reachable at all.
+		return APIModeEnrollable
 	}
+}
+
+// Declared reports whether the configuration says anything about the API.
+//
+// It separates an operator asking for something from the default happening to
+// them. An absent api: block still runs the daemon, but it is not a request,
+// and the behaviours that hold a node -- awaitConfig, and omitting role -- stay
+// gated on a request. Without this an ISO default would silently turn a typo in
+// role: into a node that waits forever.
+func (a API) Declared() bool {
+	mode := a.Mode()
+
+	return mode == APIModeConfigured || mode == APIModeMaintenance
 }
 
 // OpenEnrolment reports whether the node will let anyone who reaches it claim

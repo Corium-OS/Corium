@@ -20,13 +20,45 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   other. It says which firmware settings matter, why the boot order has to be
   disk first and USB second, and why booting once without the seed costs
   nothing — no bootstrap marker is written, so the node configures itself on
-  the next boot. A section covers installing with no seed at all: what the
-  machine is then (a host with no account, no API listening and k0s stopped),
-  why that is recoverable, and why neither the `corium.config=` kernel argument
-  nor the pairing-code flow is a way to avoid a seed. This path was previously
+  the next boot. A section covers installing with no seed at all, which the
+  API default below turns into a supported path rather than a dead end: the
+  node prints a pairing code and waits to be enrolled. This path was previously
   two rows in a table pointing at the quick start.
 
 ### Changed
+
+- **The management API is on by default.** A node with no `api:` block now runs
+  `corium-apid` and can be claimed with the pairing code on its console, instead
+  of running no daemon at all. This is what makes a machine installed from the
+  installer ISO reachable: it used to come up with no account, no API and k0s
+  stopped, and the only way back in was physical. `cctl enroll <address> --code
+  <code> --config node.yaml` now turns it into a node. See
+  [ADR 11](docs/adr/0011-api-on-by-default.md).
+
+  Three limits keep this from being a bigger change than it reads as:
+
+  - **Nothing new is held.** A document that names a role still builds it on
+    first boot. Maintenance mode — `api.enabled: true` with no CA — is still the
+    only thing that makes a node wait, and still has to be asked for by name.
+  - **Enrolment closes when the node bootstraps.** A node running workloads
+    cannot be claimed, whatever its configuration says. Taking one over still
+    means `cctl reset`.
+  - **The daemon only runs where it can do something.** A node that has
+    bootstrapped and names no operator CA binds no port, because it would have
+    nobody to authenticate.
+
+  What actually changes for a node already in service is the window between boot
+  and bootstrap — roughly a minute, on every boot including after an upgrade —
+  during which the node listens and demands a pairing code. `api.enabled: false`
+  keeps the old posture, and is now the only way to have no port at all.
+
+- **`api.insecure` is still opt-in.** ADR 11 makes the port default, not the
+  openness: a node with no `api:` block demands the pairing code. Writing
+  `insecure: true` on its own is a validation error, as it was.
+- **`awaitConfig`, and omitting `role`, now need an explicit `api:` block.**
+  Both used to be accepted whenever the API was on, and the API being on no
+  longer means anybody asked for anything. Without this a typo in `role:` would
+  produce a node that waits for ever instead of a validation error.
 
 - **Downloads is shorter and in the order you would do it.** Install `cctl`,
   fetch the artefact, check it, or build it yourself — with the reasoning for
