@@ -3,51 +3,39 @@
 A spare tower or mini-PC turned into a single-node Kubernetes cluster. Two USB
 sticks: one installs the operating system, the other tells the node what it is.
 
-This is the path for hardware in front of you — a machine with a monitor, a
-keyboard and a firmware setup screen. For a dedicated server reached through a
-provider's rescue system, see [rescue mode](rescue.md) instead; for a VM, see
-[Proxmox](proxmox.md) or the [quick start](../quickstart.md).
+For a dedicated server reached through a provider's rescue system, see
+[rescue mode](rescue.md); for a VM, [Proxmox](proxmox.md) or the
+[quick start](../quickstart.md).
 
-> Unlike [Proxmox](proxmox.md), this page is not backed by a CI run: nothing in
-> the project boots the ISO on physical hardware automatically. The behaviour it
-> describes is the behaviour the image and the agent are built for, and the ISO
-> install path itself is exercised by hand. If your machine disagrees with a
+> Unlike [Proxmox](proxmox.md), no CI run backs this page — nothing in the
+> project boots the ISO on physical hardware. If your machine disagrees with a
 > step here, that is worth an issue.
 
 ## Before you start
 
-- **A 64-bit x86 machine that boots UEFI.** Corium boots UEFI only. A firmware
-  set to legacy/CSM will not find a bootloader.
-- **A whole disk you are willing to lose.** The installer partitions and wipes
-  its target. If the machine has more than one disk, disconnect the ones you are
-  not installing to — that is the cheapest way to be certain which one it picks.
-- **Two USB sticks.** One of 4 GB or more for the ISO, which is about 2.4 GB.
-  One of any size for the configuration seed.
-- **Wired ethernet.** Corium configures no wireless, and a Kubernetes node on
-  wifi is not a thing this project tries to make work.
-- **4 GB of RAM and 32 GB of disk**, with 8 GB of RAM more comfortable.
-- **A public SSH key.** Once the node is up you reach it over SSH; the console
-  is for watching the install, not for working.
+- **A 64-bit x86 machine that boots UEFI.** Corium boots UEFI only.
+- **A whole disk you are willing to lose.** The installer wipes its target. If
+  the machine has more than one disk, disconnect the others.
+- **Two USB sticks.** 4 GB or more for the ISO, which is about 2.4 GB; any size
+  for the seed.
+- **Wired ethernet.** Corium configures no wireless.
+- **4 GB of RAM and 32 GB of disk**, 8 GB of RAM more comfortably.
+- **A public SSH key.**
 
 ## How the install is shaped
 
-Two separate things happen, and knowing which is which makes every step below
-obvious:
+Two separate things happen:
 
-1. **The ISO lays down the operating system.** It is unattended — Anaconda
-   deploys the bootc image embedded in it with no prompts and no kickstart to
-   write. It does not ask what the node is, because it has no way to.
+1. **The ISO lays down the operating system.** Unattended — Anaconda deploys the
+   bootc image embedded in it, with no prompts and no kickstart to write. It
+   never asks what the node is.
 2. **cloud-init configures the node on its first real boot.** That is where the
    `corium:` block and your login account come from.
 
-A desktop PC has no metadata service to supply step 2, so you supply it
-yourself, from a **NoCloud seed**: a USB stick whose filesystem is labelled
-`CIDATA`. It is the first datasource Corium probes, and the only fully offline
-one.
-
-Skipping the seed is allowed but rarely what you want: Corium creates no default
-user, so a node that boots with no configuration comes up as a host with no
-account to log into. The console shows a login prompt you cannot answer.
+A desktop PC has no metadata service for step 2, so you supply it from a
+**NoCloud seed**: a USB stick whose filesystem is labelled `CIDATA`. It is the
+first datasource Corium probes, and the only offline one. Installing without one
+is allowed, and [recoverable](#if-you-install-without-a-seed).
 
 ---
 
@@ -56,8 +44,7 @@ account to log into. The console shows a login prompt you cannot answer.
 Fetch `corium-0.4.0-x86_64.iso` and check it — [downloads](downloads.md) covers
 all three routes and the verification.
 
-Identify the stick, then write it. **`dd` to the wrong device destroys that
-device**, so run the listing first and read it:
+**`dd` to the wrong device destroys that device.** Run the listing first:
 
 ```bash
 # linux
@@ -97,16 +84,16 @@ users:
 
 `role` is the only required field. See [examples](../examples.md) for workers,
 add-ons and a custom CNI, and the [reference](../reference.md) for every field.
-If you have the repository checked out, validate it before you walk to the
-machine — validation is offline and reports every problem at once:
+From a checkout, validate it before you walk to the machine. Validation is
+offline and reports every problem at once, and `mise exec` supplies the pinned
+Go toolchain, so this works on a machine that has never installed Go:
 
 ```bash
-go run ./cmd/corium-agent validate node.yaml
+mise exec -- go run ./cmd/corium-agent validate node.yaml
 ```
 
-The seed is two files on a filesystem labelled `CIDATA`. The label is what
-cloud-init looks for; the stick's size, partition table and contents otherwise
-do not matter.
+Two files on a filesystem labelled `CIDATA`. The label is what cloud-init looks
+for; nothing else about the stick matters.
 
 ```bash
 # linux. /dev/sdY is the *second* stick, not the one holding the ISO.
@@ -126,9 +113,8 @@ cp node.yaml /Volumes/CIDATA/user-data
 printf 'instance-id: corium-01\nlocal-hostname: corium-01\n' > /Volumes/CIDATA/meta-data
 ```
 
-Both files, both named exactly that, both at the root of the filesystem.
-`user-data` is the cloud-config; `meta-data` may be almost empty but must exist,
-or cloud-init does not accept the seed.
+Both at the root, both named exactly that. `meta-data` may be nearly empty but
+must exist, or cloud-init rejects the seed.
 
 ## 3. Set up the firmware
 
@@ -141,24 +127,20 @@ three things:
 | Boot order | **Internal disk first, USB second** | See below |
 | Secure Boot | Off, if the install does not boot | See below |
 
-**Disk first, USB second** is not a typo and it matters. An empty disk has no
-UEFI boot entry, so the firmware falls through to the stick and installs.
-Afterwards the disk has an entry and wins. With the stick first, the machine
-reinstalls itself on every reboot — and because the install is unattended,
-nothing on screen tells you that is what is happening.
+**Disk first, USB second** is not a typo. An empty disk has no UEFI boot entry,
+so the firmware falls through to the stick and installs; afterwards the disk has
+an entry and wins. With the stick first, the machine reinstalls itself on every
+reboot, and the install being unattended, nothing on screen says so.
 
-**Secure Boot** is not something this project has verified on bare metal. The
-image ships Fedora's signed shim, so it may well work; if the machine refuses to
-boot after the install, turn it off and try again, and please report what you
-found.
+**Secure Boot** is unverified on bare metal. The image ships Fedora's signed
+shim, so it may well work; if the machine refuses to boot after the install,
+turn it off.
 
 ## 4. Install
 
-Plug in **only the ISO stick** — leave the seed out, so there is one fewer disk
-for the installer to consider — and power the machine on.
-
-Anaconda runs with no prompts and reboots when it is done. On a modern SSD this
-is a few minutes. Pull the stick during the reboot, or on the next power-off.
+Plug in **only the ISO stick** — one fewer disk for the installer to consider —
+and power the machine on. Anaconda reboots when it is done, a few minutes on an
+SSD. Pull the stick during that reboot.
 
 ## 5. Configure it
 
@@ -169,36 +151,63 @@ cloud-init finds `CIDATA`, creates your user, and `corium-bootstrap` reads the
 node. The console banner reports the node's role, its cluster and whether k0s is
 running.
 
-The order is forgiving here. If you boot once without the seed, the agent logs
-
-```
-no corium configuration found, leaving node unconfigured
-```
-
-and stops without marking the node bootstrapped
-(`/var/lib/corium/bootstrapped`). Plug the seed in, reboot, and it runs then.
-What is *not* recoverable this way is a node that bootstrapped with the wrong
-configuration — that needs `cctl reset`, or a reinstall.
-
-Once the node is up the seed stick has done its job and can come out. Leaving it
-in is harmless.
+The seed stick can come out once the node is up, or stay in.
 
 ## 6. Check it worked
-
-From the machine's console, or over SSH:
 
 ```bash
 ssh core@<the node's address>
 sudo k0s kubectl get nodes
 ```
 
-To get the kubeconfig onto your laptop, and for everything after that, carry on
-with the [quick start](../quickstart.md#4-check-it-worked).
+For the kubeconfig and everything after it, carry on with the
+[quick start](../quickstart.md#4-check-it-worked). Managing the node with
+[`cctl`](../cli.md) is a separate step: the management API is off by default and
+a node has to be claimed before it answers.
 
-Managing the node from your own machine with [`cctl`](../cli.md) is a separate
-step: the management API is off by default and a node has to be claimed before
-it answers. [cctl](../cli.md#2-from-nothing-to-a-managed-node) covers it end to
-end.
+---
+
+## If you install without a seed
+
+The ISO installs fine on its own. What you get is a healthy host that is in no
+cluster and that nobody can log into:
+
+| | After the install |
+|---|---|
+| `corium-bootstrap` | Ran, found nothing, wrote no marker |
+| `corium-apid` | Exited 78. The management API is off by default, so nothing listens on 7443 |
+| k0s | Not started |
+| Accounts | None. Corium creates no default user, and `PermitRootLogin` is `no` |
+
+The console says as much, above a login prompt nobody can answer:
+
+```
+  This node is not part of a cluster.
+  address   192.168.0.42
+```
+
+**The recovery is the seed stick.** Because no bootstrap marker was written,
+nothing about the node is settled — plug a `CIDATA` stick in, reboot, and step 5
+runs as if it were the first boot. Installing first and configuring afterwards
+is a legitimate order, not a mistake to undo.
+
+Two things that look like alternatives and are not:
+
+- **`corium.config=<url>` on the kernel command line** does configure the node —
+  it is the third source in the chain. It creates no account, so you end up in a
+  cluster you still cannot log into. Worth it only pointing at a document that
+  enables the API, which at least gives you `cctl`.
+- **Waiting to be claimed**, the pairing-code flow from
+  [`awaiting-config.yaml`](../examples/awaiting-config.yaml), needs a document
+  saying `api.enabled: true`. That is a three-line seed, not no seed: with no
+  configuration at all the API never starts, so no pairing code is ever printed.
+
+A machine that boots and waits to be told everything is
+[`deploy/appliance/`](https://github.com/Corium-OS/Corium/tree/main/deploy/appliance),
+which bakes that document into `/usr/share/corium/config.yaml` as an image
+default. It is not published — you build it — and a machine built from it
+belongs to whoever reaches port 7443 first, so read its README before putting
+one on a network you share.
 
 ---
 

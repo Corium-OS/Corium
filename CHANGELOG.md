@@ -20,8 +20,11 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   other. It says which firmware settings matter, why the boot order has to be
   disk first and USB second, and why booting once without the seed costs
   nothing — no bootstrap marker is written, so the node configures itself on
-  the next boot. This path was previously two rows in a table pointing at the
-  quick start.
+  the next boot. A section covers installing with no seed at all: what the
+  machine is then (a host with no account, no API listening and k0s stopped),
+  why that is recoverable, and why neither the `corium.config=` kernel argument
+  nor the pairing-code flow is a way to avoid a seed. This path was previously
+  two rows in a table pointing at the quick start.
 
 ### Changed
 
@@ -30,6 +33,9 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   why nothing is attached to the GitHub release moved below the instructions
   instead of interleaved with them. Nothing about how artefacts are published
   changed.
+- **`corium-agent validate` is documented as `mise exec -- go run`**, so the
+  command works on a machine that has never installed Go — `mise.toml` pins the
+  toolchain already.
 - **The documentation's examples name 0.4.0.** Every version in a command, a
   filename or an image tag was still 0.3.6, and the version ladder still told
   you to track `0.3`.

@@ -115,7 +115,7 @@ the firmware's boot order — see [bare metal](/docs/install/baremetal/).
 configuration reached it, so `corium-agent` left it unconfigured and Corium
 creates no default user. Nothing is lost: no bootstrap marker was written, so
 plugging in a `CIDATA` seed stick and rebooting configures the node then. See
-[bare metal](/docs/install/baremetal/#5-configure-it).
+[bare metal](/docs/install/baremetal/#if-you-install-without-a-seed).
 
 **An interrupted install leaves nothing bootable.** Anaconda wipes the disk early.
 Do not stop the VM during an install.

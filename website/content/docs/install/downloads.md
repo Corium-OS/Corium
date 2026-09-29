@@ -19,16 +19,15 @@ Every release publishes four artefacts, all signed:
 | `cctl` | Attached to the release page | Managing nodes from your own machine |
 
 > **The exact coordinates and digests for a version are on its release page:
-> [latest release](https://github.com/Corium-OS/Corium/releases/latest).** They
-> change every release, so they are published with the release rather than
-> written down here. Substitute your version for `0.4.0` below.
+> [latest release](https://github.com/Corium-OS/Corium/releases/latest)** —
+> they change every release. Substitute your version for `0.4.0` below.
 
 ---
 
 ## Install `cctl`
 
 `cctl` runs on your machine, never on a node. Archives are published for linux
-and macOS, on amd64 and arm64. There is no Windows build.
+and macOS, on amd64 and arm64; there is no Windows build.
 
 With [mise](https://mise.jdx.dev):
 
@@ -64,8 +63,7 @@ one. Without it the check fails on the three archives you do not have, which
 looks exactly like the failure that would matter.
 
 Or build it: `git clone https://github.com/Corium-OS/Corium.git && mise run
-build` produces `bin/cctl` and `bin/corium-agent`. See [cctl](/docs/reference/cli/) for
-what it does.
+build` produces `bin/cctl` and `bin/corium-agent`.
 
 ---
 
@@ -91,11 +89,10 @@ curl -L -H "Authorization: Bearer ${token}" -o corium-0.4.0-x86_64.iso \
 https://<cdn>/corium-0.4.0-x86_64.iso
 ```
 
-The third is a CDN mirror. It is a convenience, not the release: it is allowed
-to be down, and if it ever disagreed with the registry, the registry is right.
-Nothing published there is overwritten — every file carries its version in its
-name, so a URL that worked once keeps meaning the same bytes. There is no index
-to browse, so the link for a version lives in that version's release notes.
+The third is a CDN mirror: a convenience, not the release. It is allowed to be
+down, and if it ever disagreed with the registry, the registry is right. Nothing
+there is overwritten — every file carries its version in its name — and there is
+no index to browse, so the link lives in that version's release notes.
 
 ---
 
@@ -113,7 +110,7 @@ cosign verify ghcr.io/corium-os/corium-iso@sha256:<manifest digest> \
 ```
 
 A passing check names the workflow run, commit and tag that produced the
-artefact, recorded in a public transparency log.
+artefact, from a public transparency log.
 
 **Did I receive those exact bytes?** The hash, published in the release notes:
 
@@ -140,10 +137,10 @@ Sigstore bundle, and what is published here is a plain signature.
 
 ## Or build them yourself
 
-None of the above is required. `mise run artefacts` produces the qcow2, the raw
-disk and the ISO from any image you can pull, including one you have modified.
-It needs a Linux host and `sudo`, because the builder mounts the filesystem it
-creates. See the [quick start](/docs/guides/quickstart/).
+`mise run artefacts` produces the qcow2, the raw disk and the ISO from any image
+you can pull, including one you have modified. It needs a Linux host and `sudo`,
+because the builder mounts the filesystem it creates. See the
+[quick start](/docs/guides/quickstart/).
 
 A raw disk image is not published: it would be roughly 5 GB, and the ISO already
 covers bare metal.

@@ -93,7 +93,7 @@ keep working.
 If you have the repository checked out, validate it before you boot anything:
 
 ```bash
-go run ./cmd/corium-agent validate node.yaml
+mise exec -- go run ./cmd/corium-agent validate node.yaml
 ```
 
 Validation is offline and reports every problem at once, so you do not discover
