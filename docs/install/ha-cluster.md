@@ -259,8 +259,10 @@ cctl upgrade 192.168.0.201 192.168.0.202 192.168.0.203 --image ghcr.io/corium-os
 It stops at the first controller that does not come back, rather than taking
 the second one down after it.
 
-Both need `api.operatorCA` in each controller's configuration; the API is off
-unless asked for.
+Both need `api.operatorCA` in each controller's configuration. The API runs
+without it — ADR 11 made that the default — but a controller that names its
+operator CA is claimed at boot rather than being enrollable for the minute it
+takes to bootstrap, which is what makes a three-node build unattended.
 
 ---
 

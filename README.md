@@ -62,8 +62,9 @@ including the escape hatches.
 
 ## Managing a node
 
-Every node runs a small management API, off by default, that answers for itself and nothing
-else. [`cctl`](docs/cli.md) is the client: it claims a node, reads what it is, restarts a
+Every node runs a small management API that answers for itself and nothing
+else. It is on by default: a machine installed from the ISO with no configuration prints a
+pairing code on its console and waits to be told what it is, rather than being unreachable. [`cctl`](docs/cli.md) is the client: it claims a node, reads what it is, restarts a
 service, drains it, and rolls it on to a new image. `cctl ui` is the same thing with a page
 in front of it.
 

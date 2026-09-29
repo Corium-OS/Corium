@@ -115,8 +115,8 @@ a `cctl reset` to discover the hard way.
 
 | The document says | The machine does |
 |---|---|
-| nothing — no `corium:` block anywhere | Nothing. No daemon, no cluster. Somebody wanted a host, and they have one |
-| a `role`, no `api:` | Builds that node, unattended. Nobody to ask, nothing to wait for |
+| nothing — no `corium:` block anywhere | No cluster, and a daemon waiting to be told what the machine is. Somebody wanted a host and has one; somebody who did not can claim it from the console |
+| a `role`, no `api:` | Builds that node, unattended. Claimable by pairing code until it does, and not afterwards |
 | a `role` and an `operatorCA` | Builds that node, unattended, and is already owned by the CA it names |
 | a `role` and `api.enabled: true` | Waits to be claimed, then **builds that node at once** |
 | `api.enabled: true` and **no role** | Waits to be claimed *and* to be told what it is. Builds nothing until both happen |

@@ -114,6 +114,18 @@ func gateOnEnrolment(
 	case config.APIModeDisabled:
 		return cfg, nil
 
+	case config.APIModeEnrollable:
+		// The default since ADR 11. corium-apid is serving the enrolment route
+		// beside this unit, but nothing here waits for it: a document that
+		// names a role describes a node, and the port being open is not a
+		// reason to stop building it. An operator who wants the wait asks for
+		// it by name, which is maintenance mode below.
+		//
+		// The race this leaves is the point rather than an oversight. Whoever
+		// claims the node during the minute it takes to bootstrap gets a node
+		// that is bootstrapping; whoever arrives after finds enrolment closed.
+		return cfg, nil
+
 	case config.APIModeConfigured:
 		// A configured CA is pinned by corium-apid, which is ordered before
 		// this unit. Nothing here has to wait for it: a node whose owner is
@@ -129,7 +141,7 @@ func gateOnEnrolment(
 		return awaitConfiguration(ctx, cfg)
 
 	default:
-		// Mode returns one of the three above. A fourth means somebody added a
+		// Mode returns one of the four above. A fifth means somebody added a
 		// mode and did not come back here, which is worth failing over rather
 		// than defaulting to "carry on".
 		return nil, errors.New("unknown api mode")

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -138,6 +139,29 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 			return errDisabled
 		}
 
+		// Enrolment closes when the node bootstraps, and this is where that is
+		// enforced -- not in a handler, because a node that cannot be claimed
+		// and names no owner has no authenticated route to offer either. Both
+		// halves of ADR 11's rule 4 are here: the node is either still
+		// enrollable, or it has an owner. Anything else is a socket that would
+		// refuse every request for the rest of the machine's life.
+		//
+		// Mode configured means the document names a CA, so the node has an
+		// owner even before anybody connects. An already-enrolled node never
+		// reaches this branch.
+		bootstrapped, err := hasBootstrapped(stateDir)
+		if err != nil {
+			return err
+		}
+
+		if bootstrapped && mode != config.APIModeConfigured {
+			slog.Info("node has bootstrapped and has no operator CA, "+
+				"so enrolment is closed and there is nothing to serve; exiting",
+				"mode", mode)
+
+			return errDisabled
+		}
+
 		if cfg != nil && cfg.API.OpenEnrolment() {
 			slog.Warn("api.insecure is set: this node will be claimed by the first "+
 				"client that reaches it, with nothing to prove",
@@ -177,6 +201,26 @@ func serve(ctx context.Context, configPath, stateDir, listen string) error {
 // provisioned without a Corium block is a valid outcome — somebody wanted a
 // host, not a Kubernetes node — and the answer for the API is the same as for
 // the rest of the agent: do nothing, and say so.
+// hasBootstrapped reports whether the node has completed a bootstrap.
+//
+// It reads the marker directly rather than going through nodeinfo, because the
+// question here is only whether the file is there and the answer has to respect
+// the -state-dir a test points at. A missing marker is the answer, not an
+// error; anything else is not, because guessing "not bootstrapped" from a
+// broken /var would reopen enrolment on a node that has cluster credentials.
+func hasBootstrapped(stateDir string) (bool, error) {
+	_, err := os.Stat(filepath.Join(stateDir, "bootstrapped"))
+
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, fmt.Errorf("reading the bootstrap marker: %w", err)
+	}
+}
+
 func claimFromConfiguration(
 	ctx context.Context, store *api.Store, path string,
 ) (config.APIMode, *config.Config, error) {
@@ -184,9 +228,13 @@ func claimFromConfiguration(
 
 	switch {
 	case errors.Is(err, config.ErrNoCoriumBlock), errors.Is(err, source.ErrNotFound):
-		slog.Info("no corium configuration found, management API stays off")
+		// The installer ISO's case, and the reason ADR 11 moved the default. A
+		// node carrying no configuration used to exit here with no port, no
+		// account and nothing on the console but a login prompt nobody could
+		// answer. It is now the node most in need of being reachable.
+		slog.Info("no corium configuration found, serving enrolment")
 
-		return config.APIModeDisabled, nil, nil
+		return config.APIModeEnrollable, nil, nil
 
 	case err != nil:
 		return config.APIModeDisabled, nil, err

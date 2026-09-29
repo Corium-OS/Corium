@@ -76,9 +76,16 @@ podman run --rm --privileged --pid=host \
 Do this before the reboot. A dedicated server has no metadata service and no
 seed device, so cloud-init finds nothing and the node comes up unconfigured —
 `no corium configuration found, leaving node unconfigured` in the agent's
-journal. Worse, **the login user is created by cloud-init too**, so a node that
-boots without configuration has no account to SSH into. Corium ships no root
-account, and its sshd drop-in sets `PermitRootLogin no`.
+journal. **The login user is created by cloud-init too**, so such a node has no
+account to SSH into. Corium ships no root account, and its sshd drop-in sets
+`PermitRootLogin no`.
+
+Since [ADR 11](../adr/0011-api-on-by-default.md) that is recoverable without a
+second trip: the node serves its enrolment route and prints a pairing code on
+the console, so `cctl enroll --config` can tell it what it is. That still needs
+a console, which is the thing a dedicated server is least likely to give you a
+usable one of — so seed it here anyway, and treat the API as the fallback for
+when you find out later that you did not.
 
 The cheapest fix is a kernel argument, which `bootc install` will write for
 you — so it goes into step 1 rather than after it:

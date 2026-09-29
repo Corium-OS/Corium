@@ -53,8 +53,11 @@ func TestGateLetsClaimedNodesThrough(t *testing.T) {
 		api  config.API
 	}{
 		{
-			// The overwhelming majority of nodes, including every one
-			// provisioned before the API was designed.
+			// The overwhelming majority of nodes. Since ADR 11 this is
+			// enrollable rather than disabled -- corium-apid is serving the
+			// port beside this unit -- and the gate still has to let it
+			// straight through, because a document that names a role describes
+			// a node and an open port is not a reason to stop building it.
 			name: "no api block",
 			api:  config.API{},
 		},

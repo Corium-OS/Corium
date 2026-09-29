@@ -31,8 +31,11 @@ delivered the user-data, and that a standalone document has no `corium:` wrapper
 See [where configuration comes from](reference.md).
 
 **The node has no account to log into.** The login user is created by cloud-init.
-A node that boots without configuration has no user, and no password. Reprovision
-it with a configuration that declares one.
+A node that boots without configuration has no user, and no password. It is not
+stranded: since [ADR 11](adr/0011-api-on-by-default.md) it serves its enrolment
+route and prints a pairing code on the console, so `cctl enroll --config` can
+tell it what it is — including the `users:` that gives you a login. Without a
+console, reprovision it with a configuration that declares one.
 
 **`cctl` says the node is not enrolled.** It is waiting to be claimed:
 `api.enabled: true` with no CA is maintenance mode, and such a node holds its

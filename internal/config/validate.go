@@ -56,20 +56,19 @@ func (c *Config) validateRole() []error {
 		// would mean writing down something untrue, which takes effect the day
 		// somebody turns the API off.
 		//
-		// The one thing that has to be true is that somebody can still answer.
-		// With the API running they can, over `cctl apply` or `cctl enroll
-		// --config`; with it off the question could never reach the node, and a
-		// machine waiting for an answer nobody can give is worse than one that
-		// refused to boot and said why. The document that arrives later must
-		// name a role, and the bootstrap checks that before it builds anything.
-		if c.API.Mode() != APIModeDisabled {
+		// The one thing that has to be true is that somebody asked for this.
+		// Since ADR 11 the API runs without being named, so "the API is on" no
+		// longer distinguishes a node that means to wait from a document with a
+		// typo in role:. An explicit api: block does, and it is what a node
+		// waiting to be told what it is writes anyway.
+		if c.API.Declared() {
 			return nil
 		}
 
 		return []error{errors.New(
 			"role: required (single, controller, controller+worker or worker); " +
-				"a document may omit it only when the API is on, which is how a " +
-				"node says it is waiting to be told what it is")}
+				"a document may omit it only when it also names an api: block, " +
+				"which is how a node says it is waiting to be told what it is")}
 	default:
 		return []error{fmt.Errorf("role: unknown value %q", c.Role)}
 	}
@@ -1030,14 +1029,17 @@ func (c *Config) validateAPI() []error {
 				"waiting to be claimed; remove it, or remove the operator CA"))
 	}
 
-	// Waiting for a configuration that can only arrive over an API the node
-	// will not run is a node that waits for ever, with nothing to tell an
-	// operator why.
-	if c.API.AwaitConfig && c.API.Mode() == APIModeDisabled {
+	// Holding a node until somebody sends it a document is not something the
+	// default should do to an operator who never asked. An absent api: block
+	// runs the daemon but states no intent, and api.enabled: false means the
+	// document could never arrive at all -- in both cases the node would wait
+	// with nothing to tell anyone why.
+	if c.API.AwaitConfig && !c.API.Declared() {
 		problems = append(problems, errors.New(
-			"api.awaitConfig: the API is off, so the configuration this node "+
-				"would be waiting for could never reach it; set api.enabled "+
-				"or an operator CA"))
+			"api.awaitConfig: holding the bootstrap is something a document has "+
+				"to ask for; set api.enabled or an operator CA, since on its own "+
+				"this would leave the node waiting for a configuration nobody "+
+				"promised to send"))
 	}
 
 	if hasSource {

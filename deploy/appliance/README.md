@@ -12,6 +12,14 @@ rather than an image somebody downloads.
 
 ## Read this first
 
+> **Since [ADR 11](../../docs/adr/0011-api-on-by-default.md), most of this recipe
+> is the default.** A node installed from the published ISO already serves its
+> enrolment route and prints a pairing code. What is left here is the part ADR 11
+> deliberately did not make default: `insecure: true`, which drops the code, and
+> `awaitConfig: true`, which holds the node until somebody sends it a document.
+> Build this only if a console visit per machine is genuinely not going to
+> happen — otherwise the published ISO now does what you came for.
+
 `config.yaml` sets `api.insecure`. **The first client to reach port 7443 owns
 the machine for the rest of its life.** Not just once: the CA it pins is the CA
 the node obeys from then on, and rotating it needs a certificate signed by that
