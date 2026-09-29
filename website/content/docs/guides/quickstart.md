@@ -15,7 +15,7 @@ managing it without SSH.
 The short version, if you are in a hurry:
 
 ```bash
-oras pull ghcr.io/corium-os/corium-qcow2:0.3.6   # download a ready-made disk
+oras pull ghcr.io/corium-os/corium-qcow2:0.4.0   # download a ready-made disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -50,8 +50,8 @@ Pull the artefact that matches where the node will run:
 
 | Artefact | Pull it with | Use it for |
 |---|---|---|
-| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.3.6` | Proxmox, KVM, libvirt |
-| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.3.6` | Bare metal. Installs unattended |
+| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.4.0` | Proxmox, KVM, libvirt |
+| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.4.0` | Bare metal. Installs unattended. See [bare metal](/docs/install/baremetal/) |
 
 The tag above is only an example. **The exact coordinates for a given version,
 with their digests, are on that version's
@@ -64,7 +64,7 @@ No `oras`? A plain `curl` or a browser download works too. See
 received is what was published:
 
 ```bash
-cosign verify ghcr.io/corium-os/corium-qcow2:0.3.6 \
+cosign verify ghcr.io/corium-os/corium-qcow2:0.4.0 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -102,7 +102,7 @@ keep working.
 If you have the repository checked out, validate it before you boot anything:
 
 ```bash
-go run ./cmd/corium-agent validate node.yaml
+mise exec -- go run ./cmd/corium-agent validate node.yaml
 ```
 
 Validation is offline and reports every problem at once, so you do not discover
@@ -156,7 +156,9 @@ genisoimage -output seed.iso -volid cidata -joliet -rock user-data meta-data
 
 ### Without cloud-init
 
-Bare metal with no seed device, PXE, or a preconfigured appliance: put the
+A PC in front of you installs from the ISO with a NoCloud seed on a second USB
+stick — [bare metal](/docs/install/baremetal/) covers that end to end. For bare
+metal with no seed device at all, PXE, or a preconfigured appliance, put the
 configuration where the agent will find it. Sources are tried in this order and
 the first that answers wins.
 
@@ -222,11 +224,11 @@ Install `cctl` on your own machine. Archives are attached to each release, for
 linux and macOS on amd64 and arm64:
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.6'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.4.0'
 ```
 
 The quotes and the version are both required. See
-[downloads](/docs/install/downloads/#installing-cctl) for why, and for installing it
+[downloads](/docs/install/downloads/#install-cctl) for why, and for installing it
 by hand.
 
 Make the operator CA. Its certificate is what nodes are told to trust; the key
@@ -394,7 +396,7 @@ survive an upgrade.
 To publish it:
 
 ```bash
-REGISTRY=ghcr.io/you IMAGE_TAG=0.3.6-1 mise run push
+REGISTRY=ghcr.io/you IMAGE_TAG=0.4.0-1 mise run push
 ```
 
 ### Turn it into a disk

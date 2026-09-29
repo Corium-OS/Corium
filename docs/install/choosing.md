@@ -7,9 +7,10 @@ node is told what it is. Pick the row that matches your target.
 |---|---|---|
 | Proxmox, KVM or libvirt | [Proxmox](proxmox.md) | cloud-init, from a snippet on the host |
 | An OpenStack cloud | [OpenStack](openstack.md) | cloud-init, through the metadata service |
+| A desktop PC, a tower or a mini-PC in front of you | [Bare metal](baremetal.md) | A NoCloud seed on a second USB stick |
 | A dedicated server you reach over a provider's rescue system | [Rescue mode](rescue.md) | A seed you write to the disk before first boot |
 | Any other cloud or hypervisor | [Quick start](../quickstart.md) | cloud-init user-data |
-| Bare metal with no seed device, or PXE | [Quick start](../quickstart.md#without-cloud-init) | `/etc/corium/config.yaml` or the kernel command line |
+| PXE, or bare metal with no seed device at all | [Quick start](../quickstart.md#without-cloud-init) | `/etc/corium/config.yaml` or the kernel command line |
 
 Once one node works, these build on it:
 

@@ -22,7 +22,7 @@ all of it on Proxmox, and it will make more sense once you have read this.
 - SSH to all three machines from wherever you run step 4, as the user in the
   `users:` block.
 - `cctl`, for the last section only.
-  [Downloads](downloads.md#installing-cctl) installs it.
+  [Downloads](downloads.md#install-cctl) installs it.
 
 ## The shape
 
@@ -212,7 +212,7 @@ from `deploy/proxmox/`.
 > it **destroys** any VM already holding one of those VMIDs.
 
 ```bash
-DISK_IMAGE=/var/lib/vz/template/corium-0.3.6-x86_64.qcow2 \
+DISK_IMAGE=/var/lib/vz/template/corium-0.4.0-x86_64.qcow2 \
 SSH_KEY="$(cat ~/.ssh/id_ed25519.pub)" \
 CLUSTER_NAME=homelab VIP=192.168.0.200 GATEWAY=192.168.0.1 \
 NODE_IPS="192.168.0.201 192.168.0.202 192.168.0.203" \

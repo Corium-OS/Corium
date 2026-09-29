@@ -22,7 +22,7 @@ start.
 ## Build the image first
 
 ```bash
-IMAGE=ghcr.io/corium-os/corium:0.2.0 mise run zfs-image
+IMAGE=ghcr.io/corium-os/corium:0.4.0 mise run zfs-image
 ```
 
 The reasoning, the build caveats, and what to do when a kernel bump outruns the

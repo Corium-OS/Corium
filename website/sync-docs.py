@@ -87,18 +87,22 @@ PAGES = [
     ("install/proxmox.md", "install", "proxmox", "Proxmox", 301,
      "A single node on a Proxmox host, from the published qcow2 to a cluster "
      "that schedules work, with the commands and the output from a real run."),
-    ("install/ha-cluster.md", "install", "ha-cluster", "HA cluster", 302,
+    ("install/baremetal.md", "install", "baremetal", "Bare metal", 302,
+     "A desktop PC, a tower or a mini-PC turned into a node from a USB stick: "
+     "the unattended ISO, the NoCloud seed that configures it, the firmware "
+     "settings, and the reinstall loop a wrong boot order causes."),
+    ("install/ha-cluster.md", "install", "ha-cluster", "HA cluster", 303,
      "Building a three-controller cluster by hand: what each node is told, why "
      "the joiners wait for a token that does not exist yet, and how to check it."),
-    ("install/openstack.md", "install", "openstack", "OpenStack", 303,
+    ("install/openstack.md", "install", "openstack", "OpenStack", 304,
      "A node on an OpenStack cloud from the published qcow2: registering a UEFI "
      "image, and how the corium: block reaches it through the metadata service."),
-    ("install/rescue.md", "install", "rescue", "Rescue mode", 304,
+    ("install/rescue.md", "install", "rescue", "Rescue mode", 305,
      "Installing onto a dedicated server from a provider's rescue system: "
      "bootc install to-disk, the qcow2 fallback when the rescue runs from a "
      "ramfs, and the OVH specifics."),
     ("install/stretched-cluster-wireguard.md", "install",
-     "stretched-cluster-wireguard", "Stretched cluster", 305,
+     "stretched-cluster-wireguard", "Stretched cluster", 306,
      "A cluster split across two locations with its inter-node pod traffic "
      "encrypted by Calico WireGuard: why not Kilo, the MTU that bites, and a "
      "tcpdump proof that nothing crosses the wire in the clear."),

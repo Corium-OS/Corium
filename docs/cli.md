@@ -2,7 +2,7 @@
 
 `cctl` manages Corium nodes: it reads their state, drives their upgrades, and
 decides which of them will obey you. This page tracks `main`. The current
-stable release is **0.3.6**, and a command newer than the release you are
+stable release is **0.4.0**, and a command newer than the release you are
 running carries the version that introduced it.
 
 | Command | Role | What it does | Section |
@@ -39,11 +39,11 @@ it holds the private key that owns a fleet, and nothing holding that key belongs
 in an operating system image. A node ships `corium-agent`, which does the local
 work, and `corium-apid`, which answers `cctl` over the network.
 
-Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.3.6'`. The
+Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.4.0'`. The
 quotes matter in zsh, and the version is not optional. The other route is an
 archive from the
 [release page](https://github.com/Corium-OS/Corium/releases/latest), and
-[downloads](install/downloads.md#installing-cctl) covers both, including how to
+[downloads](install/downloads.md#install-cctl) covers both, including how to
 verify what you fetched. From a checkout, `mise run build`.
 
 ---
@@ -622,7 +622,7 @@ removes every key the API was trusting. See ADR 5.
 > upgraded, because a half-upgraded cluster is a decision somebody has to make.
 
 ```console
-$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.3
+$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.4
 [1/3] node-1:7443
         staged sha256:bbbb2222
         draining and rebooting.......
@@ -856,7 +856,7 @@ Two things worth knowing:
 
 ```console
 $ cctl version
-cctl 0.3.6 (a2575f3)
+cctl 0.4.0 (a2575f3)
 ```
 
 The version and the short commit are stamped in at link time. A release binary
