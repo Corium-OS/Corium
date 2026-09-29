@@ -12,6 +12,8 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-29
+
 ### Added
 
 - **An install guide for a PC in front of you.**
@@ -752,7 +754,8 @@ the node is described in cloud-init.
   turns it into a disk image is pinned to a floating tag, so two runs against
   the same digest may not produce identical bytes.
 
-[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Corium-OS/Corium/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Corium-OS/Corium/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/Corium-OS/Corium/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/Corium-OS/Corium/compare/v0.3.4...v0.3.5
