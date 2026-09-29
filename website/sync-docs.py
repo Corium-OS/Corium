@@ -154,6 +154,12 @@ PAGES = [
      "Why the Kubernetes version stops being a property of the OS image and "
      "becomes an axis of its own, delivered as a signed system extension that "
      "overlays the k0s binary the image still ships as a floor."),
+    ("adr/0011-api-on-by-default.md", "decisions",
+     "adr-0011-api-on-by-default",
+     "ADR 11 — API on by default", 1010,
+     "Why an absent api: block now means the management API runs: the installer "
+     "ISO produces a node that was never configured and cannot be logged into, "
+     "and why enrolment closes the moment the node bootstraps."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
