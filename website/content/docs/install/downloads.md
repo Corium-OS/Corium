@@ -20,7 +20,7 @@ Every release publishes four artefacts, all signed:
 
 > **The exact coordinates and digests for a version are on its release page:
 > [latest release](https://github.com/Corium-OS/Corium/releases/latest)** —
-> they change every release. Substitute your version for `0.4.0` below.
+> they change every release. Substitute your version for `0.5.0` below.
 
 ---
 
@@ -32,7 +32,7 @@ and macOS, on amd64 and arm64; there is no Windows build.
 With [mise](https://mise.jdx.dev):
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.4.0'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'
 ```
 
 Quote it and pin it — both are load-bearing:
@@ -47,7 +47,7 @@ Quote it and pin it — both are load-bearing:
 By hand instead:
 
 ```bash
-version=0.4.0
+version=0.5.0
 os=linux          # darwin on macOS
 arch=amd64        # arm64 on Apple silicon, and on 64-bit Arm linux
 base=https://github.com/Corium-OS/Corium/releases/download/v${version}
@@ -74,19 +74,19 @@ the same bytes — pick whichever you have tooling for.
 
 ```bash
 # With oras. One command, and it names the file for you.
-oras pull ghcr.io/corium-os/corium-iso:0.4.0
+oras pull ghcr.io/corium-os/corium-iso:0.5.0
 ```
 
 ```bash
 # Without oras. ghcr issues pull tokens anonymously for public packages.
 token=$(curl -s "https://ghcr.io/token?scope=repository:corium-os/corium-iso:pull" | jq -r .token)
-curl -L -H "Authorization: Bearer ${token}" -o corium-0.4.0-x86_64.iso \
+curl -L -H "Authorization: Bearer ${token}" -o corium-0.5.0-x86_64.iso \
   https://ghcr.io/v2/corium-os/corium-iso/blobs/sha256:<layer digest from the release notes>
 ```
 
 ```
 # From a browser, no tooling. The release notes carry the link.
-https://<cdn>/corium-0.4.0-x86_64.iso
+https://<cdn>/corium-0.5.0-x86_64.iso
 ```
 
 The third is a CDN mirror: a convenience, not the release. It is allowed to be
@@ -115,7 +115,7 @@ artefact, from a public transparency log.
 **Did I receive those exact bytes?** The hash, published in the release notes:
 
 ```bash
-sha256sum corium-0.4.0-x86_64.iso
+sha256sum corium-0.5.0-x86_64.iso
 # must equal the hash printed in the release notes
 ```
 

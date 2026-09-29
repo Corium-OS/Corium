@@ -50,7 +50,7 @@ is allowed, and [recoverable](#if-you-install-without-a-seed).
 
 ## 1. Write the ISO to a stick
 
-Fetch `corium-0.4.0-x86_64.iso` and check it — [downloads](/docs/install/downloads/) covers
+Fetch `corium-0.5.0-x86_64.iso` and check it — [downloads](/docs/install/downloads/) covers
 all three routes and the verification.
 
 **`dd` to the wrong device destroys that device.** Run the listing first:
@@ -58,14 +58,14 @@ all three routes and the verification.
 ```bash
 # linux
 lsblk -o NAME,SIZE,MODEL,TRAN
-sudo dd if=corium-0.4.0-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sudo dd if=corium-0.5.0-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
 ```bash
 # macOS
 diskutil list
 diskutil unmountDisk /dev/diskN
-sudo dd if=corium-0.4.0-x86_64.iso of=/dev/rdiskN bs=4m
+sudo dd if=corium-0.5.0-x86_64.iso of=/dev/rdiskN bs=4m
 ```
 
 `/dev/rdiskN` rather than `/dev/diskN` on macOS: the raw device is roughly an
