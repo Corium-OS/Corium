@@ -218,6 +218,40 @@ func (c *Client) ApplyConfig(ctx context.Context, document []byte) (*ConfigResul
 	return &result, nil
 }
 
+// RecordedConfig is the document a node is reasoning from, and where it came
+// from.
+type RecordedConfig struct {
+	// Document is the corium: YAML verbatim, as the node stored it.
+	Document string `json:"document"`
+
+	// Source is "applied" when the node returned the baseline it recorded
+	// acting on, and "etc" when it had none and fell back to the machine-local
+	// file. Only the first describes what is actually running.
+	Source string `json:"source"`
+
+	// Path is where the node read it from.
+	Path string `json:"path"`
+
+	// LocalEdit reports a /etc/corium/config.yaml that no longer matches the
+	// baseline: somebody edited the file and never applied it, so it is not
+	// what the node is running and not what the next apply will diff against.
+	LocalEdit bool `json:"localEdit"`
+}
+
+// ShowConfig asks a node for the configuration document it is reasoning from.
+//
+// It is the read half of ApplyConfig, and it reports the node's own record in
+// preference to the file in /etc -- which is the only one of the two that
+// describes what is running. See ADR 8.
+func (c *Client) ShowConfig(ctx context.Context) (*RecordedConfig, error) {
+	var recorded RecordedConfig
+	if err := c.call(ctx, http.MethodGet, "/v1/config", nil, &recorded); err != nil {
+		return nil, err
+	}
+
+	return &recorded, nil
+}
+
 // Health is the authenticated round trip: it proves the certificate works and
 // says what the node authenticated it as.
 type Health struct {
