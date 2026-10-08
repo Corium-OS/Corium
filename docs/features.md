@@ -216,6 +216,7 @@ Commands rather than schema fields. The syntax, flags and output are in
 | `cctl cordon` / `cctl drain` | At `corium:operator`, **on controllers only**. A drain a pod disruption budget refuses is not forced, and the node stays cordoned |
 | `cctl reboot` / `cctl shutdown` | At `corium:admin`. The node answers before it goes |
 | `cctl kubeconfig <node>` | At `corium:admin`. Points at the cluster's virtual IP where there is one; `--server` overrides |
+| `cctl config <node>` | At `corium:admin`. Prints the `corium:` document the node recorded applying — the same baseline `cctl apply` diffs against, not the file in `/etc` somebody may have edited since. Says so when the two disagree |
 | `cctl worker-config <controller>` | At `corium:admin`, **on controllers only**. Mints a fresh worker token and prints the `corium:` block to paste into a cloud-config; `--name`, `--label` and `--expiry` fill it in |
 | `cctl reset --confirm <node name>` | Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |
 | `cctl ca rotate <nodes...> --to <dir>` | At `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
