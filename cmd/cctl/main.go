@@ -47,6 +47,7 @@ Commands:
   pki issue     Sign a client certificate for yourself
   enroll        Claim an unenrolled node, using the code on its console
   apply         Give a node the corium: configuration it will bootstrap with
+  config        Print the corium: document a node is reasoning from
   status        Report what a node is: image, digest, role, k0s, health
   services      List the services this API knows about, and their state
   restart       Restart k0s on a node
@@ -96,6 +97,8 @@ func run() error {
 		return enrolCommand(ctx, args)
 	case "apply":
 		return applyCommand(ctx, args)
+	case "config":
+		return showConfigCommand(ctx, args)
 	case "status":
 		return statusCommand(ctx, args)
 	case "services":
@@ -1096,6 +1099,59 @@ func applyCommand(ctx context.Context, args []string) error {
 
 		fmt.Print("The node bootstraps with this the next time its bootstrap runs --\n" +
 			"now, if it was holding for one.\n")
+	}
+
+	return nil
+}
+
+// showConfigCommand prints the document a node is reasoning from.
+//
+// The document goes to standard output and everything else to standard error,
+// so `cctl config <node> > node.yaml` and `diff <(cctl config a) local.yaml`
+// both do what they look like they do.
+func showConfigCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cctl config", flag.ExitOnError)
+
+	var (
+		dir         = flags.String("dir", "", "operator directory (default ~/.corium)")
+		fingerprint = flags.String("fingerprint", "", "override the remembered fingerprint")
+	)
+
+	client, address, err := target(flags, args, "cctl config <address>", dir, fingerprint)
+	if err != nil {
+		return err
+	}
+
+	recorded, err := client.ShowConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stdout.WriteString(recorded.Document); err != nil {
+		return err
+	}
+
+	// The provenance, not the document, is the part an operator has to read
+	// rather than pipe -- so it goes where a pipe will not swallow it.
+	switch {
+	case recorded.Source == "etc":
+		fmt.Fprintf(os.Stderr,
+			"\n%s has no recorded baseline, so this is %s -- what somebody wrote,\n"+
+				"which is not necessarily what the node bootstrapped with.\n",
+			address, recorded.Path)
+
+	case recorded.LocalEdit:
+		// The one case worth interrupting for: two documents on the node
+		// disagree, and the operator is looking at the one that is running.
+		fmt.Fprintf(os.Stderr,
+			"\nThis is %s: what %s recorded applying.\n\n"+
+				"Warning: %s has been edited since and does not match. That edit is not\n"+
+				"running, and `cctl apply` diffs against this document, not that file.\n",
+			recorded.Path, address, api.ConfigPath)
+
+	default:
+		fmt.Fprintf(os.Stderr, "\nThis is %s: what %s recorded applying.\n",
+			recorded.Path, address)
 	}
 
 	return nil

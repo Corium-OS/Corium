@@ -387,6 +387,11 @@ func (s *Server) routes() http.Handler {
 	// only one.
 	mux.HandleFunc("POST /v1/config", require(RoleAdmin, s.handleApplyConfig))
 
+	// The read half, at the same rung and for a different reason: it changes
+	// nothing, but a corium: document may carry an inline join token or a
+	// WireGuard private key, and `k0s.patch` may carry anything at all.
+	mux.HandleFunc("GET /v1/config", require(RoleAdmin, s.handleShowConfig))
+
 	// The Kubernetes version, as a verb of its own. Admin, like POST /v1/config:
 	// it changes what the node runs and takes it out of service to do it.
 	mux.HandleFunc("POST /v1/kubernetes",

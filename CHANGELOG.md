@@ -12,6 +12,27 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **`cctl config <node>` reads a node's configuration back.** The management
+  API could write a `corium:` document and not return one: a node recorded what
+  it applied, diffed the next `cctl apply` against that record, and offered no
+  way to ask what the record said. An operator arriving at a fleet somebody else
+  built could change a node's configuration without being able to read it.
+
+  It prints the document to standard output and everything else to standard
+  error, so `cctl config node-01 > node-01.yaml` and
+  `diff <(cctl config node-01) node-01.yaml` both work. What it returns is
+  `/var/lib/corium/applied.yaml` — what the node *acted on* — in preference to
+  `/etc/corium/config.yaml`, which is only what somebody wrote; that is the same
+  order `cctl apply` diffs against, and when the two disagree it warns that the
+  edit in `/etc` is not running. A node with neither file, having bootstrapped
+  from cloud-init or the kernel command line, says so rather than inventing one.
+
+  It is `corium:admin`, for what a document may carry rather than for what
+  reading it does: an inline `join.token`, a VRRP `authPass`, a WireGuard
+  `privateKey`, or a `k0s.patch` holding anything at all.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

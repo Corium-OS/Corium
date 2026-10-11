@@ -361,6 +361,47 @@ a release older than this feature** has no record of what it was built with, so
 its first day-two apply is refused until it is re-bootstrapped through
 `cctl reset`; a node bootstrapped since records that baseline itself.
 
+### Reading one back
+
+`cctl config` is the other half of `cctl apply`: it prints the `corium:`
+document the node is reasoning from. *New in 0.6.0 — before that a node's
+configuration could be written over the API but not read.*
+
+```console
+$ cctl config 192.168.1.51
+corium:
+  role: controller+worker
+  cluster: lab
+
+This is /var/lib/corium/applied.yaml: what 192.168.1.51:7443 recorded applying.
+```
+
+The document goes to standard output and everything else to standard error, so
+`cctl config node-01 > node-01.yaml` and
+`diff <(cctl config node-01) node-01.yaml` both do what they look like.
+
+What it returns is the baseline in `/var/lib/corium/applied.yaml` — what the
+node *acted on* — in preference to `/etc/corium/config.yaml`, which is only
+what somebody wrote. That is the same order `cctl apply` diffs against, and
+deliberately so: an endpoint that showed you a different document from the one
+the next apply will compare against would be worse than no endpoint. When the
+two disagree, it says so:
+
+```console
+Warning: /etc/corium/config.yaml has been edited since and does not match. That
+edit is not running, and `cctl apply` diffs against this document, not that file.
+```
+
+A node with no recorded baseline falls back to `/etc/corium/config.yaml` and
+labels it, and a node that has neither — one that bootstrapped from cloud-init
+or the kernel command line, neither of which it keeps — is a `409`.
+
+It is `corium:admin`, for what a document may carry rather than for what
+reading it does: an inline `join.token`, a VRRP `authPass`, a WireGuard
+`privateKey`, and a `k0s.patch` whose contents Corium only checks is valid
+YAML. That is the rung `cctl kubeconfig` and `cctl worker-config` already sit
+on, so it hands an admin nothing they could not already mint.
+
 ### Reading
 
 | Command | Role | What it does |
@@ -370,6 +411,7 @@ its first day-two apply is refused until it is re-bootstrapped through
 | `cctl services <node>` | `corium:readonly` | The units this API knows about, and their state |
 | `cctl logs <node>` | `corium:readonly` | A journal, per unit or across all of them |
 | `cctl kubeconfig <node>` | `corium:admin` | The cluster's administrator credentials |
+| `cctl config <node>` | `corium:admin` | The `corium:` document the node is reasoning from |
 
 `cctl status` is the only one of these with a flag of its own:
 
@@ -880,7 +922,7 @@ the authoritative one; the role columns in §3 repeat it.
 |---|---|
 | `corium:readonly` | `health`, `status`, `services`, `logs`, `access ssh list` |
 | `corium:operator` | …and `restart`, `cordon`, `drain`, and an upgrade's *staging* |
-| `corium:admin` | …and `apply`, `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `worker-config`, `access ssh add`/`revoke` |
+| `corium:admin` | …and `apply`, `config`, `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `worker-config`, `access ssh add`/`revoke` |
 
 `corium:readonly` is the spelling the certificate carries and the one a node
 checks for. `cctl pki issue --role` and `cctl ca rotate --role` take the short
