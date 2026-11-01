@@ -154,6 +154,10 @@ With three controllers you can lose one and keep etcd quorum, so upgrade them
 one at a time and wait for `Ready` in between. Never take two out of three down
 together — that is quorum lost and an API server that stops accepting writes.
 
+`cctl upgrade` and `cctl k8s upgrade` enforce this: they check every etcd
+member is healthy before and after each controller, and stop otherwise. See
+[etcd around controllers](cli.md#etcd-around-controllers).
+
 With five, two at a time is survivable. With two, there is no quorum to lose
 gracefully and the cluster will be unavailable during each reboot.
 

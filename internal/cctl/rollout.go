@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
@@ -64,12 +65,18 @@ func (r *Rollout) Run(ctx context.Context) error {
 		return errors.New("no nodes to upgrade")
 	}
 
-	clients, err := r.preflight(ctx)
+	clients, roles, err := r.preflight(ctx)
 	if err != nil {
 		return err
 	}
 
+	gate := r.etcdGate(roles)
+
 	if r.DryRun {
+		if err := gate.check(ctx); err != nil {
+			return fmt.Errorf("%w; nothing was changed", err)
+		}
+
 		r.say("\nDry run: every node accepts %s. Nothing was changed.\n", r.Image)
 
 		return nil
@@ -80,7 +87,12 @@ func (r *Rollout) Run(ctx context.Context) error {
 	for i, address := range r.Nodes {
 		r.say("[%d/%d] %s\n", i+1, len(r.Nodes), address)
 
-		if err := r.upgradeOne(ctx, clients[address], address); err != nil {
+		var nodeGate *etcdGate
+		if etcdRole(roles[address]) {
+			nodeGate = gate
+		}
+
+		if err := r.upgradeOne(ctx, clients[address], address, nodeGate); err != nil {
 			r.say("        failed: %v\n", err)
 
 			return fmt.Errorf("%s: %w. %d of %d nodes were upgraded; "+
@@ -95,11 +107,12 @@ func (r *Rollout) Run(ctx context.Context) error {
 
 // preflight asks every node whether it would take the image before the first
 // one is rebooted, so a bad address or a refused image cannot leave the cluster
-// half-way.
-func (r *Rollout) preflight(ctx context.Context) (map[string]*Client, error) {
+// half-way. It also returns each node's reported role.
+func (r *Rollout) preflight(ctx context.Context) (map[string]*Client, map[string]string, error) {
 	r.say("Checking %d nodes can move to %s\n", len(r.Nodes), r.Image)
 
 	clients := make(map[string]*Client, len(r.Nodes))
+	roles := make(map[string]string, len(r.Nodes))
 	cluster := ""
 	refused := 0
 
@@ -113,6 +126,10 @@ func (r *Rollout) preflight(ctx context.Context) (map[string]*Client, error) {
 
 		client, node, err := inspect(ctx, r.Connect, address, &cluster)
 		clients[address] = client
+
+		if node != nil {
+			roles[address] = node.Role
+		}
 
 		if err == nil {
 			err = client.UpgradeCheck(ctx, r.Image)
@@ -131,11 +148,35 @@ func (r *Rollout) preflight(ctx context.Context) (map[string]*Client, error) {
 	}
 
 	if refused > 0 {
-		return nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
+		return nil, nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
 			refused, len(r.Nodes), r.Image)
 	}
 
-	return clients, nil
+	return clients, roles, nil
+}
+
+// etcdGate watches the etcd member of every node whose role may hold one.
+func (r *Rollout) etcdGate(roles map[string]string) *etcdGate {
+	gate := &etcdGate{settle: r.Settle, poll: r.Poll, say: r.say}
+
+	for _, address := range r.Nodes {
+		if !etcdRole(roles[address]) {
+			continue
+		}
+
+		gate.sources = append(gate.sources, etcdSource{
+			address: address,
+			// A fresh client each time: the node may have rebooted.
+			connect: func() (*Client, error) { return r.Connect(address) },
+		})
+	}
+
+	return gate
+}
+
+// etcdRole reports a role that may hold an etcd member; single runs kine.
+func etcdRole(role string) bool {
+	return role != string(config.RoleSingle) && config.Role(role).IsController()
 }
 
 // inspect reads a node and refuses one that is unhealthy or in another cluster
@@ -182,7 +223,7 @@ func bootedImageOf(node *nodeinfo.Node) string {
 	}
 }
 
-func (r *Rollout) upgradeOne(ctx context.Context, client *Client, address string) error {
+func (r *Rollout) upgradeOne(ctx context.Context, client *Client, address string, gate *etcdGate) error {
 	// Before anything: is this node in a state where taking it down is safe?
 	// A node that is already unhealthy is one whose workloads have nowhere
 	// good to go. Asked again after the preflight: an earlier node's reboot may
@@ -194,6 +235,10 @@ func (r *Rollout) upgradeOne(ctx context.Context, client *Client, address string
 
 	if err := healthy(before); err != nil {
 		return err
+	}
+
+	if err := gate.check(ctx); err != nil {
+		return fmt.Errorf("before upgrading it: %w", err)
 	}
 
 	// bootc's own progress, indented under the node it belongs to, so a pull of
@@ -240,6 +285,10 @@ func (r *Rollout) upgradeOne(ctx context.Context, client *Client, address string
 	}
 
 	r.say("        up on %s\n", after.OS.Booted.Digest)
+
+	if err := gate.wait(ctx); err != nil {
+		return fmt.Errorf("upgraded, but %w", err)
+	}
 
 	return nil
 }

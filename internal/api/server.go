@@ -17,6 +17,7 @@ import (
 
 	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/etcd"
 	"github.com/Corium-OS/Corium/internal/k0s"
 	"github.com/Corium-OS/Corium/internal/kubeconfig"
 	"github.com/Corium-OS/Corium/internal/lifecycle"
@@ -93,6 +94,9 @@ type Server struct {
 	// kubeconfig fetches the cluster's administrator credentials.
 	kubeconfig *kubeconfig.Manager
 
+	// etcd reads this controller's own etcd member.
+	etcd *etcd.Manager
+
 	// token mints k0s join tokens, so a controller can hand `cctl worker-config`
 	// what a new node needs to join.
 	token *token.Manager
@@ -161,6 +165,9 @@ func (s *Server) Lifecycle(manager *lifecycle.Manager) { s.lifecycle = manager }
 // Kubeconfig replaces how the server asks k0s for credentials, likewise.
 func (s *Server) Kubeconfig(manager *kubeconfig.Manager) { s.kubeconfig = manager }
 
+// Etcd replaces how the server reads its etcd member, likewise.
+func (s *Server) Etcd(manager *etcd.Manager) { s.etcd = manager }
+
 // Tokens replaces how the server mints k0s join tokens, likewise.
 func (s *Server) Tokens(manager *token.Manager) { s.token = manager }
 
@@ -190,6 +197,7 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		lifecycle:     &lifecycle.Manager{},
 		kubeconfig:    &kubeconfig.Manager{},
 		token:         &token.Manager{},
+		etcd:          &etcd.Manager{},
 		access:        &access.Manager{},
 		configPath:    ConfigPath,
 		appliedPath:   nodeinfo.AppliedConfigFile,
@@ -364,6 +372,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/node", require(RoleReadOnly, s.handleNode))
 	mux.HandleFunc("GET /v1/services", require(RoleReadOnly, s.handleServices))
 	mux.HandleFunc("GET /v1/logs", require(RoleReadOnly, s.handleLogs))
+
+	// This member's health and the membership it sees: no key material, so a read.
+	mux.HandleFunc("GET /v1/etcd", require(RoleReadOnly, s.handleEtcd))
 
 	// Restarting k0s takes a node out of service for as long as it takes to
 	// come back, which is an operator's call and not a reader's.

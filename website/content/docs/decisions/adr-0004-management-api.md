@@ -140,6 +140,13 @@ them: it takes the node out of the cluster, wipes `/var/lib/k0s`, and drops the
 machine back to unenrolled — it is the one operation that returns a node to
 maintenance mode, and it cannot leave it half-way.
 
+*Amended, for etcd quorum during a rollout.* A controller reports its own etcd
+member on `GET /v1/etcd`: etcd's `/health` verdict and the member list that
+member sees. It is a reading of local state, like the k0s version, and judges
+nothing about its peers — it cannot, since k0s binds etcd's client port to
+`127.0.0.1`. Whether the cluster can lose a member is decided in `cctl`, from
+every controller's answer, which keeps the split this section draws.
+
 ### What it does not manage
 
 No arbitrary command execution. There is no `exec`, no `shell`, and no endpoint

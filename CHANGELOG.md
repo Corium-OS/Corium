@@ -14,6 +14,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Added
 
+- **Rollouts no longer take a controller out while etcd is short a member.**
+  `cctl upgrade` and `cctl k8s upgrade` check every etcd member before and
+  after each controller, and stop with the member at fault named. A member on
+  none of the controllers given also stops them, since it counts against the
+  quorum. Controllers answer on the new `GET /v1/etcd`; one too old to has its
+  member reported as unchecked.
+
 - **`cctl k8s upgrade` checks every node before moving the first.** A node
   that is unreachable, unhealthy, listed in the wrong stage, in another cluster
   or refusing the version now stops the rollout with nothing changed, instead

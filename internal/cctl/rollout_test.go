@@ -1,6 +1,7 @@
 package cctl
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/api"
+	"github.com/Corium-OS/Corium/internal/etcd"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
@@ -47,12 +49,16 @@ type fakeNode struct {
 	refuseCheck error
 
 	cluster string
+
+	// role defaults to worker; etcd, when set, is served on GET /v1/etcd.
+	role string
+	etcd *etcd.Status
 }
 
 func (f *fakeNode) node() *nodeinfo.Node {
 	return &nodeinfo.Node{
 		Bootstrapped: true,
-		Role:         "worker",
+		Role:         cmp.Or(f.role, "worker"),
 		Cluster:      f.cluster,
 		OS:           nodeinfo.OS{Booted: &nodeinfo.Deployment{Digest: f.digest}},
 		Kubernetes: nodeinfo.Kubernetes{
@@ -428,6 +434,12 @@ func newTestClient(t *testing.T, node *fakeNode) *Client {
 			}
 
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+		})
+	}
+
+	if node.etcd != nil {
+		mux.HandleFunc("GET /v1/etcd", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(node.etcd)
 		})
 	}
 
