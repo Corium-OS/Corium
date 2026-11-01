@@ -16,7 +16,7 @@ min_version = "2026.5.1"
 # Mirrors the directive in go.mod, which stays the authority CI reads through
 # setup-go's go-version-file.
 go = "1.27"
-golangci-lint = "2.13.2"
+golangci-lint = "2.15.0"
 # Hugo's SCSS pipeline exists only in the extended build, which the registry
 # publishes under its own name. Plain `hugo` cannot build this site.
 hugo-extended = "0.166.0"
