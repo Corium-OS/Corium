@@ -368,6 +368,7 @@ func (s *Server) routes() http.Handler {
 	// other operator work. Applying takes the node out of service and rollback
 	// decides what it comes back as; both are admin.
 	mux.HandleFunc("POST /v1/upgrade/stage", require(RoleOperator, s.handleStage))
+	mux.HandleFunc("POST /v1/upgrade/check", require(RoleOperator, s.handleUpgradeCheck))
 	mux.HandleFunc("POST /v1/upgrade/apply", require(RoleAdmin, s.handleApply))
 	mux.HandleFunc("POST /v1/upgrade/rollback", require(RoleAdmin, s.handleRollback))
 

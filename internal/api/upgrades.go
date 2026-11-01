@@ -90,20 +90,13 @@ func (s *Server) handleStage(w http.ResponseWriter, r *http.Request) {
 	if !committed {
 		// The pull never started, so the image was refused before any bytes
 		// moved. These are the only outcomes that still carry a status code.
-		switch {
-		case err == nil:
+		if err == nil {
 			// Not reached in practice -- Stage announces the pull before it can
 			// succeed -- but writing the result keeps this honest if that ever
 			// changes.
 			writeJSON(w, http.StatusOK, staged)
-		case errors.Is(err, upgrade.ErrBadReference), errors.Is(err, upgrade.ErrNothingStaged):
-			writeError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, upgrade.ErrUnsigned):
-			// 403 rather than 400: the reference is well formed and the node is
-			// refusing it on policy, which is a different thing to fix.
-			writeError(w, http.StatusForbidden, err.Error())
-		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+		} else {
+			writeStageRefusal(w, err)
 		}
 
 		return
@@ -117,6 +110,49 @@ func (s *Server) handleStage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeStageEvent(w, controller, stageEvent{Staged: staged})
+}
+
+// writeStageRefusal answers an image refused before any pull.
+func writeStageRefusal(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, upgrade.ErrBadReference), errors.Is(err, upgrade.ErrNothingStaged):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, upgrade.ErrUnsigned):
+		// 403 rather than 400: the reference is well formed and the node is
+		// refusing it on policy, which is a different thing to fix.
+		writeError(w, http.StatusForbidden, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// handleUpgradeCheck answers whether this node would stage an image, pulling
+// nothing.
+//
+// A route of its own rather than a flag on POST /v1/upgrade/stage: a node older
+// than the flag would ignore it and pull.
+func (s *Server) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxUpgradeBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the request body")
+
+		return
+	}
+
+	var request stageRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "body is not valid JSON")
+
+		return
+	}
+
+	if err := s.upgrades.Check(request.Image); err != nil {
+		writeStageRefusal(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted"})
 }
 
 // writeStageEvent writes one line of the staging stream and flushes it, so the

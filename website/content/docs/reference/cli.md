@@ -668,6 +668,7 @@ removes every key the API was trusting. See ADR 5.
 |---|---|---|
 | `--image` | — | Required. The image to move the nodes to |
 | `--settle` | `15m` | How long to wait for one node to come back; a reboot into a new OS image with k0s starting behind it |
+| `--dry-run` | off | Check every node, then stop without changing anything |
 
 > **Warning.** `cctl upgrade` takes one node at a time and **stops at the first
 > that does not come back**. A rollout that carries on past a broken machine
@@ -676,6 +677,10 @@ removes every key the API was trusting. See ADR 5.
 
 ```console
 $ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.5
+Checking 3 nodes can move to ghcr.io/corium-os/corium:0.5
+  node-1:7443: on ghcr.io/corium-os/corium:0.4
+  ...
+
 [1/3] node-1:7443
         staged sha256:bbbb2222
         draining and rebooting.......
@@ -684,16 +689,25 @@ $ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.5
 ...
 ```
 
-Before each node it checks the node is fit to lose: bootstrapped, k0s running,
-and the last boot not judged bad by greenboot. After each one it checks the
+**Every node is checked before the first one reboots.** Each must be reachable
+and fit to lose — bootstrapped, k0s running, the last boot not judged bad by
+greenboot — in the same cluster as the others, listed once, and its signing
+policy must accept the image. One refusal stops the rollout with nothing
+changed. `--dry-run` stops there anyway. A node older than this check is
+reported and checks the image itself when staged.
+
+Health is asked again just before each node, and after each one it checks the
 node came back **on the digest it was sent to**, not merely that it answers.
 
 A node refuses an image its own signing policy would accept unsigned:
 
 ```console
 $ cctl upgrade node-1 --image quay.io/fedora-ostree-desktops/silverblue:44
-cctl: 403 Forbidden: the node's signing policy does not require a signature
-for this image: quay.io/fedora-ostree-desktops/silverblue:44
+Checking 1 nodes can move to quay.io/fedora-ostree-desktops/silverblue:44
+  node-1:7443: 403 Forbidden: the node's signing policy does not require a
+  signature for this image: quay.io/fedora-ostree-desktops/silverblue:44
+cctl: 1 of 1 nodes cannot move to quay.io/fedora-ostree-desktops/silverblue:44;
+nothing was changed
 ```
 
 That is the check that stops a typo rebasing a Kubernetes node onto a desktop.

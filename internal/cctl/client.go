@@ -710,6 +710,16 @@ func (c *Client) KubernetesCheck(ctx context.Context, version, mirror string) (s
 	return reply.Kubernetes, nil
 }
 
+// UpgradeCheck asks a node whether it would stage an image, pulling nothing.
+func (c *Client) UpgradeCheck(ctx context.Context, image string) error {
+	request, err := json.Marshal(map[string]string{"image": image})
+	if err != nil {
+		return fmt.Errorf("encoding the request: %w", err)
+	}
+
+	return c.call(ctx, http.MethodPost, "/v1/upgrade/check", request, nil)
+}
+
 // Rollback marks a node's previous image as the one to boot next. It does not
 // reboot.
 func (c *Client) Rollback(ctx context.Context) error {

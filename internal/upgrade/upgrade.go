@@ -91,14 +91,10 @@ var referencePattern = regexp.MustCompile(
 func (m *Manager) Stage(ctx context.Context, image string, onProgress func(string)) (*Staged, error) {
 	image = strings.TrimSpace(image)
 
-	if !referencePattern.MatchString(image) {
-		return nil, fmt.Errorf("%q: %w", image, ErrBadReference)
-	}
-
 	// Before the pull, not after: a node that has already downloaded an image
 	// it will not run has spent the bandwidth for nothing, and an operator who
 	// gets the refusal first can fix the reference.
-	if err := checkPolicy(m.PolicyPath, image); err != nil {
+	if err := m.Check(image); err != nil {
 		return nil, err
 	}
 
@@ -143,6 +139,18 @@ func (m *Manager) Stage(ctx context.Context, image string, onProgress func(strin
 	}
 
 	return staged, nil
+}
+
+// Check holds every refusal Stage can reach before pulling, so a rollout can
+// ask it of every node before staging on the first.
+func (m *Manager) Check(image string) error {
+	image = strings.TrimSpace(image)
+
+	if !referencePattern.MatchString(image) {
+		return fmt.Errorf("%q: %w", image, ErrBadReference)
+	}
+
+	return checkPolicy(m.PolicyPath, image)
 }
 
 // switchTo runs `bootc switch`, streaming its progress when there is somewhere
