@@ -717,6 +717,7 @@ cluster to another *Kubernetes* version, which since
 | `--mirror` | — | Override where the extension is pulled from |
 | `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
 | `--dry-run` | off | Check every node, then stop without changing anything |
+| `--json` | off | Print a per-node report on standard output; progress goes to standard error |
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
@@ -743,6 +744,11 @@ others, and accept the version against its own window and skew rules. One
 refusal stops the rollout with nothing changed. `--dry-run` stops there
 anyway. A node older than this check is reported and checks itself when moved.
 
+**A stopped rollout resumes by running the same command again.** Nodes already
+on the target version are skipped. The ones still to move must all start from
+the same minor: a mix, such as a cluster left half-way by an earlier rollout to
+another version, is refused with the nodes named by minor.
+
 Each node downloads the extension *before* it is taken out of service, so an
 unreachable registry or a signature that does not verify costs nothing. Then it
 drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
@@ -758,6 +764,30 @@ forcing it.
 There is no automatic rollback if k0s does not come back on a node: it stays
 cordoned and says why. k0s does not support downgrading a minor, so reversing
 it unasked would risk making a recoverable problem permanent.
+
+`--json` prints one report once the rollout ends, whether it succeeded or not;
+the exit status still says which.
+
+```console
+$ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2 --json 2>/dev/null
+{
+  "version": "v1.36.4+k0s.1",
+  "dryRun": false,
+  "nodes": [
+    {"address": "node-1:7443", "stage": "controller", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "moved"},
+    {"address": "node-2:7443", "stage": "worker", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "failed", "error": "..."}
+  ]
+}
+```
+
+| `result` | Meaning |
+|---|---|
+| `moved` | Now on the target version |
+| `skipped` | Already on the target version |
+| `failed` | The change was attempted and did not complete; the rollout stopped here |
+| `pending` | Not reached, because an earlier node failed |
+| `refused` | Turned down by the check; nothing was changed anywhere |
+| `checked` | Accepted by the check, then left alone: a dry run, or another node was refused |
 
 ### Getting a kubeconfig
 

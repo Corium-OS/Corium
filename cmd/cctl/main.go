@@ -687,6 +687,8 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 			"how long one node is allowed to take")
 		dryRun = flags.Bool("dry-run", false,
 			"check every node accepts the version, and change nothing")
+		asJSON = flags.Bool("json", false,
+			"print a per-node report as JSON; progress goes to standard error")
 	)
 
 	rest, err := parseFlags(flags, args)
@@ -697,7 +699,7 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 	if len(rest) == 0 || rest[0] != "upgrade" {
 		return errors.New(
 			"usage: cctl k8s upgrade --version <version> " +
-				"--controllers <address>[,...] [--workers <address>[,...]] [--dry-run]")
+				"--controllers <address>[,...] [--workers <address>[,...]] [--dry-run] [--json]")
 	}
 
 	if *version == "" {
@@ -728,7 +730,22 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 		},
 	}
 
-	return rollout.Run(ctx)
+	if !*asJSON {
+		return rollout.Run(ctx)
+	}
+
+	// Stdout carries only the report, so it can be piped as is.
+	rollout.Out = os.Stderr
+	runErr := rollout.Run(ctx)
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(rollout.Report()); err != nil {
+		return errors.Join(runErr, fmt.Errorf("writing the report: %w", err))
+	}
+
+	return runErr
 }
 
 // addressList splits a comma-separated list, giving each entry the default
