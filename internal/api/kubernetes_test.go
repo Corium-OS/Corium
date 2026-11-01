@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -127,5 +128,63 @@ func TestSwapToTheRunningVersionDoesNothing(t *testing.T) {
 
 	if got != "v1.36.4+k0s.0" {
 		t.Errorf("got %q, want the floor v1.36.4+k0s.0", got)
+	}
+}
+
+// TestCheckAnswersWithoutChangingAnything covers the route a rollout asks every
+// node before moving the first.
+func TestCheckAnswersWithoutChangingAnything(t *testing.T) {
+	t.Parallel()
+
+	ca := newAuthority(t)
+
+	tests := []struct {
+		name       string
+		version    string
+		wantStatus int
+		wantResult string
+	}{
+		{name: "the running version", version: "v1.36.4+k0s.0",
+			wantStatus: http.StatusOK, wantResult: "unchanged"},
+		{name: "a patch in the window", version: "v1.36.4+k0s.1",
+			wantStatus: http.StatusOK, wantResult: "would-change"},
+		{name: "a minor downgrade", version: "v1.34.11+k0s.1",
+			wantStatus: http.StatusConflict},
+		{name: "outside the window", version: "v1.33.13+k0s.1",
+			wantStatus: http.StatusConflict},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := serverWithWindow(t, ca)
+
+			if err := os.WriteFile(server.configPath, []byte(aDocument), 0o600); err != nil {
+				t.Fatalf("seeding the configuration: %v", err)
+			}
+
+			address := serveOn(t, server)
+			admin := client(t, server.store, ca.issue(t, RoleAdmin))
+
+			status, body := postRaw(t, admin, "https://"+address+"/v1/kubernetes/check",
+				`{"version":"`+test.version+`"}`)
+			if status != test.wantStatus {
+				t.Fatalf("status = %d, want %d (%v)", status, test.wantStatus, body)
+			}
+
+			if result, _ := body["status"].(string); result != test.wantResult {
+				t.Errorf("status field = %q, want %q", result, test.wantResult)
+			}
+
+			written, err := os.ReadFile(server.configPath)
+			if err != nil {
+				t.Fatalf("reading the configuration: %v", err)
+			}
+
+			if string(written) != aDocument {
+				t.Error("a check rewrote the node's configuration")
+			}
+		})
 	}
 }

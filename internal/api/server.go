@@ -392,6 +392,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/kubernetes",
 		require(RoleAdmin, s.handleKubernetesVersion))
 
+	// Changes nothing, but only the caller of the route above needs its answer.
+	mux.HandleFunc("POST /v1/kubernetes/check",
+		require(RoleAdmin, s.handleKubernetesCheck))
+
 	mux.HandleFunc("POST /v1/ca/rotate", require(RoleAdmin, s.handleRotateCA))
 
 	// Admin, and not because it changes anything -- it changes nothing. It

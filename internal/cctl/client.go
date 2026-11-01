@@ -302,6 +302,11 @@ func (c *Client) callUsing(
 	// 202 is what a node returns when it has accepted a job it will not be
 	// around to finish -- applying an upgrade reboots it.
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted {
+		// Handlers answer 404 in JSON; the router's own is plain text.
+		if response.StatusCode == http.StatusNotFound && !json.Valid(raw) {
+			return fmt.Errorf("%w: %s %s", ErrUnknownRoute, method, path)
+		}
+
 		return c.explain(response.Status, raw)
 	}
 
@@ -640,6 +645,31 @@ func (c *Client) KubernetesVersion(ctx context.Context, version, mirror string) 
 	}
 
 	if err := c.call(ctx, http.MethodPost, "/v1/kubernetes", request, &reply); err != nil {
+		return "", err
+	}
+
+	return reply.Kubernetes, nil
+}
+
+// ErrUnknownRoute is a node older than the call made of it.
+var ErrUnknownRoute = errors.New("the node does not know this route")
+
+// KubernetesCheck asks a node whether it would accept a version, changing
+// nothing. It reports the version the node runs now.
+func (c *Client) KubernetesCheck(ctx context.Context, version, mirror string) (string, error) {
+	request, err := json.Marshal(map[string]string{
+		"version": version,
+		"mirror":  mirror,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encoding the request: %w", err)
+	}
+
+	var reply struct {
+		Kubernetes string `json:"kubernetes"`
+	}
+
+	if err := c.call(ctx, http.MethodPost, "/v1/kubernetes/check", request, &reply); err != nil {
 		return "", err
 	}
 

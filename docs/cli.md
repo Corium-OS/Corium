@@ -674,9 +674,14 @@ cluster to another *Kubernetes* version, which since
 | `--workers` | — | Comma-separated, upgraded after every controller |
 | `--mirror` | — | Override where the extension is pulled from |
 | `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
+| `--dry-run` | off | Check every node, then stop without changing anything |
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
+Checking 5 nodes can move to k0s v1.36.4+k0s.1
+  node-1:7443 (controller): on k0s v1.35.8+k0s.1
+  ...
+
 [1/5] node-1:7443 (controller)
         on k0s v1.35.8+k0s.1, moving to v1.36.4+k0s.1
         up on k0s v1.36.4+k0s.1
@@ -689,6 +694,12 @@ preference.** k0s requires controllers to be upgraded before workers, and a
 worker may never be newer than the controllers it talks to. Naming them is you
 stating the shape of the cluster before anything moves, rather than the rollout
 discovering a mistake in the address list half way through.
+
+**Every node is checked before the first one moves.** Each must be reachable
+and healthy, in the stage its role belongs to, in the same cluster as the
+others, and accept the version against its own window and skew rules. One
+refusal stops the rollout with nothing changed. `--dry-run` stops there
+anyway. A node older than this check is reported and checks itself when moved.
 
 Each node downloads the extension *before* it is taken out of service, so an
 unreachable registry or a signature that does not verify costs nothing. Then it

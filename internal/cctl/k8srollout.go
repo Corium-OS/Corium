@@ -45,6 +45,15 @@ type KubernetesRollout struct {
 
 	// Out is where progress is reported.
 	Out io.Writer
+
+	// DryRun stops after every node has been checked.
+	DryRun bool
+}
+
+// rolloutStage is one group of nodes moved together, in order.
+type rolloutStage struct {
+	name  string
+	nodes []string
 }
 
 // DefaultKubernetesTimeout is what one node is allowed. The download is the
@@ -64,10 +73,7 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 		r.Timeout = DefaultKubernetesTimeout
 	}
 
-	stages := []struct {
-		name  string
-		nodes []string
-	}{
+	stages := []rolloutStage{
 		{"controller", r.Controllers},
 		{"worker", r.Workers},
 	}
@@ -77,6 +83,19 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 		return errors.New("no nodes to move")
 	}
 
+	clients, err := r.preflight(ctx, stages, total)
+	if err != nil {
+		return err
+	}
+
+	if r.DryRun {
+		r.say("\nDry run: every node accepts k0s %s. Nothing was changed.\n", r.Version)
+
+		return nil
+	}
+
+	r.say("\n")
+
 	done := 0
 
 	for _, stage := range stages {
@@ -85,7 +104,7 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 
 			r.say("[%d/%d] %s (%s)\n", done, total, address, stage.name)
 
-			if err := r.moveOne(ctx, address); err != nil {
+			if err := r.moveOne(ctx, clients[address]); err != nil {
 				r.say("        failed: %v\n", err)
 
 				return fmt.Errorf(
@@ -102,12 +121,107 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *KubernetesRollout) moveOne(ctx context.Context, address string) error {
-	client, err := r.Connect(address)
-	if err != nil {
-		return err
+// preflight asks every node whether it can be moved before the first one is,
+// so a bad address or a refused version cannot leave the cluster half-way.
+func (r *KubernetesRollout) preflight(
+	ctx context.Context, stages []rolloutStage, total int,
+) (map[string]*Client, error) {
+	r.say("Checking %d nodes can move to k0s %s\n", total, r.Version)
+
+	clients := make(map[string]*Client, total)
+	cluster := ""
+	refused := 0
+
+	for _, stage := range stages {
+		for _, address := range stage.nodes {
+			if _, seen := clients[address]; seen {
+				r.say("  %s (%s): listed twice\n", address, stage.name)
+				refused++
+
+				continue
+			}
+
+			client, running, err := r.checkOne(ctx, address, stage.name, &cluster)
+			clients[address] = client
+
+			switch {
+			case errors.Is(err, ErrUnknownRoute):
+				r.say("  %s (%s): on k0s %s; predates the check, it will check when moved\n",
+					address, stage.name, running)
+			case err != nil:
+				r.say("  %s (%s): %v\n", address, stage.name, err)
+				refused++
+			case running == r.Version:
+				r.say("  %s (%s): already on k0s %s\n", address, stage.name, running)
+			default:
+				r.say("  %s (%s): on k0s %s\n", address, stage.name, running)
+			}
+		}
 	}
 
+	if refused > 0 {
+		return nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
+			refused, total, r.Version)
+	}
+
+	return clients, nil
+}
+
+// checkOne reads a node and asks it to validate the version. cluster carries
+// the first cluster name seen, which every other node must share.
+func (r *KubernetesRollout) checkOne(
+	ctx context.Context, address, stage string, cluster *string,
+) (*Client, string, error) {
+	client, err := r.Connect(address)
+	if err != nil {
+		return nil, "", err
+	}
+
+	node, err := client.Node(ctx)
+	if err != nil {
+		return client, "", err
+	}
+
+	if err := healthy(node); err != nil {
+		return client, "", err
+	}
+
+	if err := roleFits(node.Role, stage); err != nil {
+		return client, "", err
+	}
+
+	if node.Cluster != "" {
+		if *cluster == "" {
+			*cluster = node.Cluster
+		} else if node.Cluster != *cluster {
+			return client, "", fmt.Errorf("in cluster %q, the others in %q", node.Cluster, *cluster)
+		}
+	}
+
+	running, err := client.KubernetesCheck(ctx, r.Version, r.Mirror)
+	if errors.Is(err, ErrUnknownRoute) {
+		return client, kubernetesVersionOf(node), err
+	}
+
+	return client, running, err
+}
+
+// roleFits refuses a node listed in the wrong stage, which would break the
+// controllers-first order. An unreported role is left to the node.
+func roleFits(role, stage string) error {
+	if role == "" {
+		return nil
+	}
+
+	isWorker := role == "worker"
+	if isWorker != (stage == "worker") {
+		return fmt.Errorf("is a %s, listed as a %s", role, stage)
+	}
+
+	return nil
+}
+
+func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {
 	// Before anything: is this node in a state where taking it out of service
 	// is safe? A node that is already unhealthy is one whose workloads have
 	// nowhere good to go, and whose control plane can least afford to lose a

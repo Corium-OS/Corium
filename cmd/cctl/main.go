@@ -682,6 +682,8 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 			"comma-separated worker addresses, upgraded after the controllers")
 		timeout = flags.Duration("timeout", cctl.DefaultKubernetesTimeout,
 			"how long one node is allowed to take")
+		dryRun = flags.Bool("dry-run", false,
+			"check every node accepts the version, and change nothing")
 	)
 
 	rest, err := parseFlags(flags, args)
@@ -692,7 +694,7 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 	if len(rest) == 0 || rest[0] != "upgrade" {
 		return errors.New(
 			"usage: cctl k8s upgrade --version <version> " +
-				"--controllers <address>[,...] [--workers <address>[,...]]")
+				"--controllers <address>[,...] [--workers <address>[,...]] [--dry-run]")
 	}
 
 	if *version == "" {
@@ -717,6 +719,7 @@ func kubernetesCommand(ctx context.Context, args []string) error {
 		Workers:     addressList(*workers),
 		Timeout:     *timeout,
 		Out:         os.Stdout,
+		DryRun:      *dryRun,
 		Connect: func(address string) (*cctl.Client, error) {
 			return connectWith(store, address, "")
 		},
