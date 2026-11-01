@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
+	"github.com/Corium-OS/Corium/internal/lifecycle"
 )
 
 // testWindow is the window an image would ship: a floor, and the three minors
@@ -186,5 +188,80 @@ func TestCheckAnswersWithoutChangingAnything(t *testing.T) {
 				t.Error("a check rewrote the node's configuration")
 			}
 		})
+	}
+}
+
+// TestSwapRefusesWhileOneIsRunning covers a client retrying while the swap it
+// abandoned is still running on the node.
+func TestSwapRefusesWhileOneIsRunning(t *testing.T) {
+	t.Parallel()
+
+	server := serverWithWindow(t, newAuthority(t))
+
+	server.swapping.Lock()
+	defer server.swapping.Unlock()
+
+	_, err := server.swapKubernetesVersion(context.Background(),
+		&config.Config{
+			Role:       config.RoleSingle,
+			Kubernetes: config.Kubernetes{Version: "v1.36.4+k0s.0"},
+		})
+	if !errors.Is(err, ErrSwapInProgress) {
+		t.Fatalf("error is %v, want %v", err, ErrSwapInProgress)
+	}
+}
+
+// TestSwapOutlivesTheClient covers a client that leaves once the node has
+// started draining: a ^C, a laptop going to sleep, `cctl k8s upgrade --timeout`.
+// The swap must still reach systemd rather than leave k0s stopped on a
+// cordoned node.
+func TestSwapOutlivesTheClient(t *testing.T) {
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+
+	// systemctl is the first step after the drain that the Runner does not
+	// stub, so a stand-in on PATH records whether the swap got that far.
+	script := "#!/bin/sh\necho \"$@\" >> " + calls + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(script), 0o700); err != nil {
+		t.Fatalf("writing the systemctl stand-in: %v", err)
+	}
+
+	t.Setenv("PATH", bin)
+
+	clientCtx, leave := context.WithCancel(context.Background())
+	defer leave()
+
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 1 && args[1] == "drain" {
+			leave()
+		}
+
+		return nil, nil
+	}
+
+	server := serverWithWindow(t, newAuthority(t))
+	server.Lifecycle(&lifecycle.Manager{Run: run, Dir: t.TempDir(), Hostname: "node-01"})
+
+	floor, err := k0s.ParseVersion("v1.36.4+k0s.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	next, err := k0s.ParseVersion("v1.36.4+k0s.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fails at Activate, which finds nothing downloaded; what matters is that
+	// it got there with a live context.
+	_, err = server.commitSwap(clientCtx,
+		kubernetesPlan{active: floor, requested: next}, config.RoleSingle)
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("the swap stopped with its client: %v", err)
+	}
+
+	recorded, readErr := os.ReadFile(calls)
+	if readErr != nil || !strings.HasPrefix(string(recorded), "stop ") {
+		t.Fatalf("k0s was never stopped after the client left (swap error = %v)", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Corium-OS/Corium/internal/access"
@@ -84,6 +85,10 @@ type Server struct {
 
 	// lifecycle does the things that cannot be undone by doing them again.
 	lifecycle *lifecycle.Manager
+
+	// swapping is held for a whole k0s version change, which outlives the
+	// request that started it.
+	swapping sync.Mutex
 
 	// kubeconfig fetches the cluster's administrator credentials.
 	kubeconfig *kubeconfig.Manager

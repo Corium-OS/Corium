@@ -15,6 +15,11 @@ import (
 	"github.com/Corium-OS/Corium/internal/lifecycle"
 )
 
+// ErrSwapInProgress reports a version change asked for while one is running.
+var ErrSwapInProgress = errors.New(
+	"a k0s version change is already in progress on this node; " +
+		"watch its journal and retry once it has finished")
+
 // swapKubernetesVersion moves a running node to another k0s version.
 //
 // Unlike the rest of the safe subset, this one cannot be handed to a reconciler
@@ -38,12 +43,19 @@ import (
 //
 // Returns the version now running.
 func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config) (string, error) {
+	// A retried request must not start a second swap under one its client
+	// abandoned.
+	if !s.swapping.TryLock() {
+		return "", ErrSwapInProgress
+	}
+	defer s.swapping.Unlock()
+
 	plan, err := s.checkKubernetesVersion(next)
 	if err != nil {
 		return "", err
 	}
 
-	active, requested, window := plan.active, plan.requested, plan.window
+	active, requested := plan.active, plan.requested
 
 	if active.Raw == requested.Raw {
 		return active.Raw, nil
@@ -54,17 +66,36 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 		return "", err
 	}
 
+	return s.commitSwap(ctx, plan, next.Role)
+}
+
+// swapTimeout bounds a committed swap. It sits above the sum of its steps' own
+// bounds, so it only cuts a step that is genuinely hung.
+const swapTimeout = 30 * time.Minute
+
+// commitSwap is the part of a swap that takes the node out of service.
+//
+// Detached from the caller: a client that leaves after the drain started would
+// otherwise strand the node cordoned, or with k0s stopped.
+func (s *Server) commitSwap(
+	ctx context.Context, plan kubernetesPlan, role config.Role,
+) (string, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), swapTimeout)
+	defer cancel()
+
+	active, requested, window := plan.active, plan.requested, plan.window
+
 	drained, err := s.drainForSwap(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	service := k0s.ServiceName(next.Role)
+	service := k0s.ServiceName(role)
 
 	slog.Warn("swapping the k0s version",
 		"from", active, "to", requested, "service", service)
 
-	if err := k0s.Stop(ctx, next.Role); err != nil {
+	if err := k0s.Stop(ctx, role); err != nil {
 		return "", fmt.Errorf("stopping %s: %w", service, err)
 	}
 
@@ -79,7 +110,7 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 		return "", err
 	}
 
-	if err := k0s.Start(ctx, next.Role); err != nil {
+	if err := k0s.Start(ctx, role); err != nil {
 		return "", fmt.Errorf(
 			"starting %s on k0s %s: %w; the node is cordoned and the previous "+
 				"version is still in %s",
@@ -287,6 +318,12 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 	}
 
 	running, err := s.swapKubernetesVersion(r.Context(), next)
+	if errors.Is(err, ErrSwapInProgress) {
+		writeError(w, http.StatusConflict, err.Error())
+
+		return
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 
