@@ -726,6 +726,7 @@ cluster to another *Kubernetes* version, which since
 | `--mirror` | — | Override where the extension is pulled from |
 | `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
 | `--dry-run` | off | Check every node, then stop without changing anything |
+| `--json` | off | Print a per-node report on standard output; progress goes to standard error |
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
@@ -767,6 +768,29 @@ forcing it.
 There is no automatic rollback if k0s does not come back on a node: it stays
 cordoned and says why. k0s does not support downgrading a minor, so reversing
 it unasked would risk making a recoverable problem permanent.
+
+`--json` prints one report once the rollout ends, whether it succeeded or not;
+the exit status still says which.
+
+```console
+$ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2 --json 2>/dev/null
+{
+  "version": "v1.36.4+k0s.1",
+  "dryRun": false,
+  "nodes": [
+    {"address": "node-1:7443", "stage": "controller", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "moved"},
+    {"address": "node-2:7443", "stage": "worker", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "failed", "error": "..."}
+  ]
+}
+```
+
+| `result` | Meaning |
+|---|---|
+| `moved` | Now on the target version |
+| `failed` | The change was attempted and did not complete; the rollout stopped here |
+| `pending` | Not reached, because an earlier node failed |
+| `refused` | Turned down by the check; nothing was changed anywhere |
+| `checked` | Accepted by the check, then left alone: a dry run, or another node was refused |
 
 ### Getting a kubeconfig
 

@@ -369,4 +369,106 @@ func TestDryRunMovesNothing(t *testing.T) {
 			t.Errorf("%s moved %d times, want 0", address, node.moved)
 		}
 	}
+
+	for _, result := range rollout.Report().Nodes {
+		if result.Result != ResultChecked {
+			t.Errorf("%s: result %q, want %q", result.Address, result.Result, ResultChecked)
+		}
+	}
+}
+
+func TestRolloutResultsRecordEveryNode(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+		"c2:7443": {
+			role: "controller", version: "v1.35.8+k0s.1", checks: true,
+			refuse: errors.New("drain refused"),
+		},
+		"w1:7443": {role: "worker", version: "v1.35.8+k0s.1", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443", "c2:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+	}
+
+	if err := rollout.Run(t.Context()); err == nil {
+		t.Fatal("the rollout carried on past a node that failed")
+	}
+
+	got := rollout.Report().Nodes
+	if len(got) != 3 {
+		t.Fatalf("got %d results, want 3: %+v", len(got), got)
+	}
+
+	if !strings.Contains(got[1].Error, "drain refused") {
+		t.Errorf("failed node error = %q, want the node's reason", got[1].Error)
+	}
+
+	got[1].Error = ""
+
+	from, to := "v1.35.8+k0s.1", "v1.36.4+k0s.0"
+	want := []KubernetesNodeResult{
+		{Address: "c1:7443", Stage: "controller", From: from, To: to, Result: ResultMoved},
+		{Address: "c2:7443", Stage: "controller", From: from, To: to, Result: ResultFailed},
+		{Address: "w1:7443", Stage: "worker", From: from, To: to, Result: ResultPending},
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("result %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRolloutResultsOnAPreflightRefusal(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+		"w1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+	}
+
+	if err := rollout.Run(t.Context()); err == nil {
+		t.Fatal("the rollout went ahead")
+	}
+
+	got := rollout.Report().Nodes
+	if len(got) != 2 || got[0].Result != ResultChecked || got[1].Result != ResultRefused {
+		t.Fatalf("results = %+v, want c1 checked and w1 refused", got)
+	}
+
+	if !strings.Contains(got[1].Error, "listed as a worker") {
+		t.Errorf("refusal error = %q, want it to say why", got[1].Error)
+	}
+}
+
+func TestRolloutReportEncodesNoNodesAsAnEmptyList(t *testing.T) {
+	t.Parallel()
+
+	rollout := &KubernetesRollout{Version: "v1.36.4+k0s.0"}
+
+	if err := rollout.Run(t.Context()); err == nil {
+		t.Fatal("a rollout with no nodes was accepted")
+	}
+
+	encoded, err := json.Marshal(rollout.Report())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := `{"version":"v1.36.4+k0s.0","dryRun":false,"nodes":[]}`; string(encoded) != want {
+		t.Errorf("report = %s, want %s", encoded, want)
+	}
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"time"
-
-	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
 // KubernetesRollout moves a cluster to another k0s version, one node at a time.
@@ -48,6 +46,45 @@ type KubernetesRollout struct {
 
 	// DryRun stops after every node has been checked.
 	DryRun bool
+
+	// Results holds one entry per listed node, in rollout order, once Run returns.
+	Results []KubernetesNodeResult
+}
+
+// Outcomes a node can end a rollout with.
+const (
+	ResultRefused = "refused" // turned down by the preflight
+	ResultChecked = "checked" // accepted, then left alone: a dry run or another node's refusal
+	ResultMoved   = "moved"
+	ResultFailed  = "failed"
+	ResultPending = "pending" // not reached: an earlier node failed
+)
+
+// KubernetesNodeResult is one node's part in a rollout, for automation.
+type KubernetesNodeResult struct {
+	Address string `json:"address"`
+	Stage   string `json:"stage"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to"`
+	Result  string `json:"result"`
+	Error   string `json:"error,omitempty"`
+}
+
+// KubernetesReport is the machine-readable summary of a rollout.
+type KubernetesReport struct {
+	Version string                 `json:"version"`
+	DryRun  bool                   `json:"dryRun"`
+	Nodes   []KubernetesNodeResult `json:"nodes"`
+}
+
+// Report summarises the rollout. It is complete once Run has returned.
+func (r *KubernetesRollout) Report() KubernetesReport {
+	nodes := r.Results
+	if nodes == nil {
+		nodes = []KubernetesNodeResult{}
+	}
+
+	return KubernetesReport{Version: r.Version, DryRun: r.DryRun, Nodes: nodes}
 }
 
 // rolloutStage is one group of nodes moved together, in order.
@@ -96,24 +133,27 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 
 	r.say("\n")
 
-	done := 0
+	for i := range r.Results {
+		result := &r.Results[i]
 
-	for _, stage := range stages {
-		for _, address := range stage.nodes {
-			done++
+		r.say("[%d/%d] %s (%s)\n", i+1, total, result.Address, result.Stage)
 
-			r.say("[%d/%d] %s (%s)\n", done, total, address, stage.name)
+		if err := r.moveOne(ctx, clients[result.Address]); err != nil {
+			r.say("        failed: %v\n", err)
 
-			if err := r.moveOne(ctx, clients[address]); err != nil {
-				r.say("        failed: %v\n", err)
-
-				return fmt.Errorf(
-					"%s: %w. %d of %d nodes are on %s; the rest are untouched. "+
-						"A cluster part-way through this is a state k0s supports, "+
-						"so there is no hurry to finish it",
-					address, err, done-1, total, r.Version)
+			result.Result, result.Error = ResultFailed, err.Error()
+			for j := i + 1; j < len(r.Results); j++ {
+				r.Results[j].Result = ResultPending
 			}
+
+			return fmt.Errorf(
+				"%s: %w. %d of %d nodes are on %s; the rest are untouched. "+
+					"A cluster part-way through this is a state k0s supports, "+
+					"so there is no hurry to finish it",
+				result.Address, err, i, total, r.Version)
 		}
+
+		result.Result = ResultMoved
 	}
 
 	r.say("\nAll %d nodes are running k0s %s.\n", total, r.Version)
@@ -131,31 +171,44 @@ func (r *KubernetesRollout) preflight(
 	clients := make(map[string]*Client, total)
 	cluster := ""
 	refused := 0
+	r.Results = make([]KubernetesNodeResult, 0, total)
 
 	for _, stage := range stages {
 		for _, address := range stage.nodes {
+			result := KubernetesNodeResult{
+				Address: address, Stage: stage.name, To: r.Version, Result: ResultChecked,
+			}
+
 			if _, seen := clients[address]; seen {
 				r.say("  %s (%s): listed twice\n", address, stage.name)
 				refused++
+
+				result.Result, result.Error = ResultRefused, "listed twice"
+				r.Results = append(r.Results, result)
 
 				continue
 			}
 
 			client, running, err := r.checkOne(ctx, address, stage.name, &cluster)
 			clients[address] = client
+			result.From = running
 
 			switch {
 			case errors.Is(err, ErrUnknownRoute):
 				r.say("  %s (%s): on k0s %s; predates the check, it will check when moved\n",
-					address, stage.name, running)
+					address, stage.name, displayVersion(running))
 			case err != nil:
 				r.say("  %s (%s): %v\n", address, stage.name, err)
 				refused++
+
+				result.Result, result.Error = ResultRefused, err.Error()
 			case running == r.Version:
 				r.say("  %s (%s): already on k0s %s\n", address, stage.name, running)
 			default:
 				r.say("  %s (%s): on k0s %s\n", address, stage.name, running)
 			}
+
+			r.Results = append(r.Results, result)
 		}
 	}
 
@@ -200,7 +253,7 @@ func (r *KubernetesRollout) checkOne(
 
 	running, err := client.KubernetesCheck(ctx, r.Version, r.Mirror)
 	if errors.Is(err, ErrUnknownRoute) {
-		return client, kubernetesVersionOf(node), err
+		return client, node.Kubernetes.Version, err
 	}
 
 	return client, running, err
@@ -236,7 +289,7 @@ func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {
 	}
 
 	r.say("        on k0s %s, moving to %s\n",
-		kubernetesVersionOf(before), r.Version)
+		displayVersion(before.Kubernetes.Version), r.Version)
 
 	// One node's deadline, not the whole rollout's: a slow first node should
 	// not eat the budget of the ones behind it.
@@ -271,15 +324,15 @@ func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {
 	return nil
 }
 
-// kubernetesVersionOf reports what a node says it is running, for the progress
-// line. A node too old to report it is not an error worth stopping for: the
-// change is about to say what it moved from anyway.
-func kubernetesVersionOf(node *nodeinfo.Node) string {
-	if node == nil || node.Kubernetes.Version == "" {
+// displayVersion is a node's reported version for a progress line. A node too
+// old to report it is not an error worth stopping for: the change is about to
+// say what it moved from anyway.
+func displayVersion(version string) string {
+	if version == "" {
 		return "an unreported version"
 	}
 
-	return node.Kubernetes.Version
+	return version
 }
 
 func (r *KubernetesRollout) say(format string, args ...any) {
