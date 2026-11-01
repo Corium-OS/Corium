@@ -12,6 +12,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Changed
+
+- **The k0s floor is v1.36.5+k0s.0** (Kubernetes 1.36.5, etcd 3.6.16). A node
+  that sets no `kubernetes.version` moves to it with the next image.
+  v1.34.12+k0s.0, v1.35.9+k0s.0 and v1.36.5+k0s.0 join the window; the releases
+  already in it stay, so a configuration pinning one keeps working.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added
