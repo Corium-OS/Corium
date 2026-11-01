@@ -112,3 +112,103 @@ jobs:
           name: node-console
           path: console.log
           retention-days: 7
+
+  rollout:
+    name: Roll a two-node cluster and forget the worker
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'e2e')
+    # Same pin as the node job, for the same osbuild reason.
+    runs-on: ubuntu-24.04
+    # Two nodes, four extension pulls and three rollouts on top of the build.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/corium-disk
+
+      - name: A private network for the two nodes
+        run: |
+          # User-mode networking gives every VM the same address, which k0s
+          # would advertise. A bridge with NAT gives each its own, reachable
+          # from here and from the other. Docker's FORWARD DROP policy is why
+          # the forward rules are needed.
+          sudo ip link add br0 type bridge
+          sudo ip addr add 10.0.0.1/24 dev br0
+          sudo ip link set br0 up
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo iptables -t nat -A POSTROUTING -s 10.0.0.0/24 ! -o br0 -j MASQUERADE
+          sudo iptables -I FORWARD -i br0 -j ACCEPT
+          sudo iptables -I FORWARD -o br0 -j ACCEPT
+          sudo dnsmasq --interface=br0 --bind-interfaces --except-interface=lo \
+            --dhcp-range=10.0.0.100,10.0.0.200,12h \
+            --dhcp-host=52:54:00:00:00:10,10.0.0.10 \
+            --dhcp-host=52:54:00:00:00:11,10.0.0.11 \
+            --log-facility="${PWD}/dnsmasq.log"
+          sudo mkdir -p /etc/qemu
+          echo "allow br0" | sudo tee /etc/qemu/bridge.conf
+
+      - name: Boot them
+        run: |
+          for vm in ctrl:10 worker:11; do
+            name="${vm%:*}" mac="52:54:00:00:00:${vm#*:}"
+            qemu-img create -q -f qcow2 -F qcow2 -b "${PWD}/output/qcow2/disk.qcow2" "${name}.qcow2" 20G
+            cp "${OVMF_VARS}" "${name}-vars.fd"
+            cp seed.iso "${name}-seed.iso"
+            sudo qemu-system-x86_64 \
+              -machine q35,accel=kvm -cpu host -smp 2 -m 4096 \
+              -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
+              -drive "if=pflash,format=raw,file=${name}-vars.fd" \
+              -drive "file=${name}.qcow2,if=virtio,format=qcow2" \
+              -drive "file=${name}-seed.iso,if=virtio,format=raw,readonly=on" \
+              -netdev bridge,id=net0,br=br0 \
+              -device "virtio-net-pci,netdev=net0,mac=${mac}" \
+              -display none -serial "file:${name}.log" -daemonize
+          done
+
+      - name: Wait for both nodes to offer themselves
+        run: |
+          for name in ctrl worker; do
+            for attempt in $(seq 1 120); do
+              if sudo grep -q "pairing code" "${name}.log" 2>/dev/null; then
+                echo "${name} is waiting to be claimed"
+                continue 2
+              fi
+              sleep 5
+            done
+            echo "::error::${name} never printed a pairing code" >&2
+            sudo tail -60 "${name}.log" || true
+            exit 1
+          done
+          sudo chmod a+r ctrl.log worker.log
+
+      - name: Drive the rollouts with cctl
+        env:
+          CTRL: 10.0.0.10:7443
+          WORKER: 10.0.0.11:7443
+          CCTL: ${{ github.workspace }}/bin/cctl
+          CTRL_CONSOLE: ${{ github.workspace }}/ctrl.log
+          WORKER_CONSOLE: ${{ github.workspace }}/worker.log
+        run: .github/e2e/drive-a-rollout.sh
+
+      - name: What the nodes said, whatever happened
+        if: always()
+        run: |
+          for name in ctrl worker; do
+            echo "::group::${name} console"
+            sudo tail -200 "${name}.log" || true
+            echo "::endgroup::"
+          done
+          echo "::group::dnsmasq"
+          sudo cat dnsmasq.log || true
+          echo "::endgroup::"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rollout-consoles
+          path: |
+            ctrl.log
+            worker.log
+          retention-days: 7

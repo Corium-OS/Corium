@@ -39,7 +39,7 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          qemu-system-x86 ovmf cloud-image-utils
+          qemu-system-x86 ovmf cloud-image-utils dnsmasq-base
 
     - name: Build cctl
       shell: bash
