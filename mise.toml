@@ -328,7 +328,7 @@ arm64="$(fetch arm64)"
 {
 	grep -E '^(#|$|K0S_FLOOR=)' build/k0s.lock
 	{
-		awk -v v="${version}" 'NF == 3 && $1 != v' build/k0s.lock
+		awk -v v="${version}" '!/^#/ && NF == 3 && $1 != v' build/k0s.lock
 		printf '%-17s %-7s %s\n' "${version}" amd64 "${amd64}"
 		printf '%-17s %-7s %s\n' "${version}" arm64 "${arm64}"
 	} | sort

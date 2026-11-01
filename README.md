@@ -14,7 +14,7 @@
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/ci.yml?branch=main&label=CI&logo=github" alt="CI"></a>
   <a href="https://github.com/Corium-OS/Corium/actions/workflows/image.yml"><img src="https://img.shields.io/github/actions/workflow/status/Corium-OS/Corium/image.yml?branch=main&label=image&logo=podman&logoColor=white" alt="Image build"></a>
   <img src="https://img.shields.io/badge/Kubernetes-1.34%E2%80%931.36-326CE5?logo=kubernetes&logoColor=white" alt="Kubernetes 1.34 to 1.36">
-  <img src="https://img.shields.io/badge/k0s%20floor-v1.36.4%2Bk0s.0-0F1689" alt="k0s floor v1.36.4+k0s.0">
+  <img src="https://img.shields.io/badge/k0s%20floor-v1.36.5%2Bk0s.0-0F1689" alt="k0s floor v1.36.5+k0s.0">
   <img src="https://img.shields.io/badge/Fedora-bootc-51A2DA?logo=fedora&logoColor=white" alt="Fedora bootc">
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Corium-OS/Corium?logo=go&logoColor=white&label=Go" alt="Go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Corium-OS/Corium?color=blue" alt="License: MIT"></a>
