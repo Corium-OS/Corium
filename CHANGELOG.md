@@ -49,6 +49,13 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ### Changed
 
+- **A controller refuses a Kubernetes minor that would strand a worker.** A
+  worker left out of `cctl k8s upgrade` stays one minor behind, which k0s
+  allows; at the next minor it would be two behind, which k0s does not. The
+  controller now checks its kubelets before a minor change, refuses that one
+  and names the worker. `POST /v1/kubernetes/check` returns the kubelets left
+  one minor behind. See ADR 12.
+
 - **The k0s floor is v1.36.5+k0s.0** (Kubernetes 1.36.5, etcd 3.6.16). A node
   that sets no `kubernetes.version` moves to it with the next image.
   v1.34.12+k0s.0, v1.35.9+k0s.0 and v1.36.5+k0s.0 join the window; the releases

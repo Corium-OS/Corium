@@ -749,6 +749,11 @@ on the target version are skipped. The ones still to move must all start from
 the same minor: a mix, such as a cluster left half-way by an earlier rollout to
 another version, is refused with the nodes named by minor.
 
+**A controller refuses to strand a worker.** A worker you leave out stays a
+minor behind, which k0s allows, so the rollout succeeds. At the next minor it
+would be two behind, which k0s does not: the controller refuses that move and
+names the worker. Move it first.
+
 Each node downloads the extension *before* it is taken out of service, so an
 unreachable registry or a signature that does not verify costs nothing. Then it
 drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a

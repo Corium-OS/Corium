@@ -1344,7 +1344,9 @@ upgrade. The axes are independent, not unbounded.
 **Skew.** k0s is stricter than upstream Kubernetes: one minor at a time,
 controllers before workers, and no going back a minor. A change that breaks
 those rules is refused with the rule named, before anything is stopped — a node
-does not discover mid-upgrade that k0s will not start. Note that rolling *back*
+does not discover mid-upgrade that k0s will not start. A controller also checks
+the kubelets it serves: it refuses a minor that would leave one of them two
+minors behind, and names it. Note that rolling *back*
 a Kubernetes version is not the free operation an OS rollback is: reverting is a
 second forward move, and k0s does not support downgrading a minor at all.
 
