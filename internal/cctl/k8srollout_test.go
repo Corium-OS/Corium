@@ -31,6 +31,15 @@ type k8sNode struct {
 
 	// unhealthy makes it report a stopped k0s.
 	unhealthy bool
+
+	// checks serves POST /v1/kubernetes/check; without it the node predates
+	// the route.
+	checks bool
+
+	// refuseCheck makes the check reject the version.
+	refuseCheck error
+
+	cluster string
 }
 
 func (n *k8sNode) service() string {
@@ -50,6 +59,7 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 		_ = json.NewEncoder(w).Encode(&nodeinfo.Node{
 			Bootstrapped: true,
 			Role:         node.role,
+			Cluster:      node.cluster,
 			Kubernetes: nodeinfo.Kubernetes{
 				Version: node.version,
 				Service: node.service(),
@@ -57,6 +67,19 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 			},
 		})
 	})
+
+	if node.checks {
+		mux.HandleFunc("POST /v1/kubernetes/check", func(w http.ResponseWriter, _ *http.Request) {
+			if node.refuseCheck != nil {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": node.refuseCheck.Error()})
+
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]string{"kubernetes": node.version})
+		})
+	}
 
 	mux.HandleFunc("POST /v1/kubernetes", func(w http.ResponseWriter, r *http.Request) {
 		if node.refuse != nil {
@@ -248,5 +271,102 @@ func TestRolloutNeedsNodes(t *testing.T) {
 
 	if err := rollout.Run(t.Context()); err == nil {
 		t.Fatal("a rollout with no nodes was accepted")
+	}
+}
+
+// TestPreflightStopsTheRolloutBeforeAnyNodeMoves covers every refusal the
+// preflight owns: each one must leave every node untouched, including the
+// controllers listed before the node at fault.
+func TestPreflightStopsTheRolloutBeforeAnyNodeMoves(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		worker  k8sNode
+		workers []string
+	}{
+		{
+			name: "a worker refuses the version",
+			worker: k8sNode{role: "worker", checks: true,
+				refuseCheck: errors.New("k0s does not support skipping a minor")},
+			workers: []string{"w1:7443"},
+		},
+		{
+			name:    "a controller listed as a worker",
+			worker:  k8sNode{role: "controller", checks: true},
+			workers: []string{"w1:7443"},
+		},
+		{
+			name:    "a node from another cluster",
+			worker:  k8sNode{role: "worker", checks: true, cluster: "elsewhere"},
+			workers: []string{"w1:7443"},
+		},
+		{
+			name:    "an address listed twice",
+			worker:  k8sNode{role: "worker", checks: true},
+			workers: []string{"w1:7443", "w1:7443"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			worker := test.worker
+			worker.version = "v1.35.8+k0s.1"
+
+			if worker.cluster == "" {
+				worker.cluster = "lab"
+			}
+
+			fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+				"c1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true, cluster: "lab"},
+				"w1:7443": &worker,
+			}}
+
+			rollout := &KubernetesRollout{
+				Version:     "v1.36.4+k0s.0",
+				Controllers: []string{"c1:7443"},
+				Workers:     test.workers,
+				Connect:     fleet.connect,
+			}
+
+			if err := rollout.Run(t.Context()); err == nil {
+				t.Fatal("the rollout went ahead")
+			}
+
+			for address, node := range fleet.nodes {
+				if node.moved != 0 {
+					t.Errorf("%s moved %d times, want 0", address, node.moved)
+				}
+			}
+		})
+	}
+}
+
+func TestDryRunMovesNothing(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+		"w1:7443": {role: "worker", version: "v1.35.8+k0s.1", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+		DryRun:      true,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for address, node := range fleet.nodes {
+		if node.moved != 0 {
+			t.Errorf("%s moved %d times, want 0", address, node.moved)
+		}
 	}
 }

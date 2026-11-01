@@ -38,35 +38,15 @@ import (
 //
 // Returns the version now running.
 func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config) (string, error) {
-	window, err := k0s.ReadWindow(s.k0sWindowPath)
+	plan, err := s.checkKubernetesVersion(next)
 	if err != nil {
 		return "", err
 	}
 
-	requested, err := k0s.ParseVersion(next.Kubernetes.Version)
-	if err != nil {
-		return "", fmt.Errorf("kubernetes.version: %w", err)
-	}
-
-	if err := window.Check(requested); err != nil {
-		return "", err
-	}
-
-	// Measured against what is actually merged, not against what the recorded
-	// configuration claims. Those disagree on a node whose extension stopped
-	// matching after an OS rebase, and the skew rules apply to the binary that
-	// is really there.
-	active, err := k0s.ActiveVersion(k0s.ExtensionRelease, window.Floor)
-	if err != nil {
-		return "", err
-	}
+	active, requested, window := plan.active, plan.requested, plan.window
 
 	if active.Raw == requested.Raw {
 		return active.Raw, nil
-	}
-
-	if err := k0s.CheckSkew(active, requested); err != nil {
-		return "", err
 	}
 
 	// Before anything is stopped. See the note above.
@@ -155,6 +135,49 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 	slog.Warn("k0s version swapped", "from", active, "to", running)
 
 	return running.Raw, nil
+}
+
+// kubernetesPlan is what a version change would do, decided without doing it.
+type kubernetesPlan struct {
+	window    k0s.Window
+	active    k0s.Version
+	requested k0s.Version
+}
+
+// checkKubernetesVersion holds every refusal a swap can reach without a
+// registry, a cluster or systemd, so a rollout can ask it of every node before
+// moving the first.
+func (s *Server) checkKubernetesVersion(next *config.Config) (kubernetesPlan, error) {
+	window, err := k0s.ReadWindow(s.k0sWindowPath)
+	if err != nil {
+		return kubernetesPlan{}, err
+	}
+
+	requested, err := k0s.ParseVersion(next.Kubernetes.Version)
+	if err != nil {
+		return kubernetesPlan{}, fmt.Errorf("kubernetes.version: %w", err)
+	}
+
+	if err := window.Check(requested); err != nil {
+		return kubernetesPlan{}, err
+	}
+
+	// Measured against what is actually merged, not against what the recorded
+	// configuration claims. Those disagree on a node whose extension stopped
+	// matching after an OS rebase, and the skew rules apply to the binary that
+	// is really there.
+	active, err := k0s.ActiveVersion(k0s.ExtensionRelease, window.Floor)
+	if err != nil {
+		return kubernetesPlan{}, err
+	}
+
+	if active.Raw != requested.Raw {
+		if err := k0s.CheckSkew(active, requested); err != nil {
+			return kubernetesPlan{}, err
+		}
+	}
+
+	return kubernetesPlan{window: window, active: active, requested: requested}, nil
 }
 
 // clusterSettleTimeout bounds how long a restarted control plane is given to
@@ -258,52 +281,12 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxKubernetesBody))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read the request body")
-
+	baseline, next, ok := s.readKubernetesRequest(w, r)
+	if !ok {
 		return
 	}
 
-	var request kubernetesRequest
-	if err := json.Unmarshal(body, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "body is not valid JSON")
-
-		return
-	}
-
-	if request.Version == "" {
-		writeError(w, http.StatusBadRequest, "version is required")
-
-		return
-	}
-
-	// Diffed against what the node recorded applying, for the reason ADR 8
-	// gives: a file in /etc may have been hand-edited into something the node
-	// never acted on.
-	baseline, err := s.baselineConfig()
-	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-
-		return
-	}
-
-	next := *baseline
-	next.Kubernetes.Version = request.Version
-
-	if request.Mirror != "" {
-		next.Kubernetes.Mirror = request.Mirror
-	}
-
-	// Validated before anything moves, so a malformed mirror is a 400 rather
-	// than a node that drains itself and then cannot pull.
-	if err := next.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-
-		return
-	}
-
-	running, err := s.swapKubernetesVersion(r.Context(), &next)
+	running, err := s.swapKubernetesVersion(r.Context(), next)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 
@@ -311,7 +294,7 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 	}
 
 	status := "changed"
-	if baseline.Kubernetes.Version == request.Version {
+	if baseline.Kubernetes.Version == next.Kubernetes.Version {
 		status = "unchanged"
 	}
 
@@ -342,4 +325,86 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 		"status":     status,
 		"kubernetes": running,
 	})
+}
+
+// handleKubernetesCheck answers whether this node would accept a version,
+// changing nothing.
+//
+// A route of its own rather than a flag on POST /v1/kubernetes: a node older
+// than the flag would ignore it and perform the swap.
+func (s *Server) handleKubernetesCheck(w http.ResponseWriter, r *http.Request) {
+	_, next, ok := s.readKubernetesRequest(w, r)
+	if !ok {
+		return
+	}
+
+	plan, err := s.checkKubernetesVersion(next)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+
+		return
+	}
+
+	status := "would-change"
+	if plan.active.Raw == plan.requested.Raw {
+		status = "unchanged"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     status,
+		"kubernetes": plan.active.Raw,
+	})
+}
+
+// readKubernetesRequest builds the configuration a version request would
+// leave the node with, answering the request itself when it is unusable.
+func (s *Server) readKubernetesRequest(
+	w http.ResponseWriter, r *http.Request,
+) (*config.Config, *config.Config, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxKubernetesBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the request body")
+
+		return nil, nil, false
+	}
+
+	var request kubernetesRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "body is not valid JSON")
+
+		return nil, nil, false
+	}
+
+	if request.Version == "" {
+		writeError(w, http.StatusBadRequest, "version is required")
+
+		return nil, nil, false
+	}
+
+	// Diffed against what the node recorded applying, for the reason ADR 8
+	// gives: a file in /etc may have been hand-edited into something the node
+	// never acted on.
+	baseline, err := s.baselineConfig()
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+
+		return nil, nil, false
+	}
+
+	next := *baseline
+	next.Kubernetes.Version = request.Version
+
+	if request.Mirror != "" {
+		next.Kubernetes.Mirror = request.Mirror
+	}
+
+	// Validated before anything moves, so a malformed mirror is a 400 rather
+	// than a node that drains itself and then cannot pull.
+	if err := next.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+
+		return nil, nil, false
+	}
+
+	return baseline, &next, true
 }

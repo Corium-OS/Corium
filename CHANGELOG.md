@@ -12,6 +12,14 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **`cctl k8s upgrade` checks every node before moving the first.** A node
+  that is unreachable, unhealthy, listed in the wrong stage, in another cluster
+  or refusing the version now stops the rollout with nothing changed, instead
+  of half-way through. `--dry-run` runs the check alone. Nodes answer it on the
+  new `POST /v1/kubernetes/check`.
+
 ### Changed
 
 - **The k0s floor is v1.36.5+k0s.0** (Kubernetes 1.36.5, etcd 3.6.16). A node
