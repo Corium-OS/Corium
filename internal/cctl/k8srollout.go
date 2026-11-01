@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
+
+	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
 // KubernetesRollout moves a cluster to another k0s version, one node at a time.
@@ -55,6 +58,7 @@ type KubernetesRollout struct {
 const (
 	ResultRefused = "refused" // turned down by the preflight
 	ResultChecked = "checked" // accepted, then left alone: a dry run or another node's refusal
+	ResultSkipped = "skipped" // already on the target version
 	ResultMoved   = "moved"
 	ResultFailed  = "failed"
 	ResultPending = "pending" // not reached: an earlier node failed
@@ -138,12 +142,20 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 
 		r.say("[%d/%d] %s (%s)\n", i+1, total, result.Address, result.Stage)
 
+		if result.Result == ResultSkipped {
+			r.say("        already on k0s %s, skipped\n", r.Version)
+
+			continue
+		}
+
 		if err := r.moveOne(ctx, clients[result.Address]); err != nil {
 			r.say("        failed: %v\n", err)
 
 			result.Result, result.Error = ResultFailed, err.Error()
 			for j := i + 1; j < len(r.Results); j++ {
-				r.Results[j].Result = ResultPending
+				if r.Results[j].Result == ResultChecked {
+					r.Results[j].Result = ResultPending
+				}
 			}
 
 			return fmt.Errorf(
@@ -197,6 +209,10 @@ func (r *KubernetesRollout) preflight(
 			case errors.Is(err, ErrUnknownRoute):
 				r.say("  %s (%s): on k0s %s; predates the check, it will check when moved\n",
 					address, stage.name, displayVersion(running))
+
+				if running == r.Version {
+					result.Result = ResultSkipped
+				}
 			case err != nil:
 				r.say("  %s (%s): %v\n", address, stage.name, err)
 				refused++
@@ -204,6 +220,8 @@ func (r *KubernetesRollout) preflight(
 				result.Result, result.Error = ResultRefused, err.Error()
 			case running == r.Version:
 				r.say("  %s (%s): already on k0s %s\n", address, stage.name, running)
+
+				result.Result = ResultSkipped
 			default:
 				r.say("  %s (%s): on k0s %s\n", address, stage.name, running)
 			}
@@ -212,12 +230,61 @@ func (r *KubernetesRollout) preflight(
 		}
 	}
 
+	mixed := mixedMinors(r.Results)
+	if mixed != "" {
+		r.say("  %s\n", mixed)
+	}
+
 	if refused > 0 {
 		return nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
 			refused, total, r.Version)
 	}
 
+	if mixed != "" {
+		return nil, fmt.Errorf("%s; bring them to one minor before moving to %s. Nothing was changed",
+			mixed, r.Version)
+	}
+
 	return clients, nil
+}
+
+// mixedMinors names the nodes still to move when they span several minors,
+// which a resumed or overlapping rollout can leave behind. Each node accepting
+// the target alone does not make the order safe across them. Empty when they
+// agree; an unreported or unparseable version is left to the node's own check.
+func mixedMinors(results []KubernetesNodeResult) string {
+	var lines []string
+
+	byLine := map[string][]string{}
+
+	for _, result := range results {
+		if result.Result != ResultChecked {
+			continue
+		}
+
+		version, err := k0s.ParseVersion(result.From)
+		if err != nil {
+			continue
+		}
+
+		line := version.MinorLine()
+		if _, seen := byLine[line]; !seen {
+			lines = append(lines, line)
+		}
+
+		byLine[line] = append(byLine[line], result.Address)
+	}
+
+	if len(lines) < 2 {
+		return ""
+	}
+
+	groups := make([]string, 0, len(lines))
+	for _, line := range lines {
+		groups = append(groups, fmt.Sprintf("%s on %s", strings.Join(byLine[line], ", "), line))
+	}
+
+	return "the nodes still to move are on different minors: " + strings.Join(groups, "; ")
 }
 
 // checkOne reads a node and asks it to validate the version. cluster carries

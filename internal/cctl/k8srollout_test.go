@@ -454,6 +454,98 @@ func TestRolloutResultsOnAPreflightRefusal(t *testing.T) {
 	}
 }
 
+func TestResumedRolloutSkipsNodesAlreadyOnTheTarget(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.36.4+k0s.0", checks: true},
+		"c2:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+		"w1:7443": {role: "worker", version: "v1.35.2+k0s.0", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443", "c2:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if got := fleet.nodes["c1:7443"].moved; got != 0 {
+		t.Errorf("the node already on the target moved %d times, want 0", got)
+	}
+
+	want := []string{ResultSkipped, ResultMoved, ResultMoved}
+	for i, result := range rollout.Report().Nodes {
+		if result.Result != want[i] {
+			t.Errorf("%s: result %q, want %q", result.Address, result.Result, want[i])
+		}
+	}
+}
+
+func TestPreflightRefusesNodesToMoveFromDifferentMinors(t *testing.T) {
+	t.Parallel()
+
+	// Each node accepts the target alone; together they are not one rollout.
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.35.8+k0s.1", checks: true},
+		"w1:7443": {role: "worker", version: "v1.36.2+k0s.0", checks: true},
+		"w2:7443": {role: "worker", version: "v1.36.4+k0s.0", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443"},
+		Workers:     []string{"w1:7443", "w2:7443"},
+		Connect:     fleet.connect,
+	}
+
+	err := rollout.Run(t.Context())
+	if err == nil {
+		t.Fatal("the rollout went ahead across two minors")
+	}
+
+	for _, want := range []string{"c1:7443 on 1.35", "w1:7443 on 1.36"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+
+	if strings.Contains(err.Error(), "w2:7443") {
+		t.Errorf("error %q names a node already on the target", err)
+	}
+
+	for address, node := range fleet.nodes {
+		if node.moved != 0 {
+			t.Errorf("%s moved %d times, want 0", address, node.moved)
+		}
+	}
+}
+
+func TestPreflightAcceptsDifferentPatchesOfOneMinor(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {role: "controller", version: "v1.36.3+k0s.0", checks: true},
+		"w1:7443": {role: "worker", version: "v1.36.2+k0s.1", checks: true},
+	}}
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+		DryRun:      true,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
 func TestRolloutReportEncodesNoNodesAsAnEmptyList(t *testing.T) {
 	t.Parallel()
 

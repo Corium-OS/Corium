@@ -24,6 +24,10 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   stage, source and target version, result and error, on standard output for
   automation; progress moves to standard error.
 
+- **`cctl k8s upgrade` resumes safely.** Nodes already on the target version
+  are skipped, and the check refuses a rollout whose remaining nodes start from
+  different minors, naming them.
+
 - **`cctl config <node>` reads a node's configuration back.** The management
   API could write a `corium:` document and not return one: a node recorded what
   it applied, diffed the next `cctl apply` against that record, and offered no

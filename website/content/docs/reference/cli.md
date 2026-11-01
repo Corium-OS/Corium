@@ -753,6 +753,11 @@ others, and accept the version against its own window and skew rules. One
 refusal stops the rollout with nothing changed. `--dry-run` stops there
 anyway. A node older than this check is reported and checks itself when moved.
 
+**A stopped rollout resumes by running the same command again.** Nodes already
+on the target version are skipped. The ones still to move must all start from
+the same minor: a mix, such as a cluster left half-way by an earlier rollout to
+another version, is refused with the nodes named by minor.
+
 Each node downloads the extension *before* it is taken out of service, so an
 unreachable registry or a signature that does not verify costs nothing. Then it
 drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
@@ -787,6 +792,7 @@ $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2
 | `result` | Meaning |
 |---|---|
 | `moved` | Now on the target version |
+| `skipped` | Already on the target version |
 | `failed` | The change was attempted and did not complete; the rollout stopped here |
 | `pending` | Not reached, because an earlier node failed |
 | `refused` | Turned down by the check; nothing was changed anywhere |
