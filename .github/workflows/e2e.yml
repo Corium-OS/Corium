@@ -35,7 +35,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.pull_request.labels.*.name, 'e2e')
-    runs-on: ubuntu-latest
+    # osbuild cannot mount its container storage on ubuntu-26.04; see image.yml.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
