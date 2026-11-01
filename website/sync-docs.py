@@ -160,6 +160,11 @@ PAGES = [
      "Why an absent api: block now means the management API runs: the installer "
      "ISO produces a node that was never configured and cannot be logged into, "
      "and why enrolment closes the moment the node bootstraps."),
+    ("adr/0012-rollout-inventory.md", "decisions",
+     "adr-0012-rollout-inventory",
+     "ADR 12 — Rollout inventory", 1011,
+     "Why a controller refuses a Kubernetes minor that would leave a kubelet two "
+     "minors behind, and why cctl warns about workers left out of a rollout."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes
