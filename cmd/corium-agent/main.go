@@ -22,6 +22,7 @@ import (
 
 	"github.com/Corium-OS/Corium/internal/bootstrap"
 	"github.com/Corium-OS/Corium/internal/config"
+	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
 // Build metadata, injected at link time.
@@ -138,7 +139,7 @@ func backupCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return bootstrap.RunBackup(ctx, *path, *keep)
+	return k0s.Backup(ctx, *path, *keep)
 }
 
 // envInt reads an integer from the environment, falling back to a default.
