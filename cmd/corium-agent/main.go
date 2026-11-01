@@ -139,7 +139,9 @@ func backupCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return k0s.Backup(ctx, *path, *keep)
+	_, err := k0s.Backup(ctx, k0s.Binary, *path, *keep)
+
+	return err
 }
 
 // envInt reads an integer from the environment, falling back to a default.

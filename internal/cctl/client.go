@@ -199,6 +199,9 @@ type ConfigResult struct {
 	// not actually running, so this is the node's answer rather than an echo of
 	// the request.
 	Kubernetes string `json:"kubernetes,omitempty"`
+
+	// Backup is the control plane snapshot taken before that change, if any.
+	Backup string `json:"backup,omitempty"`
 }
 
 // ApplyConfig sends a node the corium: document it should bootstrap with.
@@ -675,25 +678,35 @@ func (c *Client) Apply(ctx context.Context) error {
 //
 // It blocks for as long as the node takes -- a download, then a drain, then k0s
 // coming back -- so the caller's context is what bounds it.
-func (c *Client) KubernetesVersion(ctx context.Context, version, mirror string) (string, error) {
+func (c *Client) KubernetesVersion(ctx context.Context, version, mirror string) (KubernetesChange, error) {
 	request, err := json.Marshal(map[string]string{
 		"version": version,
 		"mirror":  mirror,
 	})
 	if err != nil {
-		return "", fmt.Errorf("encoding the request: %w", err)
+		return KubernetesChange{}, fmt.Errorf("encoding the request: %w", err)
 	}
 
-	var reply struct {
-		Status     string `json:"status"`
-		Kubernetes string `json:"kubernetes"`
-	}
+	var reply KubernetesChange
 
 	if err := c.call(ctx, http.MethodPost, "/v1/kubernetes", request, &reply); err != nil {
-		return "", err
+		return KubernetesChange{}, err
 	}
 
-	return reply.Kubernetes, nil
+	return reply, nil
+}
+
+// KubernetesChange is a node's answer to a version change.
+type KubernetesChange struct {
+	// Status is "changed" or "unchanged".
+	Status string `json:"status"`
+
+	// Kubernetes is the k0s version now running.
+	Kubernetes string `json:"kubernetes"`
+
+	// Backup is the control plane snapshot taken before the stop. Empty on a
+	// worker, an unchanged node, or a node that predates it.
+	Backup string `json:"backup,omitempty"`
 }
 
 // ErrUnknownRoute is a node older than the call made of it.

@@ -78,6 +78,9 @@ type KubernetesNodeResult struct {
 	To      string `json:"to"`
 	Result  string `json:"result"`
 	Error   string `json:"error,omitempty"`
+
+	// Backup is the control plane snapshot a controller took before moving.
+	Backup string `json:"backup,omitempty"`
 }
 
 // KubernetesReport is the machine-readable summary of a rollout.
@@ -168,7 +171,7 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 			continue
 		}
 
-		moved, err := r.moveGated(ctx, clients[result.Address], result.Stage, gate)
+		moved, err := r.moveGated(ctx, clients[result.Address], result, gate)
 		if err != nil {
 			r.say("        failed: %v\n", err)
 
@@ -379,19 +382,23 @@ func (r *KubernetesRollout) etcdGate(clients map[string]*Client, roles map[strin
 }
 
 // moveGated moves one node, and a controller only while etcd can spare it.
-// moved reports whether the node changed version, even when err is set.
+// moved reports whether the node changed version, even when err is set; the
+// node's snapshot is recorded on result.
 func (r *KubernetesRollout) moveGated(
-	ctx context.Context, client *Client, stage string, gate *etcdGate,
+	ctx context.Context, client *Client, result *KubernetesNodeResult, gate *etcdGate,
 ) (moved bool, err error) {
-	if stage != "controller" {
-		return false, r.moveOne(ctx, client)
+	if result.Stage != "controller" {
+		result.Backup, err = r.moveOne(ctx, client)
+
+		return false, err
 	}
 
 	if err := gate.check(ctx); err != nil {
 		return false, fmt.Errorf("before moving it: %w", err)
 	}
 
-	if err := r.moveOne(ctx, client); err != nil {
+	result.Backup, err = r.moveOne(ctx, client)
+	if err != nil {
 		return false, err
 	}
 
@@ -402,18 +409,19 @@ func (r *KubernetesRollout) moveGated(
 	return true, nil
 }
 
-func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {
+// moveOne returns the snapshot the node took, even when a later check fails.
+func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) (string, error) {
 	// Before anything: is this node in a state where taking it out of service
 	// is safe? A node that is already unhealthy is one whose workloads have
 	// nowhere good to go, and whose control plane can least afford to lose a
 	// member.
 	before, err := client.Node(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := healthy(before); err != nil {
-		return err
+		return "", err
 	}
 
 	r.say("        on k0s %s, moving to %s\n",
@@ -424,32 +432,38 @@ func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {
 	attempt, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 
-	running, err := client.KubernetesVersion(attempt, r.Version, r.Mirror)
+	change, err := client.KubernetesVersion(attempt, r.Version, r.Mirror)
 	if err != nil {
-		return err
+		return "", err
+	}
+
+	running := change.Kubernetes
+
+	if change.Backup != "" {
+		r.say("        snapshot %s\n", change.Backup)
 	}
 
 	// The node already refuses to report success on a version it is not
 	// running, so this is a second pair of eyes rather than the only check.
 	// It costs nothing and it is the assertion a rollout exists to make.
 	if running != r.Version {
-		return fmt.Errorf("reports %s after being moved to %s", running, r.Version)
+		return change.Backup, fmt.Errorf("reports %s after being moved to %s", running, r.Version)
 	}
 
 	// Health again, because the point of going one at a time is to find out
 	// that a node did not come back *before* starting the next one.
 	after, err := client.Node(ctx)
 	if err != nil {
-		return err
+		return change.Backup, err
 	}
 
 	if err := healthy(after); err != nil {
-		return err
+		return change.Backup, err
 	}
 
 	r.say("        up on k0s %s\n", running)
 
-	return nil
+	return change.Backup, nil
 }
 
 // displayVersion is a node's reported version for a progress line. A node too

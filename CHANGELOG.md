@@ -21,6 +21,14 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   quorum. Controllers answer on the new `GET /v1/etcd`; one too old to has its
   member reported as unchecked.
 
+- **A controller snapshots its datastore before changing its Kubernetes
+  version.** Between the drain and the stop, `k0s backup` saves etcd or
+  kine/SQLite to `backup.path` (default `/var/lib/corium/backups`), `0600`,
+  under the same retention as scheduled backups. `cctl k8s upgrade` and
+  `cctl apply` print the archive's path. A snapshot that fails cancels the
+  change and uncordons the node. See
+  [upgrades](docs/upgrades.md#a-controller-snapshots-its-datastore-first).
+
 - **`cctl k8s upgrade` checks every node before moving the first.** A node
   that is unreachable, unhealthy, listed in the wrong stage, in another cluster
   or refusing the version now stops the rollout with nothing changed, instead

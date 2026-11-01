@@ -1090,6 +1090,10 @@ func applyCommand(ctx context.Context, args []string) error {
 			fmt.Printf("  kubernetes  %s\n", result.Kubernetes)
 		}
 
+		if result.Backup != "" {
+			fmt.Printf("  snapshot    %s\n", result.Backup)
+		}
+
 		if result.Restarted != "" {
 			fmt.Printf("  restarted   %s\n", result.Restarted)
 		}

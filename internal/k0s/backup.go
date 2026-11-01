@@ -36,12 +36,12 @@ const (
 // very thing somebody pointed it at.
 var archivePattern = regexp.MustCompile(`^corium-backup-\d{8}T\d{6}Z\.tar\.gz$`)
 
-// Backup takes one control plane snapshot into dir and applies retention.
-//
-// k0s must be running: `k0s backup` asks its status socket for the role first.
-func Backup(ctx context.Context, dir string, keep int) error {
+// Backup runs binary to take one control plane snapshot into dir, applies retention, and
+// returns the archive's path. k0s must be running: `k0s backup` asks its
+// status socket for the role first.
+func Backup(ctx context.Context, binary, dir string, keep int) (string, error) {
 	if dir == "" {
-		return errors.New("no backup path configured; " +
+		return "", errors.New("no backup path configured; " +
 			"corium-backup.service takes one from a drop-in corium-agent writes " +
 			"at first boot from corium.backup")
 	}
@@ -49,7 +49,7 @@ func Backup(ctx context.Context, dir string, keep int) error {
 	// 0700 and not 0755: everything in here is a copy of the cluster CA's
 	// private key and of every Secret in etcd.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
+		return "", fmt.Errorf("creating %s: %w", dir, err)
 	}
 
 	path := filepath.Join(dir, archiveName(time.Now()))
@@ -59,7 +59,7 @@ func Backup(ctx context.Context, dir string, keep int) error {
 	// wider mode, and no run may overwrite an archive already on disk.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- a name this function coined under a validated directory
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", path, err)
+		return "", fmt.Errorf("creating %s: %w", path, err)
 	}
 
 	// `k0s backup --save-path -` streams the archive to stdout, which lets the
@@ -67,7 +67,7 @@ func Backup(ctx context.Context, dir string, keep int) error {
 	// instead of picking up whatever k0s left in a directory.
 	var stderr bytes.Buffer
 
-	cmd := exec.CommandContext(ctx, Binary, "backup", "--save-path", "-")
+	cmd := exec.CommandContext(ctx, binary, "backup", "--save-path", "-")
 	cmd.Stdout = file
 	cmd.Stderr = &stderr
 
@@ -84,21 +84,21 @@ func Backup(ctx context.Context, dir string, keep int) error {
 		}
 
 		if message := strings.TrimSpace(stderr.String()); message != "" {
-			return fmt.Errorf("k0s backup: %w: %s", err, message)
+			return "", fmt.Errorf("k0s backup: %w: %s", err, message)
 		}
 
-		return fmt.Errorf("k0s backup: %w", err)
+		return "", fmt.Errorf("k0s backup: %w", err)
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", path, err)
+		return "", fmt.Errorf("stat %s: %w", path, err)
 	}
 
 	// The path and the size, never the contents.
 	slog.Info("wrote a control plane backup", "path", path, "bytes", info.Size())
 
-	return prune(dir, keep)
+	return path, prune(dir, keep)
 }
 
 // verifyArchive checks that what arrived on stdout is a gzip stream.

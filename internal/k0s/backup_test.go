@@ -1,12 +1,105 @@
 package k0s
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
+
+// fakeK0s writes an executable standing in for k0s, running script.
+func fakeK0s(t *testing.T, script string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "k0s")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil { // #nosec G306 -- a test executable
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func TestBackupReturnsAPrivateArchive(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "backups")
+	binary := fakeK0s(t, `printf '\037\213archive'`)
+
+	path, err := Backup(context.Background(), binary, dir, 7)
+	if err != nil {
+		t.Fatalf("Backup() error = %v", err)
+	}
+
+	if filepath.Dir(path) != dir || !archivePattern.MatchString(filepath.Base(path)) {
+		t.Fatalf("Backup() = %q, want an archive retention recognises under %s", path, dir)
+	}
+
+	for _, check := range []struct {
+		path string
+		mode os.FileMode
+	}{{path, 0o600}, {dir, 0o700}} {
+		info, err := os.Stat(check.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := info.Mode().Perm(); got != check.mode {
+			t.Errorf("%s has mode %o, want %o", check.path, got, check.mode)
+		}
+	}
+}
+
+// TestBackupLeavesNothingWhenItFails guards against a file that looks like a
+// backup and is not one.
+func TestBackupLeavesNothingWhenItFails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		script  string
+		wantErr string
+	}{
+		{
+			name:    "k0s refuses",
+			script:  `printf '\037\213'; echo 'unable to detect cluster status' >&2; exit 1`,
+			wantErr: "unable to detect cluster status",
+		},
+		{
+			name:    "stdout is not an archive",
+			script:  `echo 'level=info msg=starting'`,
+			wantErr: "not a gzip stream",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			path, err := Backup(context.Background(), fakeK0s(t, tc.script), dir, 7)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Backup() = %q, %v; want an error mentioning %q", path, err, tc.wantErr)
+			}
+
+			if path != "" {
+				t.Errorf("Backup() returned %q for an archive that failed", path)
+			}
+
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(entries) != 0 {
+				t.Errorf("a failed backup left %v behind", entries)
+			}
+		})
+	}
+}
 
 func TestArchiveName(t *testing.T) {
 	t.Parallel()

@@ -13,6 +13,9 @@ import (
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
+// controllerBackup is the snapshot a fake controller reports taking.
+const controllerBackup = "/var/lib/corium/backups/corium-backup-20261101T120000Z.tar.gz"
+
 // k8sNode stands in for one machine in a Kubernetes rollout.
 type k8sNode struct {
 	role    string
@@ -117,10 +120,16 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 			node.version = node.comesBackAs
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		reply := map[string]string{
 			"status":     "changed",
 			"kubernetes": node.version,
-		})
+		}
+
+		if node.role == "controller" {
+			reply["backup"] = controllerBackup
+		}
+
+		_ = json.NewEncoder(w).Encode(reply)
 	})
 
 	server := httptest.NewTLSServer(mux)
@@ -188,6 +197,22 @@ func TestRolloutUpgradesControllersBeforeWorkers(t *testing.T) {
 	for address, node := range fleet.nodes {
 		if node.moved != 1 {
 			t.Errorf("%s moved %d times, want 1", address, node.moved)
+		}
+	}
+
+	// Only controllers hold a datastore, so only they report a snapshot.
+	if got := strings.Count(out.String(), "snapshot "+controllerBackup); got != 2 {
+		t.Errorf("printed %d snapshot paths, want one per controller:\n%s", got, out.String())
+	}
+
+	for _, node := range rollout.Report().Nodes {
+		want := ""
+		if node.Stage == "controller" {
+			want = controllerBackup
+		}
+
+		if node.Backup != want {
+			t.Errorf("report for %s has backup %q, want %q", node.Address, node.Backup, want)
 		}
 	}
 }
@@ -428,7 +453,8 @@ func TestRolloutResultsRecordEveryNode(t *testing.T) {
 
 	from, to := "v1.35.8+k0s.1", "v1.36.4+k0s.0"
 	want := []KubernetesNodeResult{
-		{Address: "c1:7443", Stage: "controller", From: from, To: to, Result: ResultMoved},
+		{Address: "c1:7443", Stage: "controller", From: from, To: to, Result: ResultMoved,
+			Backup: controllerBackup},
 		{Address: "c2:7443", Stage: "controller", From: from, To: to, Result: ResultFailed},
 		{Address: "w1:7443", Stage: "worker", From: from, To: to, Result: ResultPending},
 	}
