@@ -5,9 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
 // machine stands in for a node, recording what would have been done to it.
@@ -54,6 +57,31 @@ func newManager(t *testing.T, m *machine) *Manager {
 	t.Helper()
 
 	return &Manager{Run: m.runner(), Dir: t.TempDir(), Hostname: "worker-01"}
+}
+
+func TestKubeletsReadsNameAndVersion(t *testing.T) {
+	t.Parallel()
+
+	manager := &Manager{Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if got := strings.Join(args, " "); got != "kubectl get nodes -o json" {
+			t.Errorf("ran k0s %s", got)
+		}
+
+		return []byte(`{"items":[
+			{"metadata":{"name":"w1"},"status":{"nodeInfo":{"kubeletVersion":"v1.35.9+k0s"}}},
+			{"metadata":{"name":"c1"},"status":{"nodeInfo":{"kubeletVersion":"v1.36.5+k0s"}}}
+		]}`), nil
+	}}
+
+	got, err := manager.Kubelets(t.Context())
+	if err != nil {
+		t.Fatalf("Kubelets() error = %v", err)
+	}
+
+	want := []k0s.Kubelet{{Name: "w1", Version: "v1.35.9+k0s"}, {Name: "c1", Version: "v1.36.5+k0s"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Kubelets() = %v, want %v", got, want)
+	}
 }
 
 func TestAWorkerCannotCordonItself(t *testing.T) {
