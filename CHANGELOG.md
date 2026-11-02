@@ -60,6 +60,14 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   v1.34.12+k0s.0, v1.35.9+k0s.0 and v1.36.5+k0s.0 join the window; the releases
   already in it stay, so a configuration pinning one keeps working.
 
+### Fixed
+
+- **A Kubernetes version change finishes even if `cctl` goes away.** A client
+  that disconnected once the node had started draining — `^C`, a laptop going
+  to sleep, `cctl k8s upgrade --timeout` — left the node cordoned, or with k0s
+  stopped. The node now carries the change through on its own, and refuses a
+  second one with a 409 while it runs.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added
