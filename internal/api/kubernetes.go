@@ -151,6 +151,15 @@ func (s *Server) commitSwap(
 
 	swap := kubernetesSwap{running: running.Raw, backup: backup}
 
+	// A controller is not back until its API server answers. Without a Node of
+	// its own it is never drained, so nothing below would wait, and the next
+	// node of a rollout would move while this control plane is still down.
+	if role != config.RoleWorker && !drained {
+		if err := s.waitFor(ctx, s.canListNodes); err != nil {
+			return swap, fmt.Errorf("k0s %s is running, but %w", running, err)
+		}
+	}
+
 	if drained {
 		// Wait for the control plane before asking it for anything. On a
 		// controller -- and every single-node cluster is one -- the API server
@@ -164,7 +173,7 @@ func (s *Server) commitSwap(
 		// not one", which is untrue and sends an operator looking at roles
 		// instead of at timing. Found by the end-to-end test, which is the only
 		// place a real control plane is restarted.
-		if err := s.waitForClusterAccess(ctx); err != nil {
+		if err := s.waitFor(ctx, s.lifecycle.CanReachCluster); err != nil {
 			return swap, fmt.Errorf(
 				"k0s %s is running, but %w; uncordon it with `cctl uncordon`",
 				running, err)
@@ -346,25 +355,24 @@ const clusterSettleTimeout = 5 * time.Minute
 // clusterPollInterval is how often it asks.
 const clusterPollInterval = 5 * time.Second
 
-// waitForClusterAccess blocks until this node can act on its own Node object.
+// waitFor blocks until ready reports true, or the control plane has had
+// clusterSettleTimeout to come back.
 //
 // It exists because a version change restarts the very control plane the node
-// then needs in order to put itself back into service.
-func (s *Server) waitForClusterAccess(ctx context.Context) error {
+// then needs, to put itself back into service or to answer the next node.
+func (s *Server) waitFor(ctx context.Context, ready func(context.Context) bool) error {
 	deadline := time.Now().Add(clusterSettleTimeout)
 
 	ticker := time.NewTicker(clusterPollInterval)
 	defer ticker.Stop()
 
 	for {
-		if s.lifecycle.CanReachCluster(ctx) {
+		if ready(ctx) {
 			return nil
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf(
-				"its control plane did not answer within %s, so the node could "+
-					"not be returned to service", clusterSettleTimeout)
+			return fmt.Errorf("its control plane did not answer within %s", clusterSettleTimeout)
 		}
 
 		select {
@@ -373,6 +381,14 @@ func (s *Server) waitForClusterAccess(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// canListNodes reports whether this node's API server answers with its admin
+// credentials, which a controller without a Node object cannot show otherwise.
+func (s *Server) canListNodes(ctx context.Context) bool {
+	_, err := s.lifecycle.Kubelets(ctx)
+
+	return err == nil
 }
 
 // drainForSwap takes the node out of service, and reports whether it did.
