@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
@@ -49,6 +50,11 @@ type KubernetesRollout struct {
 
 	// DryRun stops after every node has been checked.
 	DryRun bool
+
+	// Settle is how long etcd gets to be whole again after a controller moves,
+	// and Poll how often it is asked.
+	Settle time.Duration
+	Poll   time.Duration
 
 	// Results holds one entry per listed node, in rollout order, once Run returns.
 	Results []KubernetesNodeResult
@@ -114,6 +120,14 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 		r.Timeout = DefaultKubernetesTimeout
 	}
 
+	if r.Settle == 0 {
+		r.Settle = DefaultEtcdSettle
+	}
+
+	if r.Poll == 0 {
+		r.Poll = DefaultPoll
+	}
+
 	stages := []rolloutStage{
 		{"controller", r.Controllers},
 		{"worker", r.Workers},
@@ -124,12 +138,18 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 		return errors.New("no nodes to move")
 	}
 
-	clients, err := r.preflight(ctx, stages, total)
+	clients, roles, err := r.preflight(ctx, stages, total)
 	if err != nil {
 		return err
 	}
 
+	gate := r.etcdGate(clients, roles)
+
 	if r.DryRun {
+		if err := gate.check(ctx); err != nil {
+			return fmt.Errorf("%w; nothing was changed", err)
+		}
+
 		r.say("\nDry run: every node accepts k0s %s. Nothing was changed.\n", r.Version)
 
 		return nil
@@ -148,10 +168,19 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 			continue
 		}
 
-		if err := r.moveOne(ctx, clients[result.Address]); err != nil {
+		moved, err := r.moveGated(ctx, clients[result.Address], result.Stage, gate)
+		if err != nil {
 			r.say("        failed: %v\n", err)
 
+			// A controller that moved and left etcd short is on the new version.
 			result.Result, result.Error = ResultFailed, err.Error()
+			onTarget := i
+
+			if moved {
+				result.Result = ResultMoved
+				onTarget++
+			}
+
 			for j := i + 1; j < len(r.Results); j++ {
 				if r.Results[j].Result == ResultChecked {
 					r.Results[j].Result = ResultPending
@@ -162,7 +191,7 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 				"%s: %w. %d of %d nodes are on %s; the rest are untouched. "+
 					"A cluster part-way through this is a state k0s supports, "+
 					"so there is no hurry to finish it",
-				result.Address, err, i, total, r.Version)
+				result.Address, err, onTarget, total, r.Version)
 		}
 
 		result.Result = ResultMoved
@@ -177,10 +206,11 @@ func (r *KubernetesRollout) Run(ctx context.Context) error {
 // so a bad address or a refused version cannot leave the cluster half-way.
 func (r *KubernetesRollout) preflight(
 	ctx context.Context, stages []rolloutStage, total int,
-) (map[string]*Client, error) {
+) (map[string]*Client, map[string]string, error) {
 	r.say("Checking %d nodes can move to k0s %s\n", total, r.Version)
 
 	clients := make(map[string]*Client, total)
+	roles := make(map[string]string, total)
 	cluster := ""
 	refused := 0
 	r.Results = make([]KubernetesNodeResult, 0, total)
@@ -201,7 +231,7 @@ func (r *KubernetesRollout) preflight(
 				continue
 			}
 
-			client, running, err := r.checkOne(ctx, address, stage.name, &cluster)
+			client, running, err := r.checkOne(ctx, address, stage.name, &cluster, roles)
 			clients[address] = client
 			result.From = running
 
@@ -236,16 +266,16 @@ func (r *KubernetesRollout) preflight(
 	}
 
 	if refused > 0 {
-		return nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
+		return nil, nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
 			refused, total, r.Version)
 	}
 
 	if mixed != "" {
-		return nil, fmt.Errorf("%s; bring them to one minor before moving to %s. Nothing was changed",
+		return nil, nil, fmt.Errorf("%s; bring them to one minor before moving to %s. Nothing was changed",
 			mixed, r.Version)
 	}
 
-	return clients, nil
+	return clients, roles, nil
 }
 
 // mixedMinors names the nodes still to move when they span several minors,
@@ -288,11 +318,16 @@ func mixedMinors(results []KubernetesNodeResult) string {
 }
 
 // checkOne reads a node and asks it to validate the version. cluster carries
-// the first cluster name seen, which every other node must share.
+// the first cluster name seen, which every other node must share; roles
+// collects what each node says it is.
 func (r *KubernetesRollout) checkOne(
-	ctx context.Context, address, stage string, cluster *string,
+	ctx context.Context, address, stage string, cluster *string, roles map[string]string,
 ) (*Client, string, error) {
 	client, node, err := inspect(ctx, r.Connect, address, cluster)
+	if node != nil {
+		roles[address] = node.Role
+	}
+
 	if err != nil {
 		return client, "", err
 	}
@@ -322,6 +357,49 @@ func roleFits(role, stage string) error {
 	}
 
 	return nil
+}
+
+// etcdGate asks every controller except a single node, which runs kine.
+func (r *KubernetesRollout) etcdGate(clients map[string]*Client, roles map[string]string) *etcdGate {
+	gate := &etcdGate{settle: r.Settle, poll: r.Poll, say: r.say}
+
+	for _, address := range r.Controllers {
+		if roles[address] == string(config.RoleSingle) {
+			continue
+		}
+
+		client := clients[address]
+		gate.sources = append(gate.sources, etcdSource{
+			address: address,
+			connect: func() (*Client, error) { return client, nil },
+		})
+	}
+
+	return gate
+}
+
+// moveGated moves one node, and a controller only while etcd can spare it.
+// moved reports whether the node changed version, even when err is set.
+func (r *KubernetesRollout) moveGated(
+	ctx context.Context, client *Client, stage string, gate *etcdGate,
+) (moved bool, err error) {
+	if stage != "controller" {
+		return false, r.moveOne(ctx, client)
+	}
+
+	if err := gate.check(ctx); err != nil {
+		return false, fmt.Errorf("before moving it: %w", err)
+	}
+
+	if err := r.moveOne(ctx, client); err != nil {
+		return false, err
+	}
+
+	if err := gate.wait(ctx); err != nil {
+		return true, fmt.Errorf("moved, but %w", err)
+	}
+
+	return true, nil
 }
 
 func (r *KubernetesRollout) moveOne(ctx context.Context, client *Client) error {

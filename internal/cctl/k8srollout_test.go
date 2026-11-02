@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Corium-OS/Corium/internal/api"
+	"github.com/Corium-OS/Corium/internal/etcd"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
@@ -40,6 +41,10 @@ type k8sNode struct {
 	refuseCheck error
 
 	cluster string
+
+	// etcd serves GET /v1/etcd; nil means the node predates the route.
+	// etcdAfterMove replaces it once the node is moved.
+	etcd, etcdAfterMove *etcd.Status
 }
 
 func (n *k8sNode) service() string {
@@ -67,6 +72,12 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 			},
 		})
 	})
+
+	if node.etcd != nil {
+		mux.HandleFunc("GET /v1/etcd", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(node.etcd)
+		})
+	}
 
 	if node.checks {
 		mux.HandleFunc("POST /v1/kubernetes/check", func(w http.ResponseWriter, _ *http.Request) {
@@ -97,6 +108,10 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 
 		node.moved++
 		node.version = request.Version
+
+		if node.etcdAfterMove != nil {
+			node.etcd = node.etcdAfterMove
+		}
 
 		if node.comesBackAs != "" {
 			node.version = node.comesBackAs

@@ -658,7 +658,7 @@ removes every key the API was trusting. See ADR 5.
 | Flag | Default | Notes |
 |---|---|---|
 | `--image` | — | Required. The image to move the nodes to |
-| `--settle` | `15m` | How long to wait for one node to come back; a reboot into a new OS image with k0s starting behind it |
+| `--settle` | `15m` | How long to wait for one node to come back; a reboot into a new OS image with k0s starting behind it, and a controller's etcd member catching up |
 | `--dry-run` | off | Check every node, then stop without changing anything |
 
 > **Warning.** `cctl upgrade` takes one node at a time and **stops at the first
@@ -684,11 +684,15 @@ Checking 3 nodes can move to ghcr.io/corium-os/corium:0.5
 and fit to lose — bootstrapped, k0s running, the last boot not judged bad by
 greenboot — in the same cluster as the others, listed once, and its signing
 policy must accept the image. One refusal stops the rollout with nothing
-changed. `--dry-run` stops there anyway. A node older than this check is
-reported and checks the image itself when staged.
+changed. `--dry-run` also checks etcd, then stops. A node older than this
+check is reported and checks the image itself when staged.
 
 Health is asked again just before each node, and after each one it checks the
 node came back **on the digest it was sent to**, not merely that it answers.
+
+Around each controller it also checks etcd: before taking one down, and again,
+for up to `--settle`, once it is back. See
+[etcd around controllers](#etcd-around-controllers).
 
 A node refuses an image its own signing policy would accept unsigned:
 
@@ -763,6 +767,10 @@ on the target version are skipped. The ones still to move must all start from
 the same minor: a mix, such as a cluster left half-way by an earlier rollout to
 another version, is refused with the nodes named by minor.
 
+**etcd is checked before and after each controller**, as `cctl upgrade` does,
+with up to five minutes for a moved controller's member to catch up. See
+[etcd around controllers](#etcd-around-controllers).
+
 Each node downloads the extension *before* it is taken out of service, so an
 unreachable registry or a signature that does not verify costs nothing. Then it
 drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
@@ -802,6 +810,36 @@ $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2
 | `pending` | Not reached, because an earlier node failed |
 | `refused` | Turned down by the check; nothing was changed anywhere |
 | `checked` | Accepted by the check, then left alone: a dry run, or another node was refused |
+
+A controller that moved but left etcd short is reported `moved`, with the
+error that stopped the rollout.
+
+### etcd around controllers
+
+Both rollouts refuse to take a controller out while etcd is short a member,
+and stop after one whose member does not come back healthy:
+
+```console
+[1/5] node-1:7443 (controller)
+        etcd: 3 of 3 members healthy
+        on k0s v1.35.8+k0s.1, moving to v1.36.4+k0s.1
+        up on k0s v1.36.4+k0s.1
+        etcd: 3 of 3 members healthy
+```
+
+No node answers for the cluster. Each controller reports its own member's
+health — etcd's `/health`, which needs a quorum to pass — and the member list
+it sees, on `GET /v1/etcd`. `cctl` puts the answers side by side and stops when:
+
+- a member is unhealthy, or a controller cannot be asked;
+- controllers disagree on the member list;
+- a member is on none of the controllers given. A dead machine still listed
+  counts against the quorum: list every controller, or remove it with
+  `k0s etcd leave`.
+
+A `single` node runs kine and is skipped, as is a controller on SQLite or an
+external etcd. A node older than this check is reported and not blocking; its
+member is then not checked.
 
 ### Getting a kubeconfig
 

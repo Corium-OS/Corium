@@ -18,6 +18,7 @@ import (
 
 	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/api"
+	"github.com/Corium-OS/Corium/internal/etcd"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
 	"github.com/Corium-OS/Corium/internal/upgrade"
@@ -281,6 +282,16 @@ func (c *Client) Node(ctx context.Context) (*nodeinfo.Node, error) {
 	}
 
 	return &node, nil
+}
+
+// Etcd reads a controller's own etcd member and the membership it sees.
+func (c *Client) Etcd(ctx context.Context) (*etcd.Status, error) {
+	var status etcd.Status
+	if err := c.call(ctx, http.MethodGet, "/v1/etcd", nil, &status); err != nil {
+		return nil, err
+	}
+
+	return &status, nil
 }
 
 // withTimeout returns a copy of this client's HTTP client with a different
