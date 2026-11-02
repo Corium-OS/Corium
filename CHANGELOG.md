@@ -19,6 +19,12 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   or refusing the version now stops the rollout with nothing changed, instead
   of half-way through. `--dry-run` runs the check alone. Nodes answer it on the
   new `POST /v1/kubernetes/check`.
+- **`cctl upgrade` checks every node before rebooting the first.** A node that
+  is unreachable, unhealthy, in another cluster, listed twice or whose signing
+  policy refuses the image now stops the rollout with nothing changed, instead
+  of after the first nodes have rebooted. `--dry-run` runs the check alone.
+  Nodes answer it on the new `POST /v1/upgrade/check`; an older node is
+  reported and still checks the image when staged.
 
 - **`cctl k8s upgrade --json` reports each node's outcome as JSON.** Address,
   stage, source and target version, result and error, on standard output for

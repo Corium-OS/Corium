@@ -292,30 +292,13 @@ func mixedMinors(results []KubernetesNodeResult) string {
 func (r *KubernetesRollout) checkOne(
 	ctx context.Context, address, stage string, cluster *string,
 ) (*Client, string, error) {
-	client, err := r.Connect(address)
+	client, node, err := inspect(ctx, r.Connect, address, cluster)
 	if err != nil {
-		return nil, "", err
-	}
-
-	node, err := client.Node(ctx)
-	if err != nil {
-		return client, "", err
-	}
-
-	if err := healthy(node); err != nil {
 		return client, "", err
 	}
 
 	if err := roleFits(node.Role, stage); err != nil {
 		return client, "", err
-	}
-
-	if node.Cluster != "" {
-		if *cluster == "" {
-			*cluster = node.Cluster
-		} else if node.Cluster != *cluster {
-			return client, "", fmt.Errorf("in cluster %q, the others in %q", node.Cluster, *cluster)
-		}
 	}
 
 	running, err := client.KubernetesCheck(ctx, r.Version, r.Mirror)

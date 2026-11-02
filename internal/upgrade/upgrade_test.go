@@ -153,6 +153,29 @@ func TestReferencesAreRefusedBeforeReachingBootc(t *testing.T) {
 	}
 }
 
+func TestCheckRefusesWhatStageWouldWithoutRunningAnything(t *testing.T) {
+	manager := &Manager{
+		PolicyPath: policyFile(t, shippedPolicy),
+		Run: func(context.Context, string, ...string) ([]byte, error) {
+			t.Error("Check() ran a command")
+
+			return nil, nil
+		},
+	}
+
+	if err := manager.Check("ghcr.io/corium-os/corium:0.2"); err != nil {
+		t.Errorf("Check() = %v, want nil", err)
+	}
+
+	if err := manager.Check("quay.io/fedora-ostree-desktops/silverblue:44"); !errors.Is(err, ErrUnsigned) {
+		t.Errorf("Check() = %v, want %v", err, ErrUnsigned)
+	}
+
+	if err := manager.Check("-rf"); !errors.Is(err, ErrBadReference) {
+		t.Errorf("Check() = %v, want %v", err, ErrBadReference)
+	}
+}
+
 // bootcStatus is what the node says after staging something.
 const bootcStatus = `{"status":{"staged":{"image":{
   "image":{"image":"ghcr.io/corium-os/corium:0.2"},

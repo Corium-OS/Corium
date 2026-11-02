@@ -38,6 +38,9 @@ type Rollout struct {
 
 	// Out is where progress is reported.
 	Out io.Writer
+
+	// DryRun stops after every node has been checked.
+	DryRun bool
 }
 
 // Defaults for a rollout, chosen from what a reboot actually costs.
@@ -57,10 +60,27 @@ var ErrUnhealthy = errors.New("node is not healthy")
 func (r *Rollout) Run(ctx context.Context) error {
 	r.applyDefaults()
 
+	if len(r.Nodes) == 0 {
+		return errors.New("no nodes to upgrade")
+	}
+
+	clients, err := r.preflight(ctx)
+	if err != nil {
+		return err
+	}
+
+	if r.DryRun {
+		r.say("\nDry run: every node accepts %s. Nothing was changed.\n", r.Image)
+
+		return nil
+	}
+
+	r.say("\n")
+
 	for i, address := range r.Nodes {
 		r.say("[%d/%d] %s\n", i+1, len(r.Nodes), address)
 
-		if err := r.upgradeOne(ctx, address); err != nil {
+		if err := r.upgradeOne(ctx, clients[address], address); err != nil {
 			r.say("        failed: %v\n", err)
 
 			return fmt.Errorf("%s: %w. %d of %d nodes were upgraded; "+
@@ -73,15 +93,100 @@ func (r *Rollout) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Rollout) upgradeOne(ctx context.Context, address string) error {
-	client, err := r.Connect(address)
-	if err != nil {
-		return err
+// preflight asks every node whether it would take the image before the first
+// one is rebooted, so a bad address or a refused image cannot leave the cluster
+// half-way.
+func (r *Rollout) preflight(ctx context.Context) (map[string]*Client, error) {
+	r.say("Checking %d nodes can move to %s\n", len(r.Nodes), r.Image)
+
+	clients := make(map[string]*Client, len(r.Nodes))
+	cluster := ""
+	refused := 0
+
+	for _, address := range r.Nodes {
+		if _, seen := clients[address]; seen {
+			r.say("  %s: listed twice\n", address)
+			refused++
+
+			continue
+		}
+
+		client, node, err := inspect(ctx, r.Connect, address, &cluster)
+		clients[address] = client
+
+		if err == nil {
+			err = client.UpgradeCheck(ctx, r.Image)
+		}
+
+		switch {
+		case errors.Is(err, ErrUnknownRoute):
+			r.say("  %s: on %s; predates the check, it will check when staged\n",
+				address, bootedImageOf(node))
+		case err != nil:
+			r.say("  %s: %v\n", address, err)
+			refused++
+		default:
+			r.say("  %s: on %s\n", address, bootedImageOf(node))
+		}
 	}
 
+	if refused > 0 {
+		return nil, fmt.Errorf("%d of %d nodes cannot move to %s; nothing was changed",
+			refused, len(r.Nodes), r.Image)
+	}
+
+	return clients, nil
+}
+
+// inspect reads a node and refuses one that is unhealthy or in another cluster
+// than the first seen, which cluster carries. Shared by both rollouts.
+func inspect(
+	ctx context.Context, connect func(string) (*Client, error), address string, cluster *string,
+) (*Client, *nodeinfo.Node, error) {
+	client, err := connect(address)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	node, err := client.Node(ctx)
+	if err != nil {
+		return client, nil, err
+	}
+
+	if err := healthy(node); err != nil {
+		return client, node, err
+	}
+
+	if node.Cluster != "" {
+		if *cluster == "" {
+			*cluster = node.Cluster
+		} else if node.Cluster != *cluster {
+			return client, node, fmt.Errorf("in cluster %q, the others in %q", node.Cluster, *cluster)
+		}
+	}
+
+	return client, node, nil
+}
+
+// bootedImageOf names what a node runs, for the preflight line.
+func bootedImageOf(node *nodeinfo.Node) string {
+	switch {
+	case node == nil || node.OS.Booted == nil:
+		return "an unreported image"
+	case node.OS.Booted.Image != "":
+		return node.OS.Booted.Image
+	case node.OS.Booted.Digest != "":
+		return node.OS.Booted.Digest
+	default:
+		return "an unreported image"
+	}
+}
+
+func (r *Rollout) upgradeOne(ctx context.Context, client *Client, address string) error {
 	// Before anything: is this node in a state where taking it down is safe?
 	// A node that is already unhealthy is one whose workloads have nowhere
-	// good to go.
+	// good to go. Asked again after the preflight: an earlier node's reboot may
+	// have changed the answer.
 	before, err := client.Node(ctx)
 	if err != nil {
 		return err

@@ -123,8 +123,14 @@ for a list of nodes:
 cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:<tag>
 ```
 
-It takes the nodes in order, and checks each one fit to lose before taking it
-down: bootstrapped, k0s running, and the last boot not judged bad by greenboot.
+Before touching any node it checks all of them: reachable, fit to lose
+(bootstrapped, k0s running, the last boot not judged bad by greenboot), in the
+same cluster, listed once, and accepting the image under their own signing
+policy. One refusal stops it with nothing changed, so a wrong address or a
+refused image is not discovered after the first nodes have rebooted. Add
+`--dry-run` to run only that check.
+
+Then it takes the nodes in order, asking each again whether it is fit to lose.
 It **stops at the first node that does not come back on the digest it was sent
 to**, and says how many were done.
 

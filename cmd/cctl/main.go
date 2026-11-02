@@ -624,6 +624,8 @@ func upgradeCommand(ctx context.Context, args []string) error {
 		image  = flags.String("image", "", "the image to move to; required")
 		settle = flags.Duration("settle", cctl.DefaultSettle,
 			"how long to wait for a node to come back")
+		dryRun = flags.Bool("dry-run", false,
+			"check every node accepts the image, and change nothing")
 	)
 
 	rest, err := parseFlags(flags, args)
@@ -632,7 +634,7 @@ func upgradeCommand(ctx context.Context, args []string) error {
 	}
 
 	if len(rest) == 0 {
-		return errors.New("usage: cctl upgrade <address>... --image <image>")
+		return errors.New("usage: cctl upgrade <address>... --image <image> [--dry-run]")
 	}
 
 	if *image == "" {
@@ -657,6 +659,7 @@ func upgradeCommand(ctx context.Context, args []string) error {
 		Nodes:   addresses,
 		Settle:  *settle,
 		Out:     os.Stdout,
+		DryRun:  *dryRun,
 		Connect: func(address string) (*cctl.Client, error) { return connectWith(store, address, "") },
 	}
 

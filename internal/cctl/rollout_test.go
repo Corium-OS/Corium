@@ -40,12 +40,20 @@ type fakeNode struct {
 
 	// unhealthy makes it report a stopped k0s.
 	unhealthy bool
+
+	// checks serves POST /v1/upgrade/check; without it the node predates the
+	// route. refuseCheck makes the check reject the image.
+	checks      bool
+	refuseCheck error
+
+	cluster string
 }
 
 func (f *fakeNode) node() *nodeinfo.Node {
 	return &nodeinfo.Node{
 		Bootstrapped: true,
 		Role:         "worker",
+		Cluster:      f.cluster,
 		OS:           nodeinfo.OS{Booted: &nodeinfo.Deployment{Digest: f.digest}},
 		Kubernetes: nodeinfo.Kubernetes{
 			Service: "k0sworker.service",
@@ -214,8 +222,16 @@ func TestRolloutRefusesToTakeDownAnAlreadyBrokenNode(t *testing.T) {
 		Out:     io.Discard,
 	}
 
-	if err := rollout.Run(t.Context()); !errors.Is(err, ErrUnhealthy) {
-		t.Fatalf("Run() = %v, want %v", err, ErrUnhealthy)
+	var out strings.Builder
+
+	rollout.Out = &out
+
+	if err := rollout.Run(t.Context()); err == nil {
+		t.Fatal("Run() = nil, want a refusal")
+	}
+
+	if !strings.Contains(out.String(), ErrUnhealthy.Error()) {
+		t.Errorf("output = %q, want it to name the unhealthy node", out.String())
 	}
 
 	if fleet.nodes["a:7443"].applied != 0 {
@@ -247,6 +263,118 @@ func TestRolloutStopsWhenANodeRefusesTheImage(t *testing.T) {
 
 	if fleet.nodes["b:7443"].applied != 0 {
 		t.Error("the second node was touched after the first refused")
+	}
+}
+
+// TestOSPreflightStopsTheRolloutBeforeAnyNodeIsTouched covers every refusal
+// the preflight owns. The node at fault is listed last, so the ones before it
+// prove nothing was staged or applied ahead of the check.
+func TestOSPreflightStopsTheRolloutBeforeAnyNodeIsTouched(t *testing.T) {
+	tests := []struct {
+		name  string
+		last  fakeNode
+		nodes []string
+	}{
+		{
+			name: "a node refuses the image",
+			last: fakeNode{checks: true,
+				refuseCheck: errors.New("the node's signing policy does not require a signature")},
+			nodes: []string{"a:7443", "b:7443"},
+		},
+		{
+			name:  "an unhealthy node",
+			last:  fakeNode{checks: true, unhealthy: true},
+			nodes: []string{"a:7443", "b:7443"},
+		},
+		{
+			name:  "a node from another cluster",
+			last:  fakeNode{checks: true, cluster: "elsewhere"},
+			nodes: []string{"a:7443", "b:7443"},
+		},
+		{
+			name:  "an unreachable address",
+			last:  fakeNode{checks: true},
+			nodes: []string{"a:7443", "b:7443", "nowhere:7443"},
+		},
+		{
+			name:  "an address listed twice",
+			last:  fakeNode{checks: true},
+			nodes: []string{"a:7443", "b:7443", "a:7443"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			last := test.last
+			last.digest = "sha256:old"
+
+			if last.cluster == "" {
+				last.cluster = "lab"
+			}
+
+			fleet := &fleet{t: t, nodes: map[string]*fakeNode{
+				"a:7443": {digest: "sha256:old", checks: true, cluster: "lab"},
+				"b:7443": &last,
+			}}
+
+			var out strings.Builder
+
+			rollout := &Rollout{
+				Image:   "ghcr.io/corium-os/corium:0.2",
+				Nodes:   test.nodes,
+				Connect: fleet.connect,
+				Poll:    time.Millisecond,
+				Settle:  50 * time.Millisecond,
+				Out:     &out,
+			}
+
+			err := rollout.Run(t.Context())
+			if err == nil {
+				t.Fatalf("the rollout went ahead\n%s", out.String())
+			}
+
+			if !strings.Contains(err.Error(), "nothing was changed") {
+				t.Errorf("error = %q, want it to say nothing was changed", err)
+			}
+
+			for address, node := range fleet.nodes {
+				if node.staged != "" || node.applied != 0 {
+					t.Errorf("%s was staged %q and applied %d times, want neither",
+						address, node.staged, node.applied)
+				}
+			}
+		})
+	}
+}
+
+func TestOSDryRunTouchesNothing(t *testing.T) {
+	fleet := &fleet{t: t, nodes: map[string]*fakeNode{
+		"a:7443": {digest: "sha256:old", checks: true},
+		"b:7443": {digest: "sha256:old"}, // predates the check: reported, not blocking
+	}}
+
+	var out strings.Builder
+
+	rollout := &Rollout{
+		Image:   "ghcr.io/corium-os/corium:0.2",
+		Nodes:   []string{"a:7443", "b:7443"},
+		Connect: fleet.connect,
+		DryRun:  true,
+		Out:     &out,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v\n%s", err, out.String())
+	}
+
+	if !strings.Contains(out.String(), "predates the check") {
+		t.Errorf("output = %q, want the older node reported", out.String())
+	}
+
+	for address, node := range fleet.nodes {
+		if node.staged != "" || node.applied != 0 {
+			t.Errorf("%s was touched by a dry run", address)
+		}
 	}
 }
 
@@ -289,6 +417,19 @@ func newTestClient(t *testing.T, node *fakeNode) *Client {
 	mux.HandleFunc("GET /v1/node", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(node.node())
 	})
+
+	if node.checks {
+		mux.HandleFunc("POST /v1/upgrade/check", func(w http.ResponseWriter, _ *http.Request) {
+			if node.refuseCheck != nil {
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": node.refuseCheck.Error()})
+
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+		})
+	}
 
 	mux.HandleFunc("POST /v1/upgrade/stage", func(w http.ResponseWriter, _ *http.Request) {
 		if node.failStage != nil {

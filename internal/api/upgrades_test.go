@@ -188,6 +188,45 @@ func TestStagingNeedsOperatorAndApplyingNeedsAdmin(t *testing.T) {
 	}
 }
 
+func TestUpgradeCheckAnswersWithoutPulling(t *testing.T) {
+	var pulled bool
+
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "switch" {
+			pulled = true
+		}
+
+		return nil, nil
+	}
+
+	ca, address, store := upgradeNode(t, shippedPolicy, run)
+	operator := client(t, store, ca.issue(t, RoleOperator))
+
+	tests := map[string]int{
+		"ghcr.io/corium-os/corium:0.2":                 http.StatusOK,
+		"quay.io/fedora-ostree-desktops/silverblue:44": http.StatusForbidden,
+		"not a reference":                              http.StatusBadRequest,
+	}
+
+	for image, want := range tests {
+		status, body := postRaw(t, operator, "https://"+address+"/v1/upgrade/check",
+			`{"image":"`+image+`"}`)
+		if status != want {
+			t.Errorf("check %q = %d, want %d (%v)", image, status, want, body)
+		}
+	}
+
+	if pulled {
+		t.Error("a check reached bootc switch")
+	}
+
+	readonly := client(t, store, ca.issue(t, RoleReadOnly))
+	if status, _ := postRaw(t, readonly, "https://"+address+"/v1/upgrade/check",
+		`{"image":"ghcr.io/corium-os/corium:0.2"}`); status != http.StatusForbidden {
+		t.Errorf("check as readonly = %d, want 403", status)
+	}
+}
+
 func TestApplyingIsAcceptedRatherThanCompleted(t *testing.T) {
 	ca, address, store := upgradeNode(t, shippedPolicy, bootc(stagedStatus))
 
