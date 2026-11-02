@@ -33,7 +33,8 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   that is unreachable, unhealthy, listed in the wrong stage, in another cluster
   or refusing the version now stops the rollout with nothing changed, instead
   of half-way through. `--dry-run` runs the check alone. Nodes answer it on the
-  new `POST /v1/kubernetes/check`.
+  new `POST /v1/kubernetes/check`. It also warns about a worker the
+  controllers report that the rollout was not given.
 - **`cctl upgrade` checks every node before rebooting the first.** A node that
   is unreachable, unhealthy, in another cluster, listed twice or whose signing
   policy refuses the image now stops the rollout with nothing changed, instead
