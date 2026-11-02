@@ -162,6 +162,12 @@ Validation is offline, per AGENTS §7. It checks the syntax of the version, its
 presence in the support window that the image was built with, and the skew
 rules, all without a network call. The pull answers whether the artifact exists.
 
+*Amended 2026-11-02.* At bootstrap the skew rules apply only to a node that
+already holds k0s state in `/var/lib/k0s`. A fresh node has nothing to migrate,
+so any version in the window is a start, not a downgrade. Without this, a floor
+at the top of the window made every older minor unreachable, and so was every
+minor upgrade, including the end-to-end test that exercises one.
+
 ### 4. The support window is three minors
 
 An image supports the Kubernetes minor that it ships as its floor and the two
