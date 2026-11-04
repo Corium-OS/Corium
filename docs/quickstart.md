@@ -1,9 +1,9 @@
 # Quick start
 
-From nothing to a working Kubernetes node in four steps, and a fifth for
-managing it without SSH.
+This page takes you from nothing to a working Kubernetes node in four steps. A
+fifth step shows how to manage the node without SSH.
 
-The short version, if you are in a hurry:
+If you are in a hurry, this is the short version:
 
 ```bash
 oras pull ghcr.io/corium-os/corium-qcow2:0.5.0   # download a ready-made disk
@@ -11,48 +11,47 @@ printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
 
-The rest of this page explains each step, and the last section covers the
-mistakes that cost the most time.
+The rest of this page explains each step. The last section covers the mistakes
+that cost the most time.
 
 ---
 
-If you would rather understand the model before typing anything, read
+If you want to understand the model before you type anything, read
 [concepts](concepts.md) first.
 
 ## Before you start
 
-Every release publishes a ready-made, signed disk image, so the quick path needs
-no build host at all. You only need two things:
+Every release publishes a ready-made, signed disk image. So the quick path needs
+no build host. You need only two things:
 
-- **Somewhere to run the node** — Proxmox, KVM/libvirt, or any cloud that accepts
+- **A place to run the node**: Proxmox, KVM/libvirt, or any cloud that accepts
   a qcow2 or an ISO.
-- **A way to download it** — [`oras`](https://oras.land), `curl`, or a browser.
-  Any of the three works from macOS, Windows or Linux, and none needs `sudo`.
+- **A tool to download it**: [`oras`](https://oras.land), `curl`, or a browser.
+  All three work on macOS, Windows, and Linux, and none of them needs `sudo`.
 
-You do **not** need `podman`, a Linux host, or 20 GB of build space unless you
-mean to change the image and rebuild it yourself — that path is covered in
-[build from source](#build-from-source) at the end.
+You do not need `podman`, a Linux host, or 20 GB of build space. You need them
+only if you change the image and rebuild it yourself. The
+[build from source](#build-from-source) section at the end covers that path.
 
 ---
 
 ## 1. Get a bootable disk
 
-Pull the artefact that matches where the node will run:
+Pull the artefact for the platform where the node will run:
 
 | Artefact | Pull it with | Use it for |
 |---|---|---|
 | qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.5.0` | Proxmox, KVM, libvirt |
 | Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.5.0` | Bare metal. Installs unattended. See [bare metal](install/baremetal.md) |
 
-The tag above is only an example. **The exact coordinates for a given version,
-with their digests, are on that version's
-[release page](https://github.com/Corium-OS/Corium/releases/latest)** — they
-change every release, so they are published with it rather than written down
-here.
+The tag above is only an example. **The
+[release page](https://github.com/Corium-OS/Corium/releases/latest) of each
+version gives its exact coordinates and digests.** They change with every
+release, so the release publishes them, and this page does not.
 
-No `oras`? A plain `curl` or a browser download works too. See
-[downloads](install/downloads.md), which also covers how to check that what you
-received is what was published:
+If you do not have `oras`, `curl` or a browser download also works. See
+[downloads](install/downloads.md). That page also shows how to make sure that
+the file you received is the file that the release published:
 
 ```bash
 cosign verify ghcr.io/corium-os/corium-qcow2:0.5.0 \
@@ -60,17 +59,17 @@ cosign verify ghcr.io/corium-os/corium-qcow2:0.5.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The ISO is **unattended**: it deploys the image embedded in it with no prompts
+The ISO is unattended. It deploys the image that it contains, with no prompts
 and no kickstart to write.
 
-Changed the image and need your own disk instead? Build a qcow2, a raw disk or an
-ISO from it — see [build from source](#build-from-source).
+If you changed the image and need your own disk, build a qcow2, a raw disk, or
+an ISO from it. See [build from source](#build-from-source).
 
 ---
 
 ## 2. Write a node configuration
 
-A complete single-node cluster:
+This is a complete single-node cluster:
 
 ```yaml
 #cloud-config
@@ -84,29 +83,30 @@ users:
       - ssh-ed25519 AAAA... you@example.com
 ```
 
-`role` is the only required field — and a node that means to be told what it is
-over the API may leave even that out, which is how a fleet shares one
-cloud-config ([§3.2](reference.md#32-role)). Everything else has a default, and
-the document stays an ordinary cloud-config — `write_files`, `runcmd` and the rest
-keep working.
+`role` is the only required field. A node that gets its role over the API can
+leave out even `role`. This lets a fleet share one cloud-config
+([§3.2](reference.md#32-role)). All other fields have a default. The document
+stays an ordinary cloud-config, so `write_files`, `runcmd`, and the other
+modules continue to work.
 
-If you have the repository checked out, validate it before you boot anything:
+If you have a checkout of the repository, validate the file before you boot
+anything:
 
 ```bash
 mise exec -- go run ./cmd/corium-agent validate node.yaml
 ```
 
-Validation is offline and reports every problem at once, so you do not discover
-your mistakes one reboot at a time.
+Validation works offline and reports all problems at the same time. So you do
+not find your mistakes one reboot at a time.
 
 The four roles:
 
 | Role | What it is |
 |---|---|
 | `single` | A self-contained cluster. Cannot gain nodes later |
-| `controller` | Control plane only, runs no workloads |
+| `controller` | Control plane only. Runs no workloads |
 | `controller+worker` | Control plane that also accepts workloads |
-| `worker` | Workloads only; joins an existing cluster with a token |
+| `worker` | Workloads only. Joins an existing cluster with a token |
 
 See [examples](examples.md) for workers, add-ons, a custom CNI, and HA.
 
@@ -128,14 +128,14 @@ NAMESERVER=192.168.0.1 \
 qm start 140
 ```
 
-Installing from the ISO instead uses `deploy/proxmox/create-vm-iso.sh`, which
-takes the same variables plus `ISO=local:iso/corium-install.iso`.
+To install from the ISO, use `deploy/proxmox/create-vm-iso.sh`. It takes the
+same variables, plus `ISO=local:iso/corium-install.iso`.
 
 ### Anywhere else
 
-Boot the disk and hand `node.yaml` to the platform as cloud-init **user-data**.
-Corium probes NoCloud, ConfigDrive, OpenStack, EC2, Azure, GCE, Hetzner, VMware
-and OVF, so one image works across all of them.
+Boot the disk and give `node.yaml` to the platform as cloud-init user-data.
+Corium probes NoCloud, ConfigDrive, OpenStack, EC2, Azure, GCE, Hetzner, VMware,
+and OVF. So one image works on all of them.
 
 For a NoCloud seed ISO:
 
@@ -147,11 +147,11 @@ genisoimage -output seed.iso -volid cidata -joliet -rock user-data meta-data
 
 ### Without cloud-init
 
-A PC in front of you installs from the ISO with a NoCloud seed on a second USB
-stick — [bare metal](install/baremetal.md) covers that end to end. For bare
-metal with no seed device at all, PXE, or a preconfigured appliance, put the
-configuration where the agent will find it. Sources are tried in this order and
-the first that answers wins.
+For a PC in front of you, install from the ISO with a NoCloud seed on a second
+USB stick. The [bare metal](install/baremetal.md) page covers that from start to
+end. For bare metal with no seed device, for PXE, or for a preconfigured
+appliance, put the configuration where the agent can find it. The agent tries
+the sources in this order, and the first source that answers wins.
 
 | Source | For |
 |---|---|
@@ -160,7 +160,7 @@ the first that answers wins.
 | `corium.config=` on the kernel command line | PXE and netboot |
 | `/usr/share/corium/config.yaml` | A default baked into a derived image |
 
-Outside a cloud-config, write the schema on its own — no `corium:` wrapper:
+Outside a cloud-config, write the schema alone, with no `corium:` wrapper:
 
 ```yaml
 role: worker
@@ -183,59 +183,61 @@ sudo k0s kubectl get nodes
 sudo k0s kubectl get pods -A
 ```
 
-A single node takes roughly a minute from power-on to `Ready`. The API answers
-well before the node registers, so `Ready` is the milestone to wait for.
+A single node needs about one minute from power-on to `Ready`. The API answers
+long before the node registers. So wait for `Ready`.
 
-Use the cluster from your workstation:
+To use the cluster from your workstation:
 
 ```bash
 ssh core@192.168.0.190 sudo k0s kubeconfig admin > kubeconfig
 KUBECONFIG=./kubeconfig kubectl get nodes
 ```
 
-The address in that file is whatever k0s decided, which is the node's own — right
-for a single node, wrong for a cluster with a virtual IP, where a kubeconfig
-aimed at one controller stops working the first time that controller does.
-Check the `server:` field before you rely on it. Step 5 removes that worry.
+k0s selects the address in that file, and it is the address of the node itself.
+That address is correct for a single node. It is wrong for a cluster with a
+virtual IP. In that case, the kubeconfig points at one controller, and it stops
+working the first time that controller stops. Make sure that the `server:` field
+is correct before you rely on the file. Step 5 removes this problem.
 
 ---
 
 ## 5. Manage it without SSH (optional)
 
-Everything above works over SSH, and on an immutable OS that is a poor fit: the
-shell you land in is a shell over a system where almost nothing you type
-persists. Corium ships a management API for the things you actually want —
-reading a node, restarting k0s, upgrading it, getting a kubeconfig — and a
-client called `cctl`.
+All the steps above work over SSH. But SSH is a poor fit for an immutable OS,
+because almost nothing that you type in the shell persists. Corium ships a
+management API and a client called `cctl`. They cover the tasks that you
+actually need, for example: read the status of a node, restart k0s, upgrade the
+node, and get a kubeconfig.
 
-It is **on unless you turn it off**. A node with no `api:` block serves its
-enrolment route until it bootstraps, which is how a machine installed from the
-ISO with no configuration can still be reached. Once it has bootstrapped, a node
-with no operator CA has nobody to authenticate and binds no port — which is what
-the four steps above produced, a minute after they finished.
+The API is **on unless you turn it off**. A node with no `api:` block serves its
+enrolment route until it bootstraps. Because of this, you can still reach a
+machine that you installed from the ISO with no configuration. After the
+bootstrap, a node with no operator CA has nobody to authenticate, so it binds no
+port. The four steps above produced that state, one minute after they
+finished.
 
-Install `cctl` on your own machine. Archives are attached to each release, for
-linux and macOS on amd64 and arm64:
+Install `cctl` on your own machine. Each release includes archives for Linux and
+macOS, on amd64 and arm64:
 
 ```bash
 mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'
 ```
 
-The quotes and the version are both required. See
-[downloads](install/downloads.md#install-cctl) for why, and for installing it
-by hand.
+You must keep the quotes and the version. See
+[downloads](install/downloads.md#install-cctl) for the reason, and for how to
+install `cctl` by hand.
 
-Make the operator CA. Its certificate is what nodes are told to trust; the key
-beside it stays on your machine and is never sent anywhere:
+Make the operator CA. Nodes trust its certificate. Its key stays on your
+machine, and `cctl` never sends it anywhere:
 
 ```bash
 cctl pki init
 cctl pki issue --role admin
 ```
 
-`pki init` prints the certificate ready to paste. Add it to the node
-configuration from step 2 — it is a certificate, not a secret, so it is safe in
-cloud-init in the open:
+`pki init` prints the certificate in a form that you can paste. Add it to the
+node configuration from step 2. It is a certificate, not a secret, so you can
+put it in cloud-init in clear text:
 
 ```yaml
 corium:
@@ -247,8 +249,8 @@ corium:
       -----END CERTIFICATE-----
 ```
 
-Reprovision the node with that configuration, and it claims itself at boot.
-Then, from your workstation:
+Provision the node again with that configuration. The node claims itself at
+boot. Then, on your workstation, run:
 
 ```bash
 cctl status 192.168.0.190          # role, image digest, k0s, greenboot, uptime
@@ -256,119 +258,119 @@ cctl logs 192.168.0.190 --unit k0scontroller --since 15m
 cctl kubeconfig 192.168.0.190 > kubeconfig
 ```
 
-The first call asks you to confirm the node's fingerprint against its journal,
-and remembers it; a node signs its own certificate, so the fingerprint is what
-identifies it rather than its name. `cctl kubeconfig` points the file at the
-cluster's virtual IP where there is one, which is the worry step 4 leaves you
-with.
+On the first call, `cctl` asks you to compare the fingerprint of the node with
+the fingerprint in the node journal. Then `cctl` remembers it. A node signs its
+own certificate, so the fingerprint identifies the node, not its name. If the
+cluster has a virtual IP, `cctl kubeconfig` points the file at it. This removes
+the problem from step 4.
 
-[The `cctl` page](cli.md) covers every command, the three roles, and what the
-API deliberately will not do.
+[The `cctl` page](cli.md) covers every command, the three roles, and the tasks
+that the API refuses on purpose.
 
 ---
 
 ## Where to go next
 
-- **Add workers** — [`examples/worker.yaml`](examples/worker.yaml). Mint a token
-  on the controller with `k0s token create --role=worker --expiry=1h`, or have a
-  controller running the API mint one and print the whole block with
+- **Add workers**: [`examples/worker.yaml`](examples/worker.yaml). Create a token
+  on the controller with `k0s token create --role=worker --expiry=1h`. Or, if a
+  controller runs the API, let it create the token and print the full block with
   `cctl worker-config <controller> --name w-1`.
-- **Highly available control plane** —
+- **Highly available control plane**:
   [`examples/ha-controller-first.yaml`](examples/ha-controller-first.yaml), or
-  `deploy/proxmox/create-ha-cluster.sh` to bootstrap all three at once. No load
-  balancer and no certificates required.
-- **Add-ons** — declare Helm charts under `addons:` and k0s installs them at
-  bootstrap. No Helm binary, no in-cluster operator.
-- **A different CNI** — [installing Cilium](cilium.md), start to finish.
-- **Anything Corium does not model** — `k0s.patch` is applied verbatim to the
-  rendered `k0s.yaml`, so every k0s setting stays reachable.
-- **Every field in detail** — the [configuration reference](reference.md).
-- **What is and is not supported** — [feature support](features.md), including
-  everything reachable through the k0s passthrough.
+  `deploy/proxmox/create-ha-cluster.sh` to bootstrap all three at the same time.
+  You need no load balancer and no certificates.
+- **Add-ons**: declare Helm charts under `addons:`, and k0s installs them at
+  bootstrap. You need no Helm binary and no in-cluster operator.
+- **A different CNI**: [installing Cilium](cilium.md), from start to finish.
+- **Anything Corium does not model**: Corium applies `k0s.patch` verbatim to the
+  rendered `k0s.yaml`. So you can reach every k0s setting.
+- **Every field in detail**: the [configuration reference](reference.md).
+- **What is and is not supported**: [feature support](features.md). It includes
+  everything that you can reach through the k0s passthrough.
 
 ### Upgrades
 
-Kubernetes ships with the OS, so upgrading means booting a new image. The
-[upgrades guide](upgrades.md) covers doing this to a cluster without losing
-quorum; the short version:
+Kubernetes ships with the OS, so to upgrade, you boot a new image. The
+[upgrades guide](upgrades.md) shows how to do this on a cluster without loss of
+quorum. This is the short version:
 
 ```bash
 sudo bootc upgrade --apply     # reboots into the new version
 sudo bootc rollback            # if it went badly
 ```
 
-Drain the node first if it carries workloads you care about.
+If the node runs important workloads, drain it first.
 
 ---
 
 ## Troubleshooting
 
-The failures below are the ones that cost the most time on this path.
-[Troubleshooting](troubleshooting.md) indexes every symptom across every
-install path.
+These failures cost the most time on this path.
+[Troubleshooting](troubleshooting.md) lists every symptom for every install
+path.
 
-**The node boots and does nothing.** Read the journal:
-`journalctl -u corium-bootstrap`, or `cctl logs <node> --unit corium-bootstrap`
-if you did step 5. A node with no Corium configuration says so and stops, which
-is a valid outcome — you get a host, not a Kubernetes node.
+**The node boots and does nothing.** Read the journal with
+`journalctl -u corium-bootstrap`. If you did step 5, use
+`cctl logs <node> --unit corium-bootstrap`. A node with no Corium configuration
+reports this and stops. That is a valid result: you get a host, not a Kubernetes
+node.
 
-**`cctl` says the node is not enrolled.** It is waiting to be claimed:
-`api.enabled: true` with no CA is maintenance mode, and such a node holds its
-bootstrap until somebody runs `cctl enroll` with the pairing code from its
-console. If you meant it to come up on its own, give it `api.operatorCA`
-instead.
+**`cctl` says the node is not enrolled.** The node waits for an operator to
+claim it. `api.enabled: true` with no CA is maintenance mode. In this mode, the
+node holds its bootstrap until somebody runs `cctl enroll` with the pairing code
+from its console. If you want the node to start without help, give it
+`api.operatorCA` instead.
 
 **The node is `NotReady` and stays there.** If you set `cni: custom`, this is
-expected: nothing has installed a network yet and the cluster is waiting for
-you. Otherwise check `kubectl -n kube-system describe pod` for the CNI
-DaemonSet.
+expected. No network is installed yet, and the cluster waits for you to install
+one. If you did not set it, look at the CNI DaemonSet with
+`kubectl -n kube-system describe pod`.
 
-**Images will not pull, everything else works.** Almost always DNS. A static
-address configured through a hypervisor usually carries no resolver — Proxmox's
-`ipconfig0` has no field for one — so set `NAMESERVER`. The symptom is
-misleading: the node pings, SSH works, the API answers, and Kubernetes hangs
-with `lookup quay.io: Try again`.
+**Images do not pull, but everything else works.** The cause is almost always
+DNS. A static address that you configure through a hypervisor usually has no
+resolver. For example, Proxmox's `ipconfig0` has no field for one. So set
+`NAMESERVER`. The symptom is misleading. The node answers ping, SSH works, and
+the API answers. But Kubernetes hangs with `lookup quay.io: Try again`.
 
 **Installing from the ISO loops forever.** The boot order must be **disk first,
-ISO second**. An empty disk has no UEFI boot entry, so the firmware falls
-through to the ISO and installs; afterwards the disk has an entry and wins. With
-the ISO first, the node reinstalls itself on every reboot.
+ISO second**. An empty disk has no UEFI boot entry. So the firmware goes to the
+ISO, which installs. After the install, the disk has an entry and boots first.
+If the ISO is first, the node installs itself again on every reboot.
 
-Do not stop the VM during an install, either. Anaconda wipes the disk early, so
-an interrupted install leaves nothing bootable behind.
+Do not stop the VM during an install. Anaconda erases the disk early. So an
+interrupted install leaves nothing that can boot.
 
-**Two nodes have the same name.** They should not: Corium derives a stable name
-from the machine ID when the hostname is still generic. If you cloned a disk
-*after* first boot, the machine ID came along with it — clear `/etc/machine-id`
-on the clone, or set `node.name` explicitly.
+**Two nodes have the same name.** This must not happen. If the hostname is still
+generic, Corium makes a stable name from the machine ID. If you cloned a disk
+*after* first boot, the clone also has the same machine ID. Clear
+`/etc/machine-id` on the clone, or set `node.name` explicitly.
 
 ---
 
 ## Build from source
 
-Everything above uses a published image. You only need this section when you have
+All the steps above use a published image. You need this section only if you
 changed the image and want a disk built from your own version.
 
-To add your own agents, certificates or drivers on top of a published image
-instead, you do not need a source checkout — see
-[building your own image](derived-images.md).
+To add your own agents, certificates, or drivers to a published image, you do
+not need a source checkout. See [building your own image](derived-images.md).
 
-This is the one part that needs a **Linux host** with `podman` and about 20 GB of
-free disk, plus [mise](https://mise.jdx.dev), which runs every command below and
-provisions the toolchain they need. `mise install` once, in the checkout.
+This is the only part that needs a **Linux host** with `podman` and about 20 GB
+of free disk. You also need [mise](https://mise.jdx.dev). It runs every command
+below and installs the toolchain that they need. Run `mise install` once, in the
+checkout.
 
-macOS and Windows cannot build the disk images. The builder mounts the root
-filesystem it creates in order to populate it, which needs a real Linux
-kernel. A Linux VM is fine; so is the hypervisor you are deploying to, which is
-often the most convenient place.
+You cannot build the disk images on macOS or Windows. The builder mounts the
+root filesystem that it creates, to fill it. This needs a real Linux kernel. A
+Linux VM works. The hypervisor that you deploy to also works, and it is often
+the most convenient place.
 
 ```bash
 podman --version     # 4.x or newer
 nproc; free -g       # 2 cores and 4 GB are enough to build
 ```
 
-The Go toolchain is **not** required: the agent is compiled inside the container
-build.
+The Go toolchain is **not** required. The container build compiles the agent.
 
 ### Build the OS image
 
@@ -376,15 +378,15 @@ build.
 mise run image
 ```
 
-This produces an ordinary OCI image. Inspect it like any other:
+This produces an ordinary OCI image. You can inspect it like any other image:
 
 ```bash
 podman run --rm localhost/corium:dev k0s version
 podman run --rm localhost/corium:dev corium-agent version
 ```
 
-The build ends with `bootc container lint`. If it reports warnings, read them —
-they catch real problems, such as content written to `/var` that will not
+The build ends with `bootc container lint`. If it reports warnings, read them.
+They find real problems, for example content written to `/var` that will not
 survive an upgrade.
 
 To publish it:
@@ -395,7 +397,7 @@ REGISTRY=ghcr.io/you IMAGE_TAG=0.5.0-1 mise run push
 
 ### Turn it into a disk
 
-Pick the artefact that matches where the node will run:
+Pick the artefact for the platform where the node will run:
 
 | Command | Produces | Use it for |
 |---|---|---|
@@ -404,12 +406,12 @@ Pick the artefact that matches where the node will run:
 | `mise run artefact-anaconda-iso` | `output/bootiso/install.iso` | Bare-metal installs |
 | `mise run artefacts` | all three | |
 
-Each takes several minutes and needs `sudo`, because the builder runs
-privileged. The two disks are built by
-[image-builder](https://github.com/osbuild/image-builder); the
-ISO by the `bootc-image-builder` entry point it still ships, which is the only
-one that builds that type. Both are pinned by digest in `mise.toml` and
-overridable there — see [ADR 9](adr/0009-image-builder.md).
+Each command takes several minutes and needs `sudo`, because the builder runs
+privileged. [image-builder](https://github.com/osbuild/image-builder) builds the
+two disks. The `bootc-image-builder` entry point that image-builder still ships
+builds the ISO, because it is the only one that can build that type. `mise.toml`
+pins both by digest, and you can override them there. See
+[ADR 9](adr/0009-image-builder.md).
 
-From here, pick up at [step 2](#2-write-a-node-configuration) with the disk you
-just built.
+Then go back to [step 2](#2-write-a-node-configuration) with the disk that you
+built.

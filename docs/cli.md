@@ -1,68 +1,68 @@
 # cctl
 
-`cctl` manages Corium nodes: it reads their state, drives their upgrades, and
-decides which of them will obey you. This page tracks `main`. The current
-stable release is **0.5.0**, and a command newer than the release you are
-running carries the version that introduced it.
+`cctl` manages Corium nodes. It reads their state, runs their upgrades, and
+controls which of them obey you. This page tracks `main`. The current stable
+release is **0.5.0**. If a command is newer than the release that you run, the
+page gives the version that introduced it.
 
 | Command | Role | What it does | Section |
 |---|---|---|---|
-| `cctl pki init` | none; local | Creates the operator CA this fleet will trust | [The operator PKI](#the-operator-pki) |
-| `cctl pki issue` | none; local | Signs a client certificate for yourself | [The operator PKI](#the-operator-pki) |
-| `cctl enroll` | a pairing code, not a role | Claims an unenrolled node, using the code on its console | [Claim a node](#claim-a-node) |
-| `cctl apply` | `corium:admin` | Gives a node the `corium:` document it bootstraps with, and re-applies the safe part of one afterwards | [Applying a configuration](#applying-a-configuration) |
-| `cctl status` | `corium:readonly` | What the node is: role, cluster, images, k0s, health | [Reading](#reading) |
-| `cctl services` | `corium:readonly` | The units this API knows about, and their state | [Reading](#reading) |
-| `cctl logs` | `corium:readonly` | A journal, per unit or across all of them | [Logs](#logs) |
-| `cctl health` | `corium:readonly` | Says the node answers, and what it authenticated you as | [Reading](#reading) |
+| `cctl pki init` | none; local | Creates the operator CA that this fleet will trust | [The operator PKI](#the-operator-pki) |
+| `cctl pki issue` | none; local | Signs a client certificate for you | [The operator PKI](#the-operator-pki) |
+| `cctl enroll` | a pairing code, not a role | Claims an unenrolled node with the code on its console | [Claim a node](#claim-a-node) |
+| `cctl apply` | `corium:admin` | Gives a node the `corium:` document that it bootstraps with. Later, re-applies the safe part of that document | [Applying a configuration](#applying-a-configuration) |
+| `cctl status` | `corium:readonly` | Shows what the node is: role, cluster, images, k0s, health | [Reading](#reading) |
+| `cctl services` | `corium:readonly` | Lists the units that this API knows about, and their state | [Reading](#reading) |
+| `cctl logs` | `corium:readonly` | Shows a journal, for one unit or for all of them | [Logs](#logs) |
+| `cctl health` | `corium:readonly` | Shows that the node answers, and what it authenticated you as | [Reading](#reading) |
 | `cctl restart` | `corium:operator` | Restarts k0s | [Acting on a node](#acting-on-a-node) |
-| `cctl cordon` | `corium:operator` | Stops new pods being scheduled, or reverses it. **Controllers only** | [Acting on a node](#acting-on-a-node) |
-| `cctl drain` | `corium:operator` | Cordons, then evicts. **Controllers only** | [Acting on a node](#acting-on-a-node) |
+| `cctl cordon` | `corium:operator` | Stops the scheduling of new pods, or reverses it. **Controllers only** | [Acting on a node](#acting-on-a-node) |
+| `cctl drain` | `corium:operator` | Cordons the node, then evicts its pods. **Controllers only** | [Acting on a node](#acting-on-a-node) |
 | `cctl upgrade` | `corium:operator` to stage, `corium:admin` to finish | Moves nodes to another OS image, one at a time | [Upgrades](#upgrades) |
-| `cctl rollback` | `corium:admin` | Marks a node's previous image as the next to boot | [Upgrades](#upgrades) |
+| `cctl rollback` | `corium:admin` | Marks the previous image of a node as the next image to boot | [Upgrades](#upgrades) |
 | `cctl reboot` | `corium:admin` | Restarts the machine | [Acting on a node](#acting-on-a-node) |
-| `cctl shutdown` | `corium:admin` | Powers it off | [Acting on a node](#acting-on-a-node) |
-| `cctl reset` | `corium:admin` | Erases a node: it leaves its cluster, forgets its owner and reboots | [Erasing a node](#erasing-a-node) |
-| `cctl access ssh` | `corium:readonly` to list, `corium:admin` to add or revoke | The SSH keys the API trusts for a user that already exists | [SSH access](#ssh-access) |
-| `cctl ca rotate` | `corium:admin` | Hands nodes to a different operator CA | [Handing a node to somebody else](#handing-a-node-to-somebody-else) |
-| `cctl kubeconfig` | `corium:admin` | The cluster's administrator credentials | [Getting a kubeconfig](#getting-a-kubeconfig) |
-| `cctl worker-config` | `corium:admin` | Mints a join token on a controller and prints a worker's `corium:` block | [Generating a worker's configuration](#generating-a-workers-configuration) |
+| `cctl shutdown` | `corium:admin` | Powers off the machine | [Acting on a node](#acting-on-a-node) |
+| `cctl reset` | `corium:admin` | Erases a node: the node leaves its cluster, forgets its owner, and reboots | [Erasing a node](#erasing-a-node) |
+| `cctl access ssh` | `corium:readonly` to list, `corium:admin` to add or revoke | Manages the SSH keys that the API trusts for a user that already exists | [SSH access](#ssh-access) |
+| `cctl ca rotate` | `corium:admin` | Moves nodes to a different operator CA | [Handing a node to somebody else](#handing-a-node-to-somebody-else) |
+| `cctl kubeconfig` | `corium:admin` | Gives the administrator credentials of the cluster | [Getting a kubeconfig](#getting-a-kubeconfig) |
+| `cctl worker-config` | `corium:admin` | Creates a join token on a controller and prints the `corium:` block for a worker | [Generating a worker's configuration](#generating-a-workers-configuration) |
 | `cctl version` | none; local | Prints the version and the commit it was built from | [Version](#version) |
 
-`cctl <command> -h` prints one command's flags, and `cctl -h` prints this list
-as the binary itself knows it.
+`cctl <command> -h` prints the flags of one command. `cctl -h` prints this list
+as the binary knows it.
 
 ## Where it runs, and how to install it
 
-It runs on your machine and never on a node. That is not an arbitrary split —
-it holds the private key that owns a fleet, and nothing holding that key belongs
-in an operating system image. A node ships `corium-agent`, which does the local
-work, and `corium-apid`, which answers `cctl` over the network.
+`cctl` runs on your machine, never on a node. There is a reason for this split.
+`cctl` holds the private key that owns a fleet, and nothing that holds that key
+belongs in an operating system image. A node ships `corium-agent`, which does
+the local work, and `corium-apid`, which answers `cctl` over the network.
 
-Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'`. The
-quotes matter in zsh, and the version is not optional. The other route is an
+Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'`. In zsh,
+the quotes are necessary. The version is required. You can also download an
 archive from the
-[release page](https://github.com/Corium-OS/Corium/releases/latest), and
-[downloads](install/downloads.md#install-cctl) covers both, including how to
-verify what you fetched. From a checkout, `mise run build`.
+[release page](https://github.com/Corium-OS/Corium/releases/latest).
+[downloads](install/downloads.md#install-cctl) covers both methods, and tells
+you how to verify what you downloaded. From a checkout, run `mise run build`.
 
 ---
 
 ## 1. What it needs to work
 
-Three things, and the order they arrive in matters.
+`cctl` needs three things, and they must arrive in this order.
 
-**An operator CA.** The certificate says which authority a node should trust;
-the private key beside it signs the certificates you present. Nodes are given
-the certificate and never the key.
+**An operator CA.** The certificate tells a node which authority to trust. The
+private key next to it signs the certificates that you present. Nodes get the
+certificate, never the key.
 
-**A client certificate**, signed by that CA, carrying your role. This is what a
-node authenticates on every call.
+**A client certificate**, signed by that CA, that carries your role. A node
+authenticates this certificate on every call.
 
-**A node's fingerprint.** A node signs its own serving certificate — no private
-key is ever carried in a Corium configuration, so there is nothing to sign it
-with — which means a hostname proves nothing and the fingerprint proves
-everything. `cctl` remembers one per node after the first contact.
+**A node's fingerprint.** A node signs its own serving certificate, because a
+Corium configuration never carries a private key to sign it with. For this
+reason, a hostname proves nothing, and the fingerprint proves everything. After
+the first contact, `cctl` remembers one fingerprint for each node.
 
 ```console
 $ cctl pki init
@@ -88,10 +88,11 @@ The key owns every node that trusts this CA. It never leaves this
 machine, and losing it means re-enrolling every node from its console.
 ```
 
-It then prints the certificate ready to paste into cloud-init, which is all
-`api.operatorCA` needs. `pki init` refuses to overwrite an existing CA: doing
-that does not lose a file, it loses every node that pinned the old one, each
-then needing a visit to its console. Move the directory aside if you mean it.
+Then the command prints the certificate in a form that you can paste into
+cloud-init. `api.operatorCA` needs nothing more. `pki init` refuses to overwrite
+an existing CA. An overwrite does not only lose a file. It loses every node that
+pinned the old CA, and each of those nodes then needs a visit to its console. If
+you really want a new CA, move the directory to a different location first.
 
 ### Issue yourself a certificate
 
@@ -100,14 +101,15 @@ $ cctl pki issue --role admin
 Signed a client certificate for "you" as corium:admin, valid for 2160h0m0s.
 ```
 
-`--role` is `readonly`, `operator` or `admin` (§4). Ninety days by default:
-client certificates are the credential that travels on laptops, so they are the
-ones worth keeping short, and reissuing needs no node to be touched.
+`--role` is `readonly`, `operator` or `admin` (§4). The default lifetime is
+ninety days. Client certificates are the credentials that travel on laptops, so
+they are the ones to keep short. Also, you can reissue one without touching a
+node.
 
 ### Claim a node
 
-A node in maintenance mode prints this on its console, its serial port and its
-journal:
+A node in maintenance mode prints this message on its console, on its serial
+port, and in its journal:
 
 ```text
 Corium node is unenrolled and is not in a cluster.
@@ -119,14 +121,14 @@ Corium node is unenrolled and is not in a cluster.
   cctl enroll 192.168.1.51:7443 --code K7QM-93XF
 ```
 
-Both values are there for a reason. The code authenticates you to the node; the
+Each value has a purpose. The code authenticates you to the node. The
 fingerprint authenticates the node to you.
 
-You will also find it above the login prompt on the node's screen — the
-hypervisor console, the IPMI view, whatever you have — because a one-shot line
-scrolls away and an unclaimed node is one you cannot log in to anyway. It is
-removed the moment the node is claimed, so a prompt never advertises a code
-that no longer works.
+You also find the message above the login prompt on the screen of the node.
+This can be the hypervisor console, the IPMI view, or another console that you
+have. The message is there because a one-time line scrolls away, and you cannot
+log in to an unclaimed node anyway. The node removes the message when somebody
+claims it. So a prompt never shows a code that no longer works.
 
 ```console
 $ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
@@ -139,23 +141,22 @@ configuration describes.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--code` | — | The pairing code printed on the node's console. A node with `api.insecure` set asks for none |
-| `--fingerprint` | — | The fingerprint printed beside it. Without this you are asked to confirm what answered |
-| `--config` | — | A `corium:` document to give the node as part of claiming it; it bootstraps with this instead of what it booted with |
-| `--yes` | off | Claim a node that will bootstrap the moment it is claimed, without being asked to confirm it |
+| `--code` | — | The pairing code that the node prints on its console. A node with `api.insecure` set asks for no code |
+| `--fingerprint` | — | The fingerprint printed next to the code. If you omit this flag, `cctl` asks you to confirm what answered |
+| `--config` | — | A `corium:` document to give the node when you claim it. The node bootstraps with this document, not with the one it booted with |
+| `--yes` | off | Claims a node that bootstraps immediately when claimed, without a confirmation prompt |
 
-Leaving `--fingerprint` out shows what answered and asks you to confirm it
-against the console. It is refused when there is nobody there to ask: a script
-that confirms whatever answers has checked nothing while appearing to.
+If you omit `--fingerprint`, `cctl` shows what answered and asks you to compare
+it with the console. If nobody is there to answer, `cctl` refuses. A script that
+accepts whatever answers checks nothing, but it looks as if it did.
 
 ### Claiming a node that already knows what it is
 
-Claiming is what releases a held bootstrap. So a node whose own cloud-init
-names a `role` does not sit and wait once you have claimed it — it starts
-becoming that node, and getting back out means `cctl reset`, a drain and a
-reboot.
+Claiming a node releases a held bootstrap. So if the cloud-init of a node names
+a `role`, the node does not wait after you claim it. It immediately starts to
+become that node. To undo this, you need `cctl reset`, a drain, and a reboot.
 
-The node says so rather than doing it on your behalf:
+The node tells you this before it acts, and does not decide for you:
 
 ```console
 $ cctl enroll 192.168.1.51 --code K7QM-93XF --fingerprint SHA256:tQ2f...9c1a
@@ -168,22 +169,22 @@ it should build instead, or claim it again saying you meant this.
 Claim it anyway? [y/N]
 ```
 
-Answering `y` claims it. `--config` is the other answer: send the document it
-should build instead, and the question does not arise, because you have said
-what you want. Nothing is claimed while the question is open and the pairing
-code is not spent, so either answer is free.
+If you answer `y`, `cctl` claims the node. The other answer is `--config`: send
+the document that the node must build instead. Then the question does not come
+up, because you said what you want. While the question is open, nothing is
+claimed and the pairing code stays valid. So either answer costs nothing.
 
-**A node waiting to be told what it is — one whose document names no role — is
-claimed without any of this**, because claiming it builds nothing. That is the
-fleet pattern (see [configuration §3.2](reference.md#32-role)), and a prompt on
-the recommended path would only teach people to dismiss it.
+**A node that waits to be told what it is, because its document names no role,
+is claimed without any of this**, because claiming it builds nothing. That is
+the fleet pattern (see [configuration §3.2](reference.md#32-role)). A prompt on
+the recommended path only teaches people to ignore it.
 
-In a script, pass `--yes`. Without a terminal the refusal is returned rather
-than asked, and it names the flag.
+In a script, pass `--yes`. Without a terminal, `cctl` returns the refusal and
+does not ask. The refusal names the flag.
 
-A node whose configuration already names an operator CA never needs this — it
-claimed itself at boot. Give `cctl` its fingerprint once, from the journal or
-the instance console log, and it is remembered:
+If the configuration of a node already names an operator CA, the node never
+needs this, because it claimed itself at boot. Give `cctl` its fingerprint one
+time, from the journal or the instance console log. `cctl` remembers it:
 
 ```console
 $ cctl status 192.168.1.51 --fingerprint SHA256:tQ2f...9c1a
@@ -191,12 +192,12 @@ $ cctl status 192.168.1.51 --fingerprint SHA256:tQ2f...9c1a
 
 ### Tell a node what it is
 
-Claiming a node says who owns it. It does not say what it should become — that
-comes from the document it booted with, which for a machine with no cloud-init
-datasource is nothing at all.
+Claiming a node says who owns it. It does not say what the node must become.
+That comes from the document that the node booted with. For a machine with no
+cloud-init datasource, there is no such document.
 
-`--config` closes that gap, and a node told to wait for one holds its bootstrap
-until it arrives:
+`--config` fills that gap. A node told to wait for a document holds its
+bootstrap until the document arrives:
 
 ```yaml
 # The whole cloud-config, identical on every machine in the fleet. It names no
@@ -216,38 +217,36 @@ bootstrap is released: it will now join the cluster the configuration
 you just sent describes.
 ```
 
-The document travels **with** the claim rather than after it, and that ordering
-is the feature: claiming a node is what releases its bootstrap, so a document
-sent a moment later would be racing a machine that has already started becoming
-something.
+The document travels **with** the claim, not after it. This order is the point
+of the feature. Claiming a node releases its bootstrap. A document sent a moment
+later races a machine that already started to become something.
 
-For a node that is already claimed, and for a node that has already
-bootstrapped, the command is `cctl apply`:
+If the node is already claimed, or already bootstrapped, use `cctl apply`:
 [Applying a configuration](#applying-a-configuration).
 
 ---
 
 ## 3. The commands
 
-Most of these take a node's address, and the port defaults to `7443`. Three
-take no address at all, because they never leave your machine: `cctl pki init`,
-`cctl pki issue` and `cctl version`.
+Most of these commands take the address of a node, and the port defaults to
+`7443`. Three commands take no address, because they never leave your machine:
+`cctl pki init`, `cctl pki issue` and `cctl version`.
 
-Every command that does reach a node shares two flags, so they are listed here
-once rather than in each table below:
+Every command that reaches a node shares two flags. This table lists them once,
+so the tables below do not repeat them:
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--dir` | `~/.corium` | The operator directory to read credentials from (§5). On every command except `cctl version` |
-| `--fingerprint` | the remembered one | Overrides what `config.yaml` holds for this address, and records it |
+| `--dir` | `~/.corium` | The operator directory to read credentials from (§5). Available on every command except `cctl version` |
+| `--fingerprint` | the remembered one | Overrides the value that `config.yaml` holds for this address, and records the new value |
 
-`cctl upgrade` and `cctl ca rotate` take `--dir` and not `--fingerprint`: both
-take a list of nodes, where a single fingerprint would mean nothing.
+`cctl upgrade` and `cctl ca rotate` take `--dir` but not `--fingerprint`. Both
+take a list of nodes, and a single fingerprint has no meaning for a list.
 
 ### The operator PKI
 
-These two make the credentials every other command presents. They reach no node
-and need no role, which is the point — they are what a role comes from.
+These two commands make the credentials that every other command presents. They
+reach no node and need no role, because roles come from them.
 
 ```console
 $ cctl pki init
@@ -258,26 +257,26 @@ $ cctl pki issue --role admin
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--dir` | `~/.corium` | Where to create the CA. It refuses to overwrite one |
+| `--dir` | `~/.corium` | Where to create the CA. The command refuses to overwrite an existing CA |
 | `--name` | `corium operators` | Common name for the CA certificate |
 
 `cctl pki issue`:
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--dir` | `~/.corium` | The directory holding the CA to sign with |
+| `--dir` | `~/.corium` | The directory that holds the CA that signs the certificate |
 | `--role` | `admin` | `readonly`, `operator` or `admin` (§4) |
 | `--name` | your `$USER`, or `corium operator` | Common name for the certificate |
-| `--lifetime` | `2160h` — ninety days | How long the certificate is valid |
+| `--lifetime` | `2160h` (ninety days) | How long the certificate is valid |
 
-Both are shown in §2, which is where the reasoning behind them sits.
+§2 shows both commands and gives the reasons for them.
 
 ### Applying a configuration
 
-`cctl apply` gives a node the `corium:` document it will bootstrap with, and on
-a node that has already bootstrapped it re-applies the part of that document
-which is safe to change in service. *Re-applying on a bootstrapped node is new
-since 0.2.0; before that it was a flat refusal.*
+`cctl apply` gives a node the `corium:` document that it will bootstrap with. If
+the node already bootstrapped, the command re-applies the part of that document
+that is safe to change in service. *Re-applying on a bootstrapped node is new in
+0.2.0. Before 0.2.0, the node refused it.*
 
 ```console
 $ cctl apply 192.168.1.51 --file controller-01.yaml
@@ -292,80 +291,83 @@ now, if it was holding for one.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--file` | — | Required. The document to send; `-` reads standard input |
+| `--file` | — | Required. The document to send. `-` reads standard input |
 
-The file may be a whole cloud-config with a `corium:` key or the block on its
-own. It is validated on your machine before it is sent and again by the node
-before it is written, so a document that would fail at boot is refused while
-somebody is still watching.
+The file can be a whole cloud-config with a `corium:` key, or the block alone.
+`cctl` validates it on your machine before it sends it, and the node validates
+it again before it writes it. So if a document will fail at boot, it is refused
+while somebody still watches.
 
-> **Warning.** The document is the node's entire configuration, not a patch.
-> Leaving `api:` out of it drops whatever it said — an `operatorCA` most of all,
-> which is what owns the node — and `cctl apply` says so when it spots it. Since
-> ADR 11 that no longer turns the daemon off, but a node that has bootstrapped
-> and no longer names an owner has nobody left to authenticate.
+> **Warning.** The document is the whole configuration of the node, not a patch.
+> If you leave `api:` out of it, the node drops everything that `api:` said. The
+> most important loss is an `operatorCA`, which is what owns the node.
+> `cctl apply` tells you when it sees this. Since ADR 11, this no longer turns
+> off the daemon. But a node that bootstrapped and names no owner has nobody
+> left to authenticate.
 
-What the command does depends on where the node is in its life:
+What the command does depends on the current state of the node:
 
 | The node | What `cctl apply` does |
 |---|---|
-| Has not bootstrapped | `applied`: the document is written, and is what the node will bootstrap with |
-| Has bootstrapped, and only the add-on set or the `k0s` block differs | `reconciled`, or `unchanged` when the document matches what it is already running |
-| Has bootstrapped, and an identity field differs | `409`, naming the field it refused and pointing at `cctl reset` |
+| Has not bootstrapped | `applied`: the node writes the document and will bootstrap with it |
+| Has bootstrapped, and only the add-on set or the `k0s` block differs | `reconciled`, or `unchanged` if the document matches what the node already runs |
+| Has bootstrapped, and an identity field differs | `409`, which names the refused field and points to `cctl reset` |
 
-Rewriting what a node *is* while it is in service would leave its configuration
-and its behaviour saying two different things, which is the thing Corium's
-provisioning model exists to prevent. See
-[ADR 8](adr/0008-day-two-reconcile.md).
+A new definition of what a node *is*, while it is in service, makes its
+configuration and its behavior say two different things. The Corium provisioning model
+exists to prevent that. See [ADR 8](adr/0008-day-two-reconcile.md).
 
 The identity fields are `role`, `cluster`, `join`, `node`, `network`, `storage`,
 `raid`, `zfs`, `wireguard`, `ha`, `upgrades`, `backup` and `api`. The safe
-subset today is `addons`, the `k0s` escape hatch and `kubernetes.version`, and
-it is expected to grow. A reconcile
-regenerates the node's k0s configuration and cycles the control plane so k0s
-installs or updates the chart, or picks up the patched configuration — an OIDC
-`extraArgs` on the API server, say — and the change is live rather than deferred
-to the next boot; only a controller does that, because a worker's charts and
-cluster configuration are declared by the controllers and rewriting its copy
-would change nothing it runs. The whole rule is enforced by the node, not by
-`cctl` and not by your role — an `admin` certificate does not get past it either.
+subset today is `addons`, the `k0s` escape hatch, and `kubernetes.version`. The
+project expects this subset to grow. A reconcile regenerates the k0s
+configuration of the node and restarts the control plane. Then k0s installs or
+updates the chart, or reads the patched configuration, for example an OIDC
+`extraArgs` on the API server. The change is live immediately, not at the next
+boot. Only a controller does a reconcile. The controllers declare the charts and
+the cluster configuration of a worker, so a rewrite of the worker's copy
+changes nothing that the worker runs. The node enforces the whole rule. `cctl`
+does not enforce it, and your role does not change it: an `admin` certificate
+does not get past it either.
 
-Changing `kubernetes.version` is the one apply that takes the node out of
-service, because it replaces the binary underneath k0s rather than a file k0s
-reads. The node drains itself, stops k0s, swaps the system extension, clears the
-staged binaries, starts k0s and uncordons — the sequence k0s documents, in that
-order. The extension is downloaded *before* any of it, so a registry that cannot
-be reached or a signature that does not verify costs nothing; and a drain a pod
-disruption budget refuses cancels the change rather than forcing it. Expect this
-one to take minutes rather than seconds.
+A change to `kubernetes.version` is the only apply that takes the node out of
+service. It replaces the binary under k0s, not a file that k0s reads. The node
+drains itself, stops k0s, swaps the system extension, clears the staged
+binaries, starts k0s, and uncordons itself. This is the sequence that k0s
+documents, in that order. The node downloads the extension *before* all of
+this. So if the registry is unreachable, or if the signature does not verify,
+nothing is lost. If a pod disruption budget refuses the drain, the node cancels
+the change and does not force it. Expect this apply to take minutes, not
+seconds.
 
-There is no automatic rollback if k0s does not come back: the node stops with
-the reason and stays cordoned. A minor upgrade may have migrated state on its
-way up and k0s does not support moving back a minor at all, so reversing it
-unasked, on a node whose control plane is already unhappy, is how a recoverable
-problem becomes an unrecoverable one. See
+There is no automatic rollback if k0s does not come back. The node stops,
+reports the reason, and stays cordoned. A minor upgrade can migrate state on its
+way up, and k0s does not support moving back a minor at all. On a node whose
+control plane already has problems, an unrequested reversal can turn a
+recoverable problem into one that you cannot recover. See
 [ADR 10](adr/0010-kubernetes-version-axis.md).
 
-`k0s.patch` is passed through verbatim, so it re-applies with the same contract
-it carries at bootstrap: Corium checks only that the result is valid YAML, and a
-patch that rewrites something load-bearing — or breaks the cluster — is yours to
-own. What it cannot do is change a field Corium *models* (`role`, `cluster`, and
-the rest above); those stay a reset away.
+Corium passes `k0s.patch` through without changes. So it re-applies under the
+same contract as at bootstrap: Corium checks only that the result is valid
+YAML. If a patch rewrites something important, or breaks the cluster, you own
+the result. A patch cannot change a field that Corium *models* (`role`,
+`cluster`, and the other fields above). Those fields still need a reset.
 
-Two edges are worth knowing. **Removing** an add-on is refused, not applied:
-k0s installs a chart from its configuration but does not uninstall one dropped
-from it, so a node that reported the removal done would be lying — delete the
-release with `kubectl delete chart <name> -n kube-system` and drop it from the
-document, and it stays out at the next bootstrap. And a node **bootstrapped by
-a release older than this feature** has no record of what it was built with, so
-its first day-two apply is refused until it is re-bootstrapped through
-`cctl reset`; a node bootstrapped since records that baseline itself.
+Two edge cases are important. **Removing** an add-on is refused, not applied.
+k0s installs a chart from its configuration, but it does not uninstall a chart
+that you remove from it. So the node cannot honestly report the removal as
+done. Instead, delete the release with `kubectl delete chart <name> -n kube-system`
+and remove it from the document. Then it stays out at the next bootstrap. Also,
+a node **bootstrapped by a release older than this feature** has no record of
+the configuration it was built with. So the node refuses its first day-two apply
+until you re-bootstrap it through `cctl reset`. A node bootstrapped by a newer
+release records that baseline itself.
 
 ### Reading one back
 
-`cctl config` is the other half of `cctl apply`: it prints the `corium:`
-document the node is reasoning from. *New in 0.6.0 — before that a node's
-configuration could be written over the API but not read.*
+`cctl config` is the other half of `cctl apply`. It prints the `corium:`
+document that the node works from. *New in 0.6.0. Before 0.6.0, the API accepted
+the configuration of a node, but did not return it.*
 
 ```console
 $ cctl config 192.168.1.51
@@ -376,52 +378,53 @@ corium:
 This is /var/lib/corium/applied.yaml: what 192.168.1.51:7443 recorded applying.
 ```
 
-The document goes to standard output and everything else to standard error, so
-`cctl config node-01 > node-01.yaml` and
-`diff <(cctl config node-01) node-01.yaml` both do what they look like.
+The document goes to standard output, and everything else goes to standard
+error. So `cctl config node-01 > node-01.yaml` and
+`diff <(cctl config node-01) node-01.yaml` both do what they look like they do.
 
-What it returns is the baseline in `/var/lib/corium/applied.yaml` — what the
-node *acted on* — in preference to `/etc/corium/config.yaml`, which is only
-what somebody wrote. That is the same order `cctl apply` diffs against, and
-deliberately so: an endpoint that showed you a different document from the one
-the next apply will compare against would be worse than no endpoint. When the
-two disagree, it says so:
+The command returns the baseline in `/var/lib/corium/applied.yaml`, which is
+what the node *acted on*. It prefers this file to `/etc/corium/config.yaml`,
+which is only what somebody wrote. `cctl apply` diffs against the same file,
+and this is intentional. An endpoint that shows a different document from the
+one that the next apply compares against is worse than no endpoint. If
+the two files are different, the command tells you:
 
 ```console
 Warning: /etc/corium/config.yaml has been edited since and does not match. That
 edit is not running, and `cctl apply` diffs against this document, not that file.
 ```
 
-A node with no recorded baseline falls back to `/etc/corium/config.yaml` and
-labels it, and a node that has neither — one that bootstrapped from cloud-init
-or the kernel command line, neither of which it keeps — is a `409`.
+If a node has no recorded baseline, the command falls back to
+`/etc/corium/config.yaml` and labels it. If a node has neither file, the command
+returns a `409`. This happens when the node bootstrapped from cloud-init or from
+the kernel command line, because the node keeps neither of them.
 
-It is `corium:admin`, for what a document may carry rather than for what
-reading it does: an inline `join.token`, a VRRP `authPass`, a WireGuard
-`privateKey`, and a `k0s.patch` whose contents Corium only checks is valid
-YAML. That is the rung `cctl kubeconfig` and `cctl worker-config` already sit
-on, so it hands an admin nothing they could not already mint.
+The command needs `corium:admin` because of what a document can carry, not
+because of what reading does. A document can carry an inline `join.token`, a
+VRRP `authPass`, a WireGuard `privateKey`, and a `k0s.patch` that Corium only
+checks for valid YAML. `cctl kubeconfig` and `cctl worker-config` already need
+this role. So the command gives an admin nothing that the admin cannot
+already create.
 
 ### Reading
 
 | Command | Role | What it does |
 |---|---|---|
-| `cctl health <node>` | `corium:readonly` | Says the node answers, and what it authenticated you as |
-| `cctl status <node>` | `corium:readonly` | What the node is: role, cluster, images, k0s, health |
-| `cctl services <node>` | `corium:readonly` | The units this API knows about, and their state |
-| `cctl logs <node>` | `corium:readonly` | A journal, per unit or across all of them |
-| `cctl kubeconfig <node>` | `corium:admin` | The cluster's administrator credentials |
-| `cctl config <node>` | `corium:admin` | The `corium:` document the node is reasoning from |
+| `cctl health <node>` | `corium:readonly` | Shows that the node answers, and what it authenticated you as |
+| `cctl status <node>` | `corium:readonly` | Shows what the node is: role, cluster, images, k0s, health |
+| `cctl services <node>` | `corium:readonly` | Lists the units that this API knows about, and their state |
+| `cctl logs <node>` | `corium:readonly` | Shows a journal, for one unit or for all of them |
+| `cctl kubeconfig <node>` | `corium:admin` | Gives the administrator credentials of the cluster |
+| `cctl config <node>` | `corium:admin` | Shows the `corium:` document that the node works from |
 
-`cctl status` is the only one of these with a flag of its own:
+`cctl status` is the only command here with a flag of its own:
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--json` | off | Prints the node's reply verbatim, for something other than a person to read |
+| `--json` | off | Prints the reply of the node without changes, for a program to read |
 
-`cctl health` is the one to reach for when something is wrong with your
-credentials rather than with the node: it is the smallest call that proves a
-certificate works.
+Use `cctl health` when something is wrong with your credentials, not with the
+node. It is the smallest call that proves that a certificate works.
 
 ```console
 $ cctl status 192.168.1.51
@@ -442,13 +445,14 @@ $ cctl status 192.168.1.51
   uptime       11m51s
 ```
 
-A field the node could not determine is left out rather than shown as a dash or
-a zero. This is usually read just before doing something irreversible, and a
-blank is honest where a placeholder invites a guess. A machine provisioned
-without a Corium configuration says so plainly instead of looking broken.
+If the node cannot find the value of a field, the output does not show the
+field. It does not show a dash or a zero. You usually read this output just
+before you do something that you cannot undo. A blank is honest, but a
+placeholder invites a guess. A machine provisioned without a Corium
+configuration says so clearly, so it does not look broken.
 
-The **digest** is the field an incident turns on: a tag says what was asked
-for, a digest says what booted.
+In an incident, the **digest** is the most important field. A tag says what was
+asked for. A digest says what booted.
 
 ### Logs
 
@@ -463,43 +467,44 @@ $ cctl logs 192.168.1.51 --follow
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--unit` | every known unit | A unit name, or `kernel` for the kernel's own messages |
-| `--lines` | 200, applied by the node | Capped at 10000 by the node |
+| `--unit` | every known unit | A unit name, or `kernel` for the messages of the kernel |
+| `--lines` | 200, set by the node | The node caps it at 10000 |
 | `--since` | — | A duration: `15m`, `2h` |
-| `--follow` | off | Streams until you stop it, for at most an hour |
+| `--follow` | off | Streams until you stop it, for one hour at most |
 
-Leaving `--unit` out reads everything the API knows about, which is what you
-want before you know where the problem is. Units come from a fixed list — an
-API that hands a unit name to `systemctl` can start anything on the machine.
+If you omit `--unit`, the command reads everything that the API knows about.
+Use this before you know where the problem is. Units come from a fixed list,
+because an API that passes any unit name to `systemctl` can start anything on
+the machine.
 
-One thing to weigh before handing somebody `corium:readonly`: it reads
-journals, and journals are not sanitised.
+Before you give somebody `corium:readonly`, think about this: the role reads
+journals, and journals are not sanitized.
 
 ### Acting on a node
 
 | Command | Role | What it does |
 |---|---|---|
 | `cctl restart <node> --unit <unit>` | `corium:operator` | Restarts k0s |
-| `cctl cordon <node>` / `--undo` | `corium:operator` | Stops new pods being scheduled, or reverses it. **Controllers only** |
-| `cctl drain <node>` | `corium:operator` | Cordons, then evicts. **Controllers only** — see below |
+| `cctl cordon <node>` / `--undo` | `corium:operator` | Stops the scheduling of new pods, or reverses it. **Controllers only** |
+| `cctl drain <node>` | `corium:operator` | Cordons the node, then evicts its pods. **Controllers only**. See below |
 | `cctl reboot <node>` | `corium:admin` | Restarts the machine |
-| `cctl shutdown <node>` | `corium:admin` | Powers it off |
+| `cctl shutdown <node>` | `corium:admin` | Powers off the machine |
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--unit` | — | Required by `cctl restart`. `cctl services <node>` lists what may be restarted |
-| `--undo` | off | `cctl cordon` only: puts the node back into service |
+| `--unit` | — | Required by `cctl restart`. `cctl services <node>` lists the units that you can restart |
+| `--undo` | off | Only for `cctl cordon`: puts the node back into service |
 
-`cctl drain`, `cctl reboot` and `cctl shutdown` take the two shared flags and
-nothing else.
+`cctl drain`, `cctl reboot` and `cctl shutdown` take only the two shared flags.
 
-**`cordon` and `drain` work on controllers only**, and since most of a cluster
-is workers, that is the common case rather than the rare one. A node acts on
-itself and nothing else, and only a controller holds cluster admin credentials
-locally — a worker has the kubelet's, which cannot evict a pod.
+**`cordon` and `drain` work on controllers only.** Most of a cluster is
+workers, so this limit applies in the common case, not in a rare one. A node
+acts only on itself, and only a controller holds cluster admin credentials
+locally. A worker has the credentials of the kubelet, and these cannot evict a
+pod.
 
-Draining a worker is a cluster operation rather than a node one, so the tool
-for it is `kubectl`, pointed at credentials this CLI will fetch for you:
+Draining a worker is a cluster operation, not a node operation. So the tool for
+it is `kubectl`, with credentials that this CLI gets for you:
 
 ```console
 $ cctl kubeconfig <a controller> > kube.yaml
@@ -507,7 +512,7 @@ $ kubectl --kubeconfig kube.yaml drain corium-w1 --ignore-daemonsets --delete-em
 $ kubectl --kubeconfig kube.yaml uncordon corium-w1
 ```
 
-The node says as much when you ask it directly:
+The node tells you this when you ask it directly:
 
 ```console
 $ cctl drain 192.168.1.52
@@ -515,18 +520,18 @@ cctl: 409 Conflict: only a controller holds cluster admin credentials, and
 this node is not one. Draining a worker is a cluster operation: ...
 ```
 
-Note what this does *not* stop: `cctl upgrade` still works on a worker. The
-upgrade path drains where it can and reboots undrained where it cannot, which
-is the same behaviour `corium-upgrade-apply.service` has always had.
+This limit does *not* stop `cctl upgrade` on a worker. The upgrade path drains
+where it can, and reboots without a drain where it cannot. This is the same
+behavior as `corium-upgrade-apply.service`.
 
-A drain that cannot finish is **not** forced. It usually means a pod disruption
-budget is saying this workload cannot lose a replica right now, which is
-exactly when overriding it is wrong — and the node is left cordoned so you can
-decide.
+A drain that cannot finish is **not** forced. Usually, a pod disruption budget
+says that this workload cannot lose a replica now. That is exactly when an
+override is wrong. The node stays cordoned so that you can decide.
 
-Restarting is a shorter list than reading. `corium-bootstrap.service` is
-readable and deliberately not restartable: re-running it on a node that has
-already joined a cluster destroys data, and no certificate can ask for it.
+The list of units that you can restart is shorter than the list that you can
+read. `corium-bootstrap.service` is readable, but intentionally not
+restartable. If it runs again on a node that already joined a cluster, it
+destroys data. No certificate can ask for it.
 
 ```console
 $ cctl restart 192.168.1.51 --unit corium-bootstrap
@@ -534,19 +539,19 @@ cctl: 403 Forbidden: corium-bootstrap.service: this unit is not one the API
 will restart (first-boot configuration; runs once)
 ```
 
-`reboot` and `shutdown` answer before they act. Without a reply you could not
-tell "the node refused" from "the node obeyed" — both look like a connection
-that died.
+`reboot` and `shutdown` reply before they act. Without a reply, "the node
+refused" and "the node obeyed" look the same: both look like a connection that
+died.
 
 ### A dashboard in the browser
 
-`cctl ui` serves a page that shows every node at once, and lets you press the
-buttons `restart`, `cordon` and `drain` are. It runs **on your machine**: the
-server binds loopback, holds your client certificate, and talks to nodes over
-the same mutual-TLS API every other command uses. No node gains a port, a
-password or a session because you opened a browser — which is the same reason
+`cctl ui` serves a page that shows every node at once. On that page, `restart`,
+`cordon` and `drain` are buttons. It runs **on your machine**. The server binds
+to loopback, holds your client certificate, and talks to nodes over the same
+mutual-TLS API that every other command uses. When you open a browser, no node
+gets a new port, password, or session. For the same reason,
 [ADR 4](adr/0004-management-api.md) put the management API on the node and the
-fleet's view nowhere.
+view of the fleet nowhere.
 
 ```console
 $ cctl ui
@@ -559,54 +564,56 @@ Ctrl-C to stop.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--listen` | `127.0.0.1:7500` | Where the dashboard binds. A non-loopback address is allowed and warned about |
+| `--listen` | `127.0.0.1:7500` | Where the dashboard binds. A non-loopback address is allowed, with a warning |
 | `--fingerprint` | — | Records a fingerprint for a single named node, as the other commands do |
 
-Naming no node shows every node `~/.corium/config.yaml` already holds a
-fingerprint for (§5) — the set this directory can reach without being told
-anything more. It is not an inventory: a node somebody else enrolled is absent
-until you name it once.
+If you name no node, the page shows every node for which `~/.corium/config.yaml`
+already holds a fingerprint (§5). This is the set of nodes that this directory
+can reach without more information. It is not an inventory. A node that
+somebody else enrolled does not appear until you name it one time.
 
 ```console
 $ cctl ui 192.168.1.51 192.168.1.52
 $ cctl ui 192.168.1.51 --fingerprint SHA256:2Qn... # a node claimed from cloud-init
 ```
 
-**What it shows.** One card per node — hostname, role, cluster, k0s version and
-whether its service is running, greenboot, uptime, and a mark when an image is
-staged and waiting for a reboot. A node that did not answer keeps its card and
-says why, because which machine is down is usually the question. Opening a card
-gives the full `cctl status` report, the service list, and a journal window.
-Fields the node could not determine are left out here exactly as they are in
-the terminal.
+**What it shows.** There is one card for each node. The card shows the
+hostname, role, cluster, and k0s version, and whether its service runs. It
+also shows greenboot, uptime, and a mark when an image is staged and waits for
+a reboot. If a node
+does not answer, it keeps its card, and the card says why. The usual question
+is which machine is down. When you open a card, it shows the full `cctl status`
+report, the service list, and a journal window. Fields that the node cannot
+find are not shown, exactly as in the terminal.
 
-Which node is open is in the URL, so a reload comes back to the node rather
-than to the list, the browser's back button does what it looks like it does,
-and the page follows your system's light or dark setting.
+The URL contains the open node. So a reload returns to that node, not to the
+list, and the back button of the browser works as you expect. The page follows
+the light or dark setting of your system.
 
 **What it does.** Restart a unit, cordon, uncordon, drain. That is the
-`corium:operator` half of the API and no more: the dashboard fetches no
-kubeconfig and no join token, and it cannot reboot, shut down, reset, apply a
-configuration or upgrade anything. Those are irreversible, or they are rollouts
-across several nodes with an order that matters, and a button is the wrong
-shape for both. Buttons your certificate cannot press are disabled rather than
-tried.
+`corium:operator` half of the API, and nothing more. The dashboard gets no
+kubeconfig and no join token. It cannot reboot, shut down, reset, apply a
+configuration, or upgrade anything. Those actions cannot be undone, or they are
+rollouts across several nodes in an order that is important. A button is the
+wrong tool for both. If your certificate cannot do an action, its button is
+disabled, and the dashboard does not try it.
 
 > **The token is the credential.** Anyone who reaches the port *and* has the
-> token acts as you do. It is printed once, moved into an `HttpOnly` cookie on
-> first load, and lives only as long as the process. The server also refuses a
-> `Host` header that is not its own loopback address, which is what stops a
-> hostile page resolving a name to `127.0.0.1` and talking to it, and refuses a
-> request the browser labels cross-site. Passing `--listen` a real interface
-> puts all of that on your network; the warning it prints says so.
+> token acts as you. The server prints the token one time, moves it into an
+> `HttpOnly` cookie at the first load, and keeps it only while the process
+> runs. The server also refuses a `Host` header that is not its own loopback
+> address. This stops a hostile page that resolves a name to `127.0.0.1` from
+> talking to the server. The server also refuses a request that the browser
+> labels cross-site. If you give `--listen` a real interface, all of this is
+> open on your network. The warning that the command prints says so.
 
 ### SSH access
 
-The API grants no shell of its own (§7), but it can trust an SSH key for a user
-that **already exists** on the node, so you can get a shell the ordinary way
-when the surfaces above are not enough. It never creates the account: the user,
-its password and its shell are cloud-init's, and Corium manages only a key file
-of its own, beside the user's own `~/.ssh`.
+The API gives no shell of its own (§7). But it can trust an SSH key for a user
+that **already exists** on the node. Then you can get a shell in the usual way
+when the features above are not enough. The API never creates the account.
+Cloud-init owns the user, its password, and its shell. Corium manages only its
+own key file, next to the user's own `~/.ssh`.
 
 | Command | Role | What it does |
 |---|---|---|
@@ -617,13 +624,14 @@ of its own, beside the user's own `~/.ssh`.
 | Flag | Default | Notes |
 |---|---|---|
 | `--user` | — | Required by `add`. The user must already exist on the node |
-| `--key-file` | standard input | Read the public key from this file |
+| `--key-file` | standard input | Reads the public key from this file |
 | `--key` | — | The public key itself, inline, instead of a file |
 | `--key-fingerprint` | — | Required by `revoke`. The SHA256 fingerprint that `list` prints |
 
-> **Warning.** `add` is **admin** because trusting a key grants a shell, the one
-> thing that steps outside the guard rails the rest of the API keeps. The node
-> logs it by fingerprint. Listing is **readonly**: a public key is not a secret.
+> **Warning.** `add` needs **admin**, because a trusted key grants a shell. A
+> shell is the one thing that goes outside the guard rails that the rest of the
+> API keeps. The node logs the key by fingerprint. Listing needs **readonly**,
+> because a public key is not a secret.
 
 ```console
 $ cctl access ssh add 192.168.1.51 --user core --key-file ~/.ssh/id_ed25519.pub
@@ -636,12 +644,12 @@ $ cctl access ssh revoke 192.168.1.51 --key-fingerprint SHA256:PZ8s…
 revoked SHA256:PZ8s… for core
 ```
 
-The key comes from `--key-file`, or `--key` inline, or standard input — so
-`cctl access ssh add <node> --user core < key.pub` works, and so does piping
-`ssh-add -L`.
+The key comes from `--key-file`, from `--key` inline, or from standard input.
+So `cctl access ssh add <node> --user core < key.pub` works, and piping
+`ssh-add -L` also works.
 
-The user must exist first. A key for an account cloud-init never created is a
-`409`, with the way round it:
+The user must exist first. A key for an account that cloud-init never created
+gets a `409`, and the message tells you what to do:
 
 ```console
 $ cctl access ssh add 192.168.1.51 --user ghost --key-file key.pub
@@ -649,22 +657,23 @@ cctl: 409 Conflict: "ghost": no such user on this node; create it with
 cloud-init before adding a key for it
 ```
 
-Corium keeps these keys in a file of its own, so `list` and `revoke` never touch
-a key you put in the user's `~/.ssh/authorized_keys` by hand, and `cctl reset`
-removes every key the API was trusting. See ADR 5.
+Corium keeps these keys in its own file. So `list` and `revoke` never touch a
+key that you added by hand to the user's `~/.ssh/authorized_keys`. `cctl reset`
+removes every key that the API trusted. See ADR 5.
 
 ### Upgrades
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--image` | — | Required. The image to move the nodes to |
-| `--settle` | `15m` | How long to wait for one node to come back; a reboot into a new OS image with k0s starting behind it, and a controller's etcd member catching up |
-| `--dry-run` | off | Check every node, then stop without changing anything |
+| `--settle` | `15m` | How long to wait for one node to come back. This covers a reboot into a new OS image, the start of k0s after it, and the catch-up of the etcd member of a controller |
+| `--dry-run` | off | Checks every node, then stops without a change |
 
 > **Warning.** `cctl upgrade` takes one node at a time and **stops at the first
-> that does not come back**. A rollout that carries on past a broken machine
-> turns one outage into a cluster-wide one. The error says how many were
-> upgraded, because a half-upgraded cluster is a decision somebody has to make.
+> node that does not come back**. A rollout that continues past a broken machine
+> turns one outage into a cluster-wide outage. The error tells you how many
+> nodes were upgraded, because somebody must decide what to do with a
+> half-upgraded cluster.
 
 ```console
 $ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.5
@@ -680,21 +689,24 @@ Checking 3 nodes can move to ghcr.io/corium-os/corium:0.5
 ...
 ```
 
-**Every node is checked before the first one reboots.** Each must be reachable
-and fit to lose — bootstrapped, k0s running, the last boot not judged bad by
-greenboot — in the same cluster as the others, listed once, and its signing
-policy must accept the image. One refusal stops the rollout with nothing
-changed. `--dry-run` also checks etcd, then stops. A node older than this
-check is reported and checks the image itself when staged.
+**Every node is checked before the first one reboots.** Each node must be
+reachable and safe to lose: bootstrapped, with k0s running, and with a last
+boot that greenboot did not mark as bad. Each node must be in the same cluster
+as the others, and listed one time. Its signing policy must accept the image.
+One refusal stops the rollout, and nothing changes. `--dry-run` also checks
+etcd, then stops. If a node is older than this check, `cctl` reports it, and the
+node checks the image itself when it stages it.
 
-Health is asked again just before each node, and after each one it checks the
-node came back **on the digest it was sent to**, not merely that it answers.
+Just before each node, `cctl` asks for its health again. After each node, it
+makes sure that the node came back **on the digest it was sent to**, not only
+that it answers.
 
-Around each controller it also checks etcd: before taking one down, and again,
-for up to `--settle`, once it is back. See
+Around each controller, `cctl` also checks etcd: before it takes the controller
+down, and again after the controller is back, for up to `--settle`. See
 [etcd around controllers](#etcd-around-controllers).
 
-A node refuses an image its own signing policy would accept unsigned:
+A node refuses an image if its own signing policy does not require a
+signature for that image:
 
 ```console
 $ cctl upgrade node-1 --image quay.io/fedora-ostree-desktops/silverblue:44
@@ -705,37 +717,37 @@ cctl: 1 of 1 nodes cannot move to quay.io/fedora-ostree-desktops/silverblue:44;
 nothing was changed
 ```
 
-That is the check that stops a typo rebasing a Kubernetes node onto a desktop.
-It is not a label check — anybody can label an image "Corium" — it is
-`/etc/containers/policy.json`, which the image ships requiring a cosign
-signature for Corium's own repository. Running your own derived images means
-adding your repository and key there, which is also how you say you trust them.
+This check stops a typo from rebasing a Kubernetes node onto a desktop. It is
+not a label check, because anybody can label an image "Corium". It uses
+`/etc/containers/policy.json`. The image ships this file with a requirement for
+a cosign signature on the Corium repository. To run your own derived images, add
+your repository and key to that file. That is also how you state that you trust
+them.
 
 ```console
 $ cctl rollback 192.168.1.51
 ```
 
-`rollback` marks the previous image as the next to boot and deliberately does
-**not** reboot. It exists because somebody is already having a bad day; the
-reboot stays yours to schedule. A node that has only ever booted one image has
-nowhere to go back to, and says so. It takes the two shared flags and nothing
-else.
+`rollback` marks the previous image as the next to boot, and intentionally does
+**not** reboot. You use it when something already went wrong, so the reboot
+stays yours to schedule. A node that booted only one image has no previous image
+to go back to, and says so. The command takes only the two shared flags.
 
 ### Kubernetes version rollouts
 
 `cctl upgrade` moves nodes to another *OS* image. `cctl k8s upgrade` moves a
-cluster to another *Kubernetes* version, which since
-[ADR 10](adr/0010-kubernetes-version-axis.md) is an axis of its own.
+cluster to another *Kubernetes* version.
+[ADR 10](adr/0010-kubernetes-version-axis.md) makes this a separate axis.
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--version` | — | Required. The k0s release to move to, such as `v1.36.4+k0s.1` |
-| `--controllers` | — | Required. Comma-separated, upgraded first, one at a time |
-| `--workers` | — | Comma-separated, upgraded after every controller |
-| `--mirror` | — | Override where the extension is pulled from |
-| `--timeout` | `30m` | How long one node is allowed: a download, then a drain |
-| `--dry-run` | off | Check every node, then stop without changing anything |
-| `--json` | off | Print a per-node report on standard output; progress goes to standard error |
+| `--controllers` | — | Required. A comma-separated list. Upgraded first, one at a time |
+| `--workers` | — | A comma-separated list. Upgraded after all controllers |
+| `--mirror` | — | Overrides the location that the extension is pulled from |
+| `--timeout` | `30m` | The time allowed for one node: a download, then a drain |
+| `--dry-run` | off | Checks every node, then stops without a change |
+| `--json` | off | Prints a report for each node on standard output. Progress goes to standard error |
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1     --controllers node-1,node-2,node-3 --workers node-4,node-5
@@ -751,44 +763,46 @@ Checking 5 nodes can move to k0s v1.36.4+k0s.1
 ```
 
 **Controllers and workers are named separately, and the order is not a
-preference.** k0s requires controllers to be upgraded before workers, and a
-worker may never be newer than the controllers it talks to. Naming them is you
-stating the shape of the cluster before anything moves, rather than the rollout
-discovering a mistake in the address list half way through.
+preference.** k0s requires that you upgrade controllers before workers. A worker
+must never be newer than the controllers that it talks to. When you name them,
+you state the shape of the cluster before anything moves. So the rollout does
+not find a mistake in the address list halfway through.
 
-**Every node is checked before the first one moves.** Each must be reachable
-and healthy, in the stage its role belongs to, in the same cluster as the
-others, and accept the version against its own window and skew rules. One
-refusal stops the rollout with nothing changed. `--dry-run` stops there
-anyway. A node older than this check is reported and checks itself when moved.
+**Every node is checked before the first one moves.** Each node must be
+reachable and healthy, in the stage that its role belongs to, and in the same
+cluster as the others. Each node must accept the version against its own window
+and skew rules. One refusal stops the rollout, and nothing changes. `--dry-run`
+stops there in all cases. If a node is older than this check, `cctl` reports it,
+and the node checks itself when it moves.
 
-**A stopped rollout resumes by running the same command again.** Nodes already
-on the target version are skipped. The ones still to move must all start from
-the same minor: a mix, such as a cluster left half-way by an earlier rollout to
-another version, is refused with the nodes named by minor.
+**A stopped rollout resumes when you run the same command again.** Nodes that
+are already on the target version are skipped. The remaining nodes must all
+start from the same minor. A mix is refused, and the error lists the nodes by
+minor. For example, a cluster left halfway by an earlier rollout to another
+version is a mix.
 
-**etcd is checked before and after each controller**, as `cctl upgrade` does,
-with up to five minutes for a moved controller's member to catch up. See
+**etcd is checked before and after each controller**, as `cctl upgrade` does.
+The etcd member of a moved controller gets up to five minutes to catch up. See
 [etcd around controllers](#etcd-around-controllers).
 
-Each node downloads the extension *before* it is taken out of service, so an
-unreachable registry or a signature that does not verify costs nothing. Then it
-drains, stops k0s, swaps the extension, and comes back — no reboot. A drain a
-pod disruption budget refuses cancels the change on that node rather than
-forcing it.
+Each node downloads the extension *before* it goes out of service. So an
+unreachable registry, or a signature that does not verify, costs nothing. Then
+the node drains, stops k0s, swaps the extension, and comes back, without a
+reboot. If a pod disruption budget refuses the drain, the node cancels the
+change and does not force it.
 
-> **A stopped rollout is a safe place to stand.** Like `cctl upgrade`, this
-> stops at the first node that fails. Unlike it, the half-finished state is one
-> k0s explicitly supports: controllers one minor ahead of workers. There is no
-> hurry to finish, which is worth knowing at the moment you are deciding
-> whether to push on.
+> **A stopped rollout is a safe state.** Like `cctl upgrade`, this command stops
+> at the first node that fails. But unlike `cctl upgrade`, its half-finished
+> state is one that k0s explicitly supports: controllers one minor ahead of
+> workers. You do not need to hurry to finish. Remember this when you decide
+> whether to continue.
 
-There is no automatic rollback if k0s does not come back on a node: it stays
-cordoned and says why. k0s does not support downgrading a minor, so reversing
-it unasked would risk making a recoverable problem permanent.
+There is no automatic rollback if k0s does not come back on a node. The node
+stays cordoned and says why. k0s does not support downgrading a minor, so an
+unrequested reversal can make a recoverable problem permanent.
 
-`--json` prints one report once the rollout ends, whether it succeeded or not;
-the exit status still says which.
+`--json` prints one report when the rollout ends, whether it succeeded or not.
+The exit status still tells you which.
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2 --json 2>/dev/null
@@ -806,18 +820,18 @@ $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2
 |---|---|
 | `moved` | Now on the target version |
 | `skipped` | Already on the target version |
-| `failed` | The change was attempted and did not complete; the rollout stopped here |
+| `failed` | The node tried the change and did not complete it. The rollout stopped here |
 | `pending` | Not reached, because an earlier node failed |
-| `refused` | Turned down by the check; nothing was changed anywhere |
-| `checked` | Accepted by the check, then left alone: a dry run, or another node was refused |
+| `refused` | Refused by the check. Nothing changed on any node |
+| `checked` | Accepted by the check, then not changed: a dry run, or another node was refused |
 
-A controller that moved but left etcd short is reported `moved`, with the
-error that stopped the rollout.
+If a controller moved but left etcd short of a member, the report shows it as
+`moved`, with the error that stopped the rollout.
 
 ### etcd around controllers
 
-Both rollouts refuse to take a controller out while etcd is short a member,
-and stop after one whose member does not come back healthy:
+Both rollouts refuse to take a controller out while etcd is short of a member.
+They also stop after a controller whose member does not come back healthy:
 
 ```console
 [1/5] node-1:7443 (controller)
@@ -827,60 +841,63 @@ and stop after one whose member does not come back healthy:
         etcd: 3 of 3 members healthy
 ```
 
-No node answers for the cluster. Each controller reports its own member's
-health — etcd's `/health`, which needs a quorum to pass — and the member list
-it sees, on `GET /v1/etcd`. `cctl` puts the answers side by side and stops when:
+No single node answers for the cluster. Each controller reports, on
+`GET /v1/etcd`, the health of its own member and the member list that it sees.
+The health comes from etcd's `/health`, which needs a quorum to pass. `cctl`
+compares the answers and stops when:
 
-- a member is unhealthy, or a controller cannot be asked;
-- controllers disagree on the member list;
-- a member is on none of the controllers given. A dead machine still listed
-  counts against the quorum: list every controller, or remove it with
-  `k0s etcd leave`.
+- A member is unhealthy, or `cctl` cannot ask a controller.
+- The controllers do not agree on the member list.
+- A member is on none of the given controllers. A dead machine that is still
+  listed counts against the quorum. List every controller, or remove the dead
+  machine with `k0s etcd leave`.
 
-A `single` node runs kine and is skipped, as is a controller on SQLite or an
-external etcd. A node older than this check is reported and not blocking; its
-member is then not checked.
+A `single` node runs kine, so `cctl` skips it. `cctl` also skips a controller on
+SQLite or on an external etcd. If a node is older than this check, `cctl`
+reports it and does not block. The member of that node is then not checked.
 
 ### Getting a kubeconfig
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--server` | the cluster's virtual IP, or the address you reached the node on | What clients should reach the control plane on |
+| `--server` | the cluster's virtual IP, or the address you reached the node on | The address that clients use to reach the control plane |
 | `--output` | standard output | Writes a file at `0600` |
-| `--force` | off | Replace an existing `--output` file |
+| `--force` | off | Replaces an existing `--output` file |
 
-> **Warning.** This is `admin`, and it outranks every other command here. The
-> rest act on one machine; this hands over a cluster, to somebody nothing in
-> this API can take it back from. The node records that it happened in its
-> journal.
+> **Warning.** This command needs `admin`, and it is more powerful than every
+> other command here. The other commands act on one machine. This one gives away
+> a cluster, and nothing in this API can take it back. The node records the
+> event in its journal.
 
 ```console
 $ cctl kubeconfig 192.168.1.51 > ~/.kube/corium.yaml
 $ cctl kubeconfig 192.168.1.51 --output ~/.kube/corium.yaml
 ```
 
-Standard output by default, and deliberately not `~/.kube/config`: merging into
-somebody's existing contexts is a decision with no undo. `--output` writes a
-file at `0600` and refuses to replace one without `--force`.
+By default, the kubeconfig goes to standard output, and intentionally not to
+`~/.kube/config`. A merge into the existing contexts of a user is a decision
+that you cannot undo. `--output` writes a file at `0600`, and refuses to replace
+a file without `--force`.
 
-The server address it points at is the cluster's virtual IP on an HA control
-plane, and otherwise the address you reached the node on. A kubeconfig aimed at
-one particular controller stops working the first time that controller does,
-which is why the virtual IP wins where there is one.
+On an HA control plane, the server address is the virtual IP of the cluster.
+Otherwise, it is the address that you used to reach the node. A kubeconfig that
+points to one controller stops working when that controller stops. That is why
+the virtual IP wins when there is one.
 
-`--server` overrides it — for a load balancer in front of the control plane, a
-name rather than an address, or a port that is not `6443`:
+`--server` overrides the address. Use it for a load balancer in front of the
+control plane, for a name instead of an address, or for a port that is not
+`6443`:
 
 ```console
 $ cctl kubeconfig 192.168.1.51 --server k8s.example.com
 $ cctl kubeconfig 192.168.1.51 --server 192.168.0.200:8443
 ```
 
-A bare address gets `https://` and `:6443`; a whole URL is left alone.
+A bare address gets `https://` and `:6443`. A full URL stays as it is.
 
-Only a controller can answer: a worker holds kubelet credentials, which are not
-an administrator's, and it says so rather than handing over something that
-looks right and is not.
+Only a controller can answer. A worker holds kubelet credentials, which are not
+administrator credentials. The worker says so, and does not give you something
+that looks correct but is not.
 
 ### Generating a worker's configuration
 
@@ -888,17 +905,17 @@ looks right and is not.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--expiry` | `1h` | How long the minted join token stays valid; a positive duration, checked before the round trip |
+| `--expiry` | `1h` | How long the new join token stays valid. A positive duration, checked before the request goes to the node |
 | `--name` | — | `node.name` for the generated worker |
-| `--label` | — | A node label, `key=value`; repeat the flag for more than one |
+| `--label` | — | A node label, `key=value`. Repeat the flag for more than one label |
 
-> **Warning.** The token is inline in the clear — that is the point — so the
-> block this prints is a secret. It goes to standard output alone, so
-> `> worker.yaml` writes only YAML, and the reminder goes to standard error.
+> **Warning.** The token is inline in clear text, by design, so the printed
+> block is a secret. The block goes alone to standard output, so `> worker.yaml`
+> writes only YAML. The reminder goes to standard error.
 
-> **Warning.** This is `admin`, and only a controller can answer: the token is
-> minted by k0s, which a worker does not run. A worker says so rather than
-> failing obscurely.
+> **Warning.** This command needs `admin`, and only a controller can answer. The
+> token comes from k0s, which a worker does not run. A worker says so, and does
+> not fail with an unclear error.
 
 ```console
 $ cctl worker-config 192.168.1.51 --name w-1 --label corium.dev/pool=general > worker.yaml
@@ -906,9 +923,9 @@ Minted a worker join token on 192.168.1.51:7443, valid 1h. It is inline in the
 block above -- treat the output as a secret, and mint a fresh one once it expires.
 ```
 
-It asks a controller to mint a fresh worker join token — `k0s token create` on
-your behalf — and prints the `corium:` block for a new worker to standard
-output:
+The command asks a controller to create a new worker join token. The controller
+runs `k0s token create` for you. Then the command prints the `corium:` block for
+a new worker to standard output:
 
 ```yaml
 corium:
@@ -921,16 +938,16 @@ corium:
     token: <a freshly minted worker token, inline>
 ```
 
-The block is the worker's alone to paste into a cloud-config; its users, SSH
-keys and anything else stay yours to add.
+The block holds only the part for the worker, to paste into a cloud-config. You
+add the users, the SSH keys, and anything else yourself.
 
 ### Handing a node to somebody else
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--to` | — | Required. A second operator directory holding the CA to move to, as made by `cctl pki init --dir` |
-| `--role` | `admin` | The role of the certificate minted under the new CA |
-| `--lifetime` | `2160h` — ninety days | How long that certificate is valid |
+| `--to` | — | Required. A second operator directory that holds the CA to move to, made by `cctl pki init --dir` |
+| `--role` | `admin` | The role of the certificate created under the new CA |
+| `--lifetime` | `2160h` (ninety days) | How long that certificate is valid |
 
 ```console
 $ cctl pki init --dir ~/.corium-2027 --name "corium operators 2027"
@@ -938,24 +955,24 @@ $ cctl ca rotate node-1 node-2 --dir ~/.corium --to ~/.corium-2027
 node-1:7443 now obeys the CA in /home/you/.corium-2027
 ```
 
-`cctl` mints a certificate under the new CA and sends it to each node as proof.
-The node verifies it chains to the CA it is being asked to obey, and refuses
-otherwise. The failure being guarded against is not recoverable over the
-network: rotate to a CA you cannot issue certificates under, and the node will
-only ever accept somebody else.
+`cctl` creates a certificate under the new CA and sends it to each node as
+proof. The node verifies that the certificate chains to the CA that it must
+obey, and refuses otherwise. This protects against a failure that you cannot
+recover from over the network. If you rotate to a CA that you cannot issue
+certificates under, the node will only accept somebody else.
 
-Rotation touches neither cluster membership nor node identity. The fingerprint
-you have pinned stays valid; only who may manage it changes.
+Rotation changes neither cluster membership nor node identity. The fingerprint
+that you pinned stays valid. Only the person who can manage the node changes.
 
-If the CA's key is *lost* there is nothing to rotate with, and the way back is
-the console — `corium-agent api set-ca --file operator-ca.pem`, run as root on
-the node itself (§6).
+If the key of the CA is *lost*, there is nothing to rotate with. The way back is
+the console: run `corium-agent api set-ca --file operator-ca.pem` as root on the
+node itself (§6).
 
 ### Erasing a node
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--confirm` | — | Required. The node's own name, which it checks before erasing itself |
+| `--confirm` | — | Required. The name of the node, which the node checks before it erases itself |
 
 ```console
 $ cctl reset 192.168.1.51
@@ -966,28 +983,31 @@ corium-00a7a34c to mean it
 $ cctl reset 192.168.1.51 --confirm corium-00a7a34c
 ```
 
-The node's own name has to be sent back to it, because an address in a shell's
-history is a poor guard against this landing on the wrong machine. It is
-checked twice: by `cctl` against what the node calls itself, and by the node.
+You must send the name of the node back to it. An address in a shell history
+does not protect well against a reset of the wrong machine. The name is checked
+twice: `cctl` compares it with what the node calls itself, and the node checks
+it too.
 
-The order is fixed. Drain, best effort — a node whose cluster has already gone
-is exactly the node somebody wants to reset. Then `k0s reset`, which takes it
-out of the cluster and wipes `/var/lib/k0s`. Then the bootstrap marker. **Only
-then** does the node forget its owner, and last of all it reboots. Doing it the
-other way round could leave a cluster member nobody owns.
+The order is fixed. First, the node drains, as a best effort. The node that
+somebody wants to reset is often one whose cluster is already gone. Then
+`k0s reset` takes the node out of the cluster and wipes `/var/lib/k0s`. Then the
+node removes the bootstrap marker. **Only then** does the node forget its owner,
+and last of all it reboots. The opposite order can leave a cluster member that
+nobody owns.
 
-The serving identity goes too, so the fingerprint remembered here stops
-matching — which is the point: a machine handed on with the certificate its
-previous owner pinned is one that owner's tooling would still accept.
+The serving identity is also removed, so the fingerprint remembered here stops
+matching. This is intentional. If a machine goes to a new owner with the
+certificate that its previous owner pinned, the tools of that previous owner
+still accept it.
 
-Two things worth knowing:
+Two things to know:
 
-- What the node comes back as depends on its configuration. One with
-  `api.operatorCA` re-claims itself and re-bootstraps, which is a genuine
-  reprovision. One in maintenance mode comes back unclaimed with a new pairing
-  code.
-- The reboot takes a **staged** image if one is waiting. Check `cctl status`
-  first if that matters.
+- What the node comes back as depends on its configuration. A node with
+  `api.operatorCA` re-claims itself and re-bootstraps, which is a real
+  reprovision. A node in maintenance mode comes back unclaimed, with a new
+  pairing code.
+- The reboot takes a **staged** image if one waits. If that is important, look
+  at `cctl status` first.
 
 ### Version
 
@@ -996,20 +1016,20 @@ $ cctl version
 cctl 0.5.0 (a2575f3)
 ```
 
-The version and the short commit are stamped in at link time. A release binary
-reports its tag with the leading `v` removed; a binary built from a checkout
-reports what `git describe --tags --always --dirty` says, so a build from an
-uncommitted tree announces itself as dirty. It takes no flags, reads no
-operator directory and reaches no node, which makes it the one command that
-works before anything else is set up.
+The build writes the version and the short commit into the binary at link time.
+A release binary reports its tag without the leading `v`. A binary built from a
+checkout reports the output of `git describe --tags --always --dirty`. So a
+build from an uncommitted tree shows itself as dirty. The command takes no
+flags, reads no operator directory, and reaches no node. So it is the only
+command that works before you set up anything.
 
 ---
 
 ## 4. Roles
 
-Carried in the client certificate's organisation, and checked by the node on
-every call. Every route names the lowest role that may use it. This table is
-the authoritative one; the role columns in §3 repeat it.
+The role is in the organization field of the client certificate, and the node
+checks it on every call. Every route names the lowest role that can use it.
+This table is the authoritative one. The role columns in §3 repeat it.
 
 | Role | Reaches |
 |---|---|
@@ -1017,61 +1037,60 @@ the authoritative one; the role columns in §3 repeat it.
 | `corium:operator` | …and `restart`, `cordon`, `drain`, and an upgrade's *staging* |
 | `corium:admin` | …and `apply`, `config`, `reboot`, `shutdown`, `reset`, `rollback`, an upgrade's *apply*, `ca rotate`, `kubeconfig`, `worker-config`, `access ssh add`/`revoke` |
 
-`corium:readonly` is the spelling the certificate carries and the one a node
+`corium:readonly` is the form that the certificate carries and that a node
 checks for. `cctl pki issue --role` and `cctl ca rotate --role` take the short
-form — `readonly`, `operator`, `admin` — and write the full name in.
+form (`readonly`, `operator`, `admin`) and write the full name.
 
-Three commands sit outside this. `cctl enroll` is made before any trust exists,
-so the pairing code stands in for a role. `cctl pki` and `cctl version` reach no
-node at all.
+Three commands are outside this table. `cctl enroll` runs before any trust
+exists, so the pairing code replaces a role. `cctl pki` and `cctl version` reach
+no node at all.
 
-`cctl upgrade` spans two roles: pulling an image changes nothing else and is
-operator work, while applying it takes the node out of service. So an operator
-can stage an upgrade and cannot finish one — `cctl upgrade` needs `admin` to
-run through.
+`cctl upgrade` uses two roles. Pulling an image changes nothing else, so it is
+operator work. Applying the image takes the node out of service. So an operator
+can stage an upgrade but cannot finish one. `cctl upgrade` needs `admin` to run
+to the end.
 
-A certificate signed by the operator CA but carrying no recognised role is
-authenticated and *not* authorised. It gets a 403 saying how to reissue it,
-because signing a certificate without naming a role is not a way to grant every
-role.
+A certificate signed by the operator CA but with no recognized role is
+authenticated, but *not* authorized. It gets a 403 that tells you how to reissue
+it. A certificate signed without a role does not get every role.
 
 ---
 
 ## 5. Your directory
 
-`~/.corium` by default, `--dir` otherwise. The directory is kept at `0700`
-whatever the files inside it are, and narrowed if it was already wider: it
-holds the key that owns a fleet.
+The default is `~/.corium`. Use `--dir` for a different directory. The directory
+is kept at `0700`, whatever the modes of the files inside it. If its mode was
+wider, `cctl` narrows it, because the directory holds the key that owns a fleet.
 
 | File | Mode | What it is |
 |---|---|---|
-| `operator-ca.pem` | `0644` | The CA certificate. Public — this is what goes in cloud-init |
-| `operator-ca.key` | `0600` | The key that owns every node trusting it. Never leaves this machine |
+| `operator-ca.pem` | `0644` | The CA certificate. Public: this is what goes in cloud-init |
+| `operator-ca.key` | `0600` | The key that owns every node that trusts it. Never leaves this machine |
 | `client.crt` | `0644` | Your certificate, signed by the CA above |
 | `client.key` | `0600` | Its key |
 | `config.yaml` | `0600` | Remembered node fingerprints, and nothing else |
 
-`config.yaml` holds fingerprints because a node signs its own certificate.
-Passing `--fingerprint` explicitly records it, which is what a node claimed
-from cloud-init needs once.
+`config.yaml` holds fingerprints because a node signs its own certificate. If
+you pass `--fingerprint` explicitly, `cctl` records it. A node claimed from
+cloud-init needs this one time.
 
 ---
 
 ## 6. What runs on the node instead
 
-Two things are deliberately not in `cctl`, because they are local by nature.
+Two tools are intentionally not in `cctl`, because they are local by nature.
 
-`corium-agent api set-ca --file <cert>` replaces the operator CA a node obeys.
-It is the way back when the key that owns a fleet is lost. It opens no port and
-accepts no request — root on the machine already owns it, so it grants nothing
-that was not already granted — and the node keeps its cluster membership, which
-is what makes it a recovery rather than a reset. It refuses a node nobody has
-claimed: installing a CA there would be enrolment walking around the pairing
-code.
+`corium-agent api set-ca --file <cert>` replaces the operator CA that a node
+obeys. It is the way back when the key that owns a fleet is lost. It opens no
+port and accepts no request. Root on the machine already owns the machine, so
+the command grants nothing new. The node keeps its cluster membership, which
+makes this a recovery and not a reset. The command refuses a node that nobody
+claimed, because a CA installed there is an enrolment that skips the
+pairing code.
 
-`corium-agent validate <file>` parses and checks a configuration without
-applying it, offline. It is the same code the node runs at boot, so it gives
-the same answer on your workstation as on the machine.
+`corium-agent validate <file>` parses and checks a configuration offline,
+without applying it. It uses the same code that the node runs at boot. So it
+gives the same answer on your workstation as on the machine.
 
 ---
 
@@ -1079,49 +1098,49 @@ the same answer on your workstation as on the machine.
 
 | Not there | Why |
 |---|---|
-| `cctl exec` | The moment an API can run any command it is SSH with a worse client, and every argument for keeping its surface small stops applying |
-| Rewriting what a node *is*, in service | A node already running Kubernetes cannot have its role, cluster, name, network or disks rewritten underneath it. `cctl apply` re-applies the safe subset (the add-on set, the k0s patch, the Kubernetes version) day-two and refuses each of those, naming it; changing one is `cctl reset`. See [ADR 8](adr/0008-day-two-reconcile.md) |
-| A reconcile loop | Nothing watches a document and corrects a running node toward it. `cctl apply` re-applies the safe subset when you ask it to, once, and does nothing between one apply and the next |
+| `cctl exec` | If an API can run any command, it is SSH with a worse client. Then every argument for a small API surface stops applying |
+| Rewriting what a node *is*, in service | On a node that already runs Kubernetes, nothing can rewrite its role, cluster, name, network or disks. `cctl apply` re-applies the safe subset (the add-on set, the k0s patch, the Kubernetes version) day-two, and refuses each of the other fields by name. To change one, use `cctl reset`. See [ADR 8](adr/0008-day-two-reconcile.md) |
+| A reconcile loop | Nothing watches a document and corrects a running node to match it. `cctl apply` re-applies the safe subset once when you ask, and does nothing between one apply and the next |
 | Anything Kubernetes beyond `kubeconfig` | The API hands over the admin kubeconfig once and does nothing else with Kubernetes. It does not proxy the apiserver, list pods, or keep credentials for you |
-| A fleet inventory | `cctl` acts on addresses you supply. There is no registry and no desired state; a rolling change is a loop over the addresses you name |
+| A fleet inventory | `cctl` acts on the addresses that you give it. There is no registry and no desired state. A rolling change is a loop over the addresses that you name |
 
-The last one is the design, not an omission: a node knows only about itself, and
-the sequencing that needs to know about the others lives here rather than on any
-node. See [ADR 4](adr/0004-management-api.md).
+The last row is the design, not an omission. A node knows only about itself. The
+sequencing that needs to know about the other nodes lives here, not on a node.
+See [ADR 4](adr/0004-management-api.md).
 
-Granting SSH access is not a counter-example. `cctl access ssh` (§3) trusts a
-key for a user that already exists, but the API still runs no command itself:
-the shell that follows is the operating system's `sshd`, and all the API decides
-is whose key it will read. See ADR 5.
+SSH access does not contradict this. `cctl access ssh` (§3) trusts a key for a
+user that already exists, but the API still runs no command itself. The shell
+that follows comes from `sshd` in the operating system. The API decides only
+whose key `sshd` reads. See ADR 5.
 
 ---
 
 ## 8. Reading a refusal
 
-The status codes are chosen so that the code alone tells you where to look.
+The status codes tell you where to look from the code alone.
 
 | Code | Means | Look at |
 |---|---|---|
 | `400` | The request is malformed | What you typed |
 | `401` | A pairing code did not match | The node's console |
-| `403` | Authenticated, not authorised — or the node refuses on policy | Your role, or the image |
-| `409` | Nothing is wrong; the node cannot do it in this state | The node: unclaimed, nothing staged, no rollback, a worker asked to drain |
+| `403` | Authenticated but not authorized, or the node refuses on policy | Your role, or the image |
+| `409` | Nothing is wrong, but the node cannot do it in this state | The node: unclaimed, nothing staged, no rollback, a worker asked to drain |
 | `500` | The node failed at it | Its journal: `cctl logs <node> --unit corium-apid` |
 
-What `cctl` itself returns to the shell is a much shorter list, which matters if
-you are scripting it:
+The exit codes that `cctl` itself returns to the shell are a much shorter list.
+This is important if you use `cctl` in a script:
 
 | Exit code | When |
 |---|---|
 | `0` | The command did what it said. `cctl -h` and `cctl <command> -h` exit `0` too |
-| `1` | Every failure, whatever caused it, with `cctl: <what went wrong>` on standard error |
-| `2` | A flag `cctl` does not recognise. This comes from Go's flag package, before the command runs |
+| `1` | Every failure, whatever the cause, with `cctl: <what went wrong>` on standard error |
+| `2` | A flag that `cctl` does not recognize. Go's flag package returns this before the command runs |
 
-There is no per-cause exit code. A `403` from the node, an address that never
-answered and a missing client certificate all exit `1`, so a script that needs
-to tell them apart has to read the message or the status code in it.
+There is no exit code for each cause. A `403` from the node, an address that
+never answered, and a missing client certificate all exit `1`. A script that
+must tell them apart must read the message, or the status code in it.
 
-A handshake that fails before any of those is its own case:
+A handshake that fails before all of those is a separate case:
 
 ```console
 $ cctl status 192.168.1.51
@@ -1129,14 +1148,14 @@ cctl: 192.168.1.51:7443 does not accept your certificate: it is signed by a CA
 this node no longer trusts.
 ```
 
-The raw TLS alert for this is `certificate required`, which reads as though the
-client sent nothing. It usually did — Go sends no certificate at all when the
-one it holds was signed by a CA the server did not name as acceptable — so the
-real cause is a CA that was rotated out from under this directory. Use the
-directory it was rotated to, or recover the node from its console with
-`corium-agent api set-ca`.
+The raw TLS alert for this is `certificate required`, which reads as if the
+client sent no certificate. Usually that is true. Go sends no certificate at
+all when its certificate was signed by a CA that the server did not name as
+acceptable. So the real cause is a CA that somebody rotated away from this
+directory. Use the directory that the CA was rotated to, or recover the node
+from its console with `corium-agent api set-ca`.
 
-A `409` is worth dwelling on, because it is the one that is easy to read as a
-fault and usually is not. A node with nothing staged, or with no earlier image
-to roll back to, or a worker that holds no credentials able to evict a pod, are
-all ordinary states rather than problems.
+Read a `409` carefully, because it is easy to read as a fault, and usually it
+is not one. A node with nothing staged, a node with no earlier image to roll
+back to, and a worker with no credentials to evict a pod are all normal states,
+not problems.

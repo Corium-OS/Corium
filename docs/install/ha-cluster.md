@@ -1,74 +1,75 @@
 # A highly available control plane
 
-Three controllers, each a full member: they run etcd between them and share a
-virtual IP that moves if one goes away. Clients talk to the virtual IP and never
-know which machine answered.
+This setup has three controllers, and each one is a full member. The three
+controllers run etcd together and share a virtual IP. A virtual IP is an address
+that moves to another machine when its current machine stops. Clients connect to
+the virtual IP and do not know which machine answered.
 
-This page builds one by hand, because the interesting part is not the commands
-— it is why they happen in that order. There is a script at the end that does
-all of it on Proxmox, and it will make more sense once you have read this.
+This page builds the cluster by hand, because the order of the steps is more
+important than the commands. A script at the end of the page does all the steps
+on Proxmox. Read this page first, and the script is easier to understand.
 
 ## Before you start
 
-- Three machines on one broadcast domain, each booted from the Corium image
-  with one of the configurations below as its cloud-init user data — three VMs,
-  three cloud instances, or three physical machines. [Proxmox](proxmox.md) and
-  [OpenStack](openstack.md) each walk through creating one; the script at the
-  end of this page creates all three.
-- Five addresses on that segment: one per machine, and a spare for the virtual
-  IP. The four decisions in the next section are about those.
-- The Corium qcow2 or ISO for whichever platform you use — see
-  [downloads](downloads.md).
-- SSH to all three machines from wherever you run step 4, as the user in the
-  `users:` block.
+- Three machines on one broadcast domain. Each machine boots from the Corium
+  image, with one of the configurations below as its cloud-init user data. They
+  can be three VMs, three cloud instances, or three physical machines.
+  [Proxmox](proxmox.md) and [OpenStack](openstack.md) each show how to create
+  one. The script at the end of this page creates all three.
+- Five addresses on that segment: one for each machine, and a spare for the
+  virtual IP. The four decisions in the next section are about these addresses.
+- The Corium qcow2 or ISO for your platform. See [downloads](downloads.md).
+- SSH access to all three machines from the host where you run step 4, as the
+  user in the `users:` block.
 - `cctl`, for the last section only.
-  [Downloads](downloads.md#install-cctl) installs it.
+  [Downloads](downloads.md#install-cctl) shows how to install it.
 
 ## The shape
 
 | | |
 |---|---|
 | Three controllers | `role: controller+worker`, or `controller` to keep workloads off them |
-| etcd | `storage.type: etcd` — the default for controllers, and required for more than one |
-| A virtual IP | Held by whichever controller currently wins a VRRP election |
+| etcd | `storage.type: etcd`. This is the default for controllers, and it is required for more than one controller |
+| A virtual IP | The controller that wins the VRRP election holds it. VRRP is the protocol that picks one holder for the address |
 | `cluster.endpoint` | The virtual IP, on every node |
 
-Three is the smallest number that survives losing one: etcd needs a majority,
-and two members have no majority without both.
+Three is the smallest number of controllers that can lose one and continue.
+etcd needs a majority of its members. With two members, there is no majority
+when one of them stops.
 
 ## Decide four things first
 
-**An address for each controller, and a fifth for the virtual IP.** All on the
-same broadcast domain — VRRP is how the controllers agree on who holds it, and
-it does not route.
+**An address for each controller, and a fifth for the virtual IP.** All the
+addresses must be on the same broadcast domain. The controllers use VRRP to
+agree which one holds the virtual IP, and VRRP traffic does not go through a
+router.
 
-**A virtual router ID**, 1–255, unique on that segment. Two clusters sharing an
-ID will fight over each other's addresses. Omit it and k0s starts at 51, which
-is fine until the day it is not.
+**A virtual router ID**, 1–255, unique on that segment. If two clusters use the
+same ID, each one takes the addresses of the other. If you do not set it, k0s
+starts at 51. That works until a second cluster on the segment uses the same ID.
 
-**A VRRP password of at most eight characters.** keepalived silently truncates
-anything longer, which would leave two controllers believing they share a
-password they do not. Corium rejects a longer value rather than allow that.
+**A VRRP password of at most eight characters.** keepalived cuts a longer
+password and gives no warning. Two controllers can then believe that they share
+a password when they do not. For this reason, Corium rejects a longer value.
 
-**Whether your network carries multicast.** Most clouds do not. Without it, list
-the other controllers under `unicastPeers`. On a flat LAN it is harmless to set
-anyway.
+**Whether your network carries multicast.** Most clouds do not. If your network
+has no multicast, list the other controllers under `unicastPeers`. On a flat LAN,
+you can set `unicastPeers` too. It does no harm.
 
 ## The problem this has to solve
 
-A k0s cluster has no pre-shared secret. The first controller generates the
-cluster certificate authority, and only once that exists can a join token be
-minted. So the second and third controllers cannot be given a token in advance
-— it does not exist when they boot.
+A k0s cluster has no pre-shared secret. The first controller creates the
+cluster certificate authority (CA). You can create a join token only after the
+CA exists. For this reason, you cannot give a token to the second and third
+controllers in advance. The token does not exist when they boot.
 
-Corium's answer is that they wait. Configure them with `join.tokenFrom.waitFor`
-and they boot, find no token, and sit there until one appears. All three
-machines can start at the same time; the token only has to arrive before the
-timeout.
+Corium makes them wait. If you configure them with `join.tokenFrom.waitFor`, they
+boot, find no token, and wait until a token appears. All three machines can
+start at the same time. The token must arrive before the timeout.
 
-Nothing else is shared. No certificates, no CA, no key material in any
-configuration file — k0s hands the CA to a joining controller over its join API
-on port 9443, once the token has proved it should.
+The machines share nothing else. No configuration file holds certificates, a CA,
+or key material. k0s sends the CA to a joining controller through its join API
+on port 9443, after the token proves that the controller can join.
 
 ## 1. The first controller
 
@@ -92,18 +93,19 @@ corium:
 ```
 
 Add the `users:` block from
-[Proxmox step 3](proxmox.md#3-describe-the-node) — it is the same one, and
-without it the machine boots with no account to SSH into.
-[`examples/ha-controller-first.yaml`](../examples/ha-controller-first.yaml) is
-the whole document in one commented file.
+[Proxmox step 3](proxmox.md#3-describe-the-node). It is the same block. Without
+it, the machine boots with no account for SSH.
+[`examples/ha-controller-first.yaml`](../examples/ha-controller-first.yaml) holds
+the whole document in one file, with comments.
 
-`endpoint` is the virtual IP because it ends up in the API server's certificate.
-Point it at one controller's own address and the certificate stops matching the
-moment the address moves.
+`endpoint` is the virtual IP because the value goes into the certificate of the
+API server. If you set it to the address of one controller, the certificate stops
+matching as soon as the API moves to another address.
 
 ## 2. The other two
 
-The same file, plus a `join:` block, and `unicastPeers` listing the *other* two:
+Use the same file. Add a `join:` block, and set `unicastPeers` to the *other*
+two controllers:
 
 ```yaml
   join:
@@ -112,34 +114,35 @@ The same file, plus a `join:` block, and `unicastPeers` listing the *other* two:
       waitFor: 20m
 ```
 
-`waitFor` is what lets them boot before the token exists. Without it a missing
+`waitFor` lets them boot before the token exists. Without `waitFor`, a missing
 token is a hard failure and the node stops.
 [`examples/ha-controller-join.yaml`](../examples/ha-controller-join.yaml) shows
 the whole document.
 
 ## 3. Create them and start all three
 
-Create each machine with its configuration as user data, then start it —
-`qm start`, `openstack server create`, powering on hardware. Order does not
-matter. The first controller forms the cluster; the other two wait.
+Create each machine with its configuration as user data. Then start it, for
+example with `qm start` or `openstack server create`, or turn on the hardware.
+The order does not matter. The first controller creates the cluster, and the
+other two wait.
 
 ## 4. Mint a token and deliver it
 
-> **Warning.** An unexpired controller token is a cluster-admin credential.
-> Whoever holds one can join a full control-plane member with read and write
-> access to etcd. Use a short expiry, and prefer a secret store over instance
-> metadata — `tokenFrom` also accepts a `url`, which is the better shape in
-> production.
+> **Warning.** Give the token a short expiry, and use a secret store instead
+> of instance metadata when you can. A controller token that has not expired is
+> a cluster-admin credential. A person who holds one can join a full
+> control-plane member with read and write access to etcd. `tokenFrom` also
+> accepts a `url`, and a `url` is the better choice in production.
 
-Once the first controller is answering, mint the token and keep it:
+When the first controller answers, create the token and store it:
 
 ```bash
 ssh core@192.168.0.201 sudo k0s status          # wait for this to succeed
 TOKEN=$(ssh core@192.168.0.201 sudo k0s token create --role=controller --expiry=1h)
 ```
 
-Then write it to `/etc/corium/join-token` on each of the other two, mode
-`0600`:
+Then write it to `/etc/corium/join-token` on each of the other two controllers,
+with mode `0600`:
 
 ```bash
 for ip in 192.168.0.202 192.168.0.203; do
@@ -147,11 +150,11 @@ for ip in 192.168.0.202 192.168.0.203; do
 done
 ```
 
-Check `$TOKEN` is not empty before you ship it. An empty file is not an error
-to a waiting controller: it keeps waiting for the whole of `waitFor` and says
-nothing that points at the cause.
+Before you send the token, make sure that `$TOKEN` is not empty. A waiting
+controller does not treat an empty file as an error. It waits for the full
+`waitFor` time and gives no message that shows the cause.
 
-Each waiting controller notices the file, joins, and k0s ships it the CA.
+Each waiting controller finds the file and joins. Then k0s sends it the CA.
 
 ## 5. Check it
 
@@ -166,24 +169,23 @@ $ sudo k0s etcd member-list
 {"members":{"corium-5c5d785f":"https://192.168.0.203:2380", ...}}
 ```
 
-Each node registers **its own address**, not the virtual IP. That distinction is
-the difference between a cluster that works and one that works until the first
+Each node registers its own address, not the virtual IP. This is necessary. A
+cluster where the nodes register the virtual IP works only until the first
 failover.
 
-The API answers on the virtual IP, which is what a kubeconfig should point at:
+The API answers on the virtual IP. Point your kubeconfig at this address:
 
 ```console
 $ curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.0.200:6443/readyz
 401
 ```
 
-401 is the right answer: the server is there and declining an unauthenticated
-request.
+401 is the correct answer. The server is running and refuses a request that
+has no authentication.
 
 ## 6. Watch it fail over
 
-The address alone will not tell you which controller holds the virtual IP. ARP
-will:
+The address does not show which controller holds the virtual IP. ARP shows it:
 
 ```bash
 ip neigh flush dev <your bridge>
@@ -191,25 +193,27 @@ ping -c2 192.168.0.200 >/dev/null
 ip neigh show 192.168.0.200          # compare the MAC against each node's
 ```
 
-Stop that controller and ask again. On a real run the virtual IP moved within
-five seconds, the API kept answering, etcd held quorum at two of three, and the
-cluster carried on scheduling. Starting the controller again brought it back
-`Ready` inside fifteen seconds.
+Stop that controller and run the commands again. In a real test, the virtual IP
+moved in less than five seconds. The API continued to answer, etcd kept its
+majority (quorum) with two of three members, and the cluster continued to
+schedule. When the controller started again, it was `Ready` in less than fifteen
+seconds.
 
 ## Doing all of that on Proxmox
 
 [`deploy/proxmox/create-ha-cluster.sh`](https://github.com/Corium-OS/Corium/tree/main/deploy/proxmox)
-performs every step above: it writes the three configurations, generates a VRRP
-password at exactly eight characters, creates and starts the VMs, waits for the
-first controller, mints a token and delivers it to the other two. Get it onto
-the host the same way [Proxmox](proxmox.md#before-you-start) does, and run it
-from `deploy/proxmox/`.
+does every step above. It writes the three configurations and creates a VRRP
+password of exactly eight characters. It creates and starts the VMs, waits for
+the first controller, creates a token, and sends the token to the other two.
+Copy it to the host the same way that [Proxmox](proxmox.md#before-you-start)
+does, and run it from `deploy/proxmox/`.
 
-> **Warning.** Two things to know before you run it. `SSH_KEY` must be a key
-> **this Proxmox host** holds the private half of, because the script SSHes
-> from here to deliver the token — a key from your laptop fails at
-> `Permission denied` with three VMs already built. And unlike `create-vm.sh`,
-> it **destroys** any VM already holding one of those VMIDs.
+> **Warning.** Read these two points before you run the script. First,
+> `SSH_KEY` must be a key whose private half is on this Proxmox host. The script
+> uses SSH from this host to send the token. If you use a key from your laptop,
+> the script stops at `Permission denied` after it built the three VMs. Second,
+> the script destroys any VM that already uses one of those VMIDs.
+> `create-vm.sh` does not do this.
 
 ```bash
 DISK_IMAGE=/var/lib/vz/template/corium-0.5.0-x86_64.qcow2 \
@@ -230,46 +234,47 @@ for ip in 192.168.0.201 192.168.0.202 192.168.0.203; do
 done
 ```
 
-`qm destroy` leaves the snippets behind, and the host keeps the controllers' old
-host keys — rebuilding onto the same addresses otherwise greets you with
-`REMOTE HOST IDENTIFICATION HAS CHANGED`.
+`qm destroy` does not remove the snippets, and the host keeps the old host keys
+of the controllers. If you do not remove the keys and you rebuild on the same
+addresses, SSH shows `REMOTE HOST IDENTIFICATION HAS CHANGED`.
 
 ## Managing it afterwards
 
-Two things about an HA cluster are easier with the [management API](../cli.md)
-than by hand, and both are about the virtual IP.
+Two tasks on an HA cluster are easier with the [management API](../cli.md) than
+by hand. Both are about the virtual IP.
 
-A kubeconfig aimed at one particular controller stops working the first time
-that controller does — which on a cluster built for exactly that eventuality is
-an odd way to end up. `cctl kubeconfig <any controller>` points the file at the
-virtual IP, because that is what the node recorded when it bootstrapped:
+A kubeconfig that points at one controller stops working when that controller
+stops. The cluster continues to run, but your access to it does not.
+`cctl kubeconfig <any controller>` points the file at the virtual IP, because
+the node recorded the virtual IP when it bootstrapped:
 
 ```bash
 cctl kubeconfig 192.168.0.201 > kubeconfig
 grep server: kubeconfig          # https://192.168.0.200:6443
 ```
 
-And rolling three controllers is the case where going one at a time matters
-most, since two of them are the quorum:
+An upgrade of one controller at a time is most important with three
+controllers, because two of them make the quorum:
 
 ```bash
 cctl upgrade 192.168.0.201 192.168.0.202 192.168.0.203 --image ghcr.io/corium-os/corium:<tag>
 ```
 
-It stops at the first controller that does not come back, rather than taking
-the second one down after it.
+If a controller does not come back, the upgrade stops there. It does not take
+down the second controller.
 
-Both need `api.operatorCA` in each controller's configuration. The API runs
-without it — ADR 11 made that the default — but a controller that names its
-operator CA is claimed at boot rather than being enrollable for the minute it
-takes to bootstrap, which is what makes a three-node build unattended.
+Both tasks need `api.operatorCA` in the configuration of each controller. The API
+runs without it, and ADR 11 made that the default. But a controller that names
+its operator CA is claimed at boot. Without it, the controller is open to
+enrolment for the minute that the bootstrap takes. The operator CA is what lets
+a three-node build run with no operator present.
 
 ---
 
 ## What to read next
 
-- [cctl](../cli.md) — every command, the three roles, and what the API will not
+- [cctl](../cli.md): every command, the three roles, and what the API does not
   do
-- [Configuration](../reference.md) — every field of `ha:` and `join:`
-- [Upgrades](../upgrades.md) — moving a cluster to a new image without losing
-  quorum
+- [Configuration](../reference.md): every field of `ha:` and `join:`
+- [Upgrades](../upgrades.md): how to move a cluster to a new image without
+  losing quorum
