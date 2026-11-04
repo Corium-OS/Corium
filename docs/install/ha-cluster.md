@@ -16,7 +16,7 @@ on Proxmox. Read this page first, and the script is easier to understand.
   can be three VMs, three cloud instances, or three physical machines.
   [Proxmox](proxmox.md) and [OpenStack](openstack.md) each show how to create
   one. The script at the end of this page creates all three.
-- Five addresses on that segment: one for each machine, and a spare for the
+- Four addresses on that segment: one for each machine, and one for the
   virtual IP. The four decisions in the next section are about these addresses.
 - The Corium qcow2 or ISO for your platform. See [downloads](downloads.md).
 - SSH access to all three machines from the host where you run step 4, as the
@@ -39,7 +39,7 @@ when one of them stops.
 
 ## Decide four things first
 
-**An address for each controller, and a fifth for the virtual IP.** All the
+**An address for each controller, and a fourth for the virtual IP.** All the
 addresses must be on the same broadcast domain. The controllers use VRRP to
 agree which one holds the virtual IP, and VRRP traffic does not go through a
 router.

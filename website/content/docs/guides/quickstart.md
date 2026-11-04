@@ -299,9 +299,11 @@ that the API refuses on purpose.
 
 ### Upgrades
 
-Kubernetes ships with the OS, so to upgrade, you boot a new image. The
-[upgrades guide](/docs/guides/upgrades/) shows how to do this on a cluster without loss of
-quorum. This is the short version:
+To upgrade the OS, you boot a new image. The [upgrades guide](/docs/guides/upgrades/)
+shows how to do this on a cluster without loss of quorum. To change only the
+Kubernetes version, see
+[upgrading Kubernetes](/docs/guides/upgrades/#upgrading-kubernetes-specifically). This is
+the short version of an OS upgrade:
 
 ```bash
 sudo bootc upgrade --apply     # reboots into the new version

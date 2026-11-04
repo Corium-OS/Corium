@@ -1179,7 +1179,7 @@ Validation rejects these errors before Corium touches a disk:
 device has a filesystem, a partition table, or the label of a different pool or
 array, the bootstrap stops. Corium does not erase the device.
 
-Use `/dev/disk/by-id/...`, not `/dev/sdb`, for the reason that [`raid`](#310-raid)
+Use `/dev/disk/by-id/...`, not `/dev/sdb`, for the reason that [`raid`](#311-raid)
 gives: the kernel gives names in the order that it finds the disks.
 
 ### 3.18 `backup`
@@ -1350,7 +1350,7 @@ becomes ready without its address pool. It gets the pool later, possibly after a
 workload that waited for a LoadBalancer stopped.
 
 You cannot change `manifests` on a node that already bootstrapped. This is true
-for all fields except `addons` and `k0s.patch`. `cctl apply` refuses the change
+for all fields except `addons`, `k0s.patch` and `kubernetes.version`. `cctl apply` refuses the change
 and names the field. To change a live stack, use `kubectl`, or reset the node.
 
 ---

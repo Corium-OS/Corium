@@ -43,8 +43,9 @@ Most mistakes in this type of system come from a wrong model of the filesystem.
 ```
 
 `/usr` is the image. Nothing writes to it at runtime. When you boot a new image,
-all of `/usr` is replaced. For this reason, the k0s binary is in `/usr`, and an
-upgrade of Kubernetes is an upgrade of the OS.
+all of `/usr` is replaced. The k0s binary in `/usr` is the default Kubernetes
+version of the image. A signed system extension can put another version over it,
+as [shown below](#kubernetes-ships-with-the-os).
 
 `/etc` is merged. OSTree compares the defaults of the image with the edits on
 the machine and combines them. If you edit a file, that file stops following the
