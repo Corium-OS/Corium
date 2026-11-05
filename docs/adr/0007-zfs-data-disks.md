@@ -4,134 +4,149 @@ Status: accepted
 
 ## Context
 
-Nodes that keep local state on their data disks — a persistent-volume
-provisioner, an image or build cache, scratch space — are the same nodes that
-want what ZFS gives and `raid[]` does not: end-to-end checksums, transparent
-compression, and snapshots. [Issue](https://github.com/Corium-OS/Corium/issues)
-asked whether Corium could put ZFS on those data disks.
+Some nodes keep local state on their data disks, for example a
+persistent-volume provisioner, an image or build cache, or scratch space.
+These nodes want what ZFS gives and `raid[]` does not: end-to-end checksums,
+transparent compression, and snapshots.
+[Issue](https://github.com/Corium-OS/Corium/issues) asked whether Corium could
+put ZFS on those data disks.
 
-The request splits into two questions, exactly as software RAID did (see
+The request splits into two questions, as software RAID did (see
 [ADR-0003](0003-software-raid-scope.md)).
 
-**Data disks.** Extra disks to be pooled and mounted somewhere. This can be done
-at first boot, and it is what this ADR adds.
+**Data disks.** These are extra disks that you pool and mount somewhere. This
+can happen at first boot, and this ADR adds it.
 
-**The root filesystem.** By the time the `corium:` block is read, root is
-deployed, mounted, and running the process reading it. Nothing there can move it
-onto ZFS. Root on ZFS additionally needs the module in the initramfs and a
-bootloader integration bootc has no declarative equivalent for. Out of scope,
-for the same reasons a RAID root is.
+**The root filesystem.** When something reads the `corium:` block, root is
+already deployed and mounted, and the process that reads the block runs from
+it. At that point, nothing can move root onto ZFS. Root on ZFS also needs the
+module in the initramfs and a bootloader integration that has no declarative
+equivalent in bootc. This is out of scope, for the same reasons as a RAID
+root.
 
-But ZFS carries a cost RAID does not, and it lands on the image rather than the
+But ZFS has a cost that RAID does not have, and the image pays it, not the
 schema.
 
-- **Fedora ships no ZFS.** It is under the CDDL, which Fedora treats as
-  incompatible with the GPL kernel. There is no package to install; the module
-  must be compiled from source.
-- **Fedora has no stable kABI.** A module built against one kernel will not load
-  on another, and there is no kABI-tracking kmod as there is on RHEL. The module
-  must be built against the *exact* kernel it runs on, and rebuilt on every
-  kernel bump.
+- **Fedora ships no ZFS.** ZFS is under the CDDL, and Fedora treats the CDDL
+  as incompatible with the GPL kernel. No package exists to install. You must
+  compile the module from source.
+- **Fedora has no stable kABI.** A module built against one kernel will not
+  load on another. Unlike RHEL, Fedora has no kmod that tracks the kABI. You
+  must build the module against the *exact* kernel that it runs on, and build
+  it again for each new kernel.
 
 ## Decision
 
-`zfs[]` covers data disks. Pools are created by `corium-agent` at first boot,
-before k0s is installed, on the same footing as `raid[]`: devices are refused if
-they already hold data, an existing pool is adopted rather than rebuilt, and a
-`RequiresMountsFor` drop-in stops k0s starting before the datasets are mounted.
+`zfs[]` covers data disks. `corium-agent` creates the pools at first boot,
+before it installs k0s, with the same rules as `raid[]`:
 
-The ZFS kernel module and userspace are **not in the base image**. They ship in
-a derived variant, `deploy/zfs/`, built on demand — the same shape as the
-appliance image. The agent code (`internal/bootstrap/zfs.go`) is in the base
-binary; only the module and tools it drives are variant-only.
+- It refuses devices that already hold data.
+- It adopts an existing pool and does not rebuild it.
+- A `RequiresMountsFor` drop-in stops k0s from starting before the datasets
+  are mounted.
+
+The ZFS kernel module and userspace are **not in the base image**. They ship
+in a derived variant, `deploy/zfs/`, which you build when you need it. The
+appliance image has the same shape. The agent code
+(`internal/bootstrap/zfs.go`) is in the base binary. Only the module and the
+tools that the code drives are in the variant only.
 
 ## Why the module is baked, not built at runtime
 
-The kABI problem has exactly one clean answer on an immutable OS, and it is the
-one bootc already implies: build the module against the image's kernel, at image
-build time, and ship the two together. An image is one kernel; the module in it
-is that kernel's module; an upgrade replaces both at once by digest. There is no
-window in which a running kernel and its ZFS module disagree, because they are
-never updated independently.
+On an immutable OS, the kABI problem has exactly one clean answer, and bootc
+already implies it. Build the module against the kernel of the image, at image
+build time, and ship the two together. An image has one kernel. The module in
+the image is the module for that kernel. An upgrade replaces both at the same
+time, by digest. The running kernel and its ZFS module never disagree, because
+they never update separately.
 
-DKMS — rebuild the module on the running machine after each kernel update — is
-the mutable-host answer and the wrong one here. Root is read-only, so there is
-nowhere to build; and DKMS keeps its state under `/var`, which on a bootc node is
-machine state seeded once, not a build tree. OpenZFS itself recommends
-precompiled kmod packages over DKMS for fleets. So the variant compiles OpenZFS
-into a `kmod` RPM in a throwaway build stage and installs it; the module lands in
-`/usr/lib/modules/<kver>/extra`, part of the read-only image.
+DKMS rebuilds the module on the running machine after each kernel update. It
+is the answer for a mutable host, and it is wrong here, for two reasons.
+First, root is read-only, so no place exists to build. Second, DKMS keeps its
+state under `/var`. On a bootc node, `/var` is machine state that the install
+seeds once, not a build tree. OpenZFS itself recommends precompiled kmod
+packages over DKMS for fleets. So the variant compiles OpenZFS into a `kmod`
+RPM in a temporary build stage and installs it. The module goes into
+`/usr/lib/modules/<kver>/extra`, which is part of the read-only image.
 
 ## Why a variant image, not the base image
 
-The base image is deliberately minimal (see the `Containerfile` package list).
-ZFS would add three things every node that never touches it should not carry:
+The base image is minimal on purpose (see the package list in the
+`Containerfile`). ZFS would add three things that a node which never uses ZFS
+must not carry:
 
-- **Weight.** The module and userspace, on an image whose reason to exist is
-  being small and replaceable.
-- **Build fragility.** Every kernel bump becomes a compile that can fail when
-  OpenZFS does not yet support the new kernel. Making that a gate on *every*
-  Corium build would couple the whole project's release cadence to OpenZFS's
-  kernel support. As a variant, it gates only the nodes that opted in.
-- **A licensing choice.** Compiling and shipping a CDDL module in a GPL kernel
-  image is a decision an operator should make on purpose, not one baked into the
-  artefact everyone downloads.
+- **Weight.** The module and userspace add size to an image that exists to be
+  small and replaceable.
+- **Build fragility.** Each new kernel becomes a compile, and the compile can
+  fail when OpenZFS does not yet support the new kernel. If that compile gated
+  *every* Corium build, the release cadence of the whole project would depend
+  on the kernel support of OpenZFS. As a variant, it gates only the nodes that
+  opted in.
+- **A licensing choice.** To compile and ship a CDDL module in a GPL kernel
+  image is a decision that an operator must make on purpose. It must not be
+  baked into the artifact that everyone downloads.
 
-Deriving the variant `FROM` the base image is what makes the kABI match free:
-`rpm -q kernel` in the build names the exact kernel the module must target, so
-the compile is against the kernel the image already ships.
+The variant derives `FROM` the base image, and this makes the kABI match free.
+`rpm -q kernel` in the build names the exact kernel that the module must
+target. Thus the compile uses the kernel that the image already ships.
 
 ## Why data-disk ZFS earns its place over cloud-init
 
-The same three reasons `raid[]` does, verbatim in spirit (see ADR-0003):
+The reasons are the same three as for `raid[]` (see ADR-0003):
 
-- **Ordering.** A `runcmd` calling `zpool` races the kubelet. Lose the race and
-  containerd writes into the directory on the root disk that the dataset is then
-  mounted over — invisible afterwards, still consuming root. Corium creates
-  pools before k0s and writes `RequiresMountsFor`, so Kubernetes refuses to start
-  rather than run without its storage.
-- **Refusing to destroy data.** A device already carrying a filesystem, a
-  partition table, or another pool's or array's label stops the bootstrap.
-  `zpool create` by hand takes `-f` and does not ask; Corium makes `wipe: true`
-  the explicit consent and defaults to stopping. A device may belong to a pool
-  or an array, never both, and that is checked at validation.
-- **Idempotency.** A second bootstrap imports and adopts an existing pool rather
-  than recreating it, and reconciles dataset properties rather than duplicating
-  anything.
+- **Ordering.** A `runcmd` that calls `zpool` races the kubelet. If it loses
+  the race, containerd writes into the directory on the root disk. Then the
+  dataset mounts over that directory. After that, the data is invisible but
+  still uses space on root. Corium creates pools before k0s and writes
+  `RequiresMountsFor`. Thus Kubernetes refuses to start instead of running
+  without its storage.
+- **Refusing to destroy data.** If a device already has a filesystem, a
+  partition table, or the label of another pool or array, the bootstrap
+  stops. `zpool create` by hand takes `-f` and does not ask. Corium makes
+  `wipe: true` the explicit consent, and by default it stops. A device can
+  belong to a pool or to an array, never both. Validation makes sure of that.
+- **Idempotency.** A second bootstrap imports and adopts an existing pool and
+  does not create it again. It reconciles dataset properties and does not
+  duplicate anything.
 
 ## Consequences
 
-A node's data pool survives a reboot (imported by scanning the attached disks,
-`cachefile=none`, so it follows its disks onto replacement hardware) but not the
-loss of the node, which is the model the rest of Corium is built around.
+The data pool of a node survives a reboot. The node imports it by a scan of
+the attached disks, with `cachefile=none`, so the pool follows its disks onto
+replacement hardware. The pool does not survive the loss of the node. The rest
+of Corium uses the same model.
 
-Declaring `zfs[]` on a plain base image is a first-boot error — `loading the zfs
-kernel module: ...` — not a silent no-op. Asking for a pool the image cannot
-build should fail loudly.
+If you declare `zfs[]` on a plain base image, first boot fails with an error
+(`loading the zfs
+kernel module: ...`). It does not silently do nothing. A request for a pool
+that the image cannot build must fail loudly.
 
-The variant's build tracks OpenZFS's kernel support. When a Fedora bump outruns
-the pinned OpenZFS release, the fix is a `ZFS_VERSION` bump, not a base-image
-change. If Fedora ever ships ZFS, or bootc grows a declarative root-on-ZFS path,
-this decision should be revisited; the schema and the variant both have room.
+The build of the variant follows the kernel support of OpenZFS. If a new
+Fedora kernel is newer than what the pinned OpenZFS release supports, the fix
+is a new `ZFS_VERSION`, not a change to the base image. If Fedora ships ZFS,
+or bootc adds a declarative root-on-ZFS path, revisit this decision. The
+schema and the variant both have room.
 
 ## Alternatives considered
 
 **ZFS in the base image, behind a build ARG.** A single `Containerfile` with a
-conditional kmod stage. Rejected: it complicates the one file every build reads
-for a feature most nodes do not use, and a stage-selection trick to skip the
-compile when the ARG is off is exactly the kind of cleverness that image is kept
-free of. A separate `deploy/zfs/` matches the appliance precedent and keeps the
-base `Containerfile` a straight read.
+conditional kmod stage. Rejected, because it makes the one file that every
+build reads more complex, for a feature that most nodes do not use. Also, a
+stage-selection trick that skips the compile when the ARG is off is exactly
+the kind of cleverness that the base image avoids. A separate `deploy/zfs/`
+follows the example of the appliance image and keeps the base `Containerfile`
+easy to read from top to bottom.
 
-**DKMS on the node.** Rejected above: no writable root to build on, and `/var`
-is seeded state, not a build tree.
+**DKMS on the node.** Rejected above: no writable root exists to build on, and
+`/var` is seeded state, not a build tree.
 
-**Document a `zpool` recipe, add no field.** Rejected for the reason ADR-0003
-rejected the same option for RAID: it leaves the ordering problem unsolved, and
-the ordering problem is the one that silently corrupts a node.
+**Document a `zpool` recipe, add no field.** Rejected for the reason that
+ADR-0003 rejected the same option for RAID: the ordering problem stays
+unsolved. That is the problem that corrupts a node without any warning.
 
 **Put the data-disk provisioner on the RAID path instead.** `raid[]` already
-exists and covers striping and mirroring. Rejected as a *replacement*, not as an
-alternative to keep: mdadm gives a block device a filesystem is laid on, with no
-checksums and no snapshots, and the workloads that specifically want ZFS want
-those. The two coexist; a node picks per set of disks.
+exists and covers striping and mirroring. Rejected as a *replacement*, but
+kept as an alternative. mdadm gives a block device, and you put a filesystem
+on it. It has no checksums and no snapshots, and the workloads that want ZFS
+want exactly those. The two coexist. A node chooses one for each set of
+disks.

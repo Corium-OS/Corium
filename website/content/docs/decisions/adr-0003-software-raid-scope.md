@@ -14,103 +14,109 @@ Status: accepted
 ## Context
 
 [Issue #5](https://github.com/Corium-OS/Corium/issues/5) asked for a way to
-declare a software RAID array from the `corium:` block, with the explicit
-caveat that it should only be added if it earns its place over a plain
-cloud-init disk setup.
+declare a software RAID array from the `corium:` block. It added an explicit
+condition: add the feature only if it is better than a plain cloud-init disk
+setup.
 
-There are two separate problems behind the one request.
+The one request contains two separate problems.
 
-**Spare disks.** Extra disks on a node, to be mirrored or striped and mounted
-somewhere. This can be done at first boot.
+**Spare disks.** These are extra disks on a node, which you mirror or stripe
+and mount somewhere. This can happen at first boot.
 
-**The root filesystem.** By the time anything reads the `corium:` block, the
-root filesystem is deployed, mounted, and running the process doing the
-reading. Nothing at that point can move it onto an array. A redundant root has
-to be arranged by whatever laid the disk down, which means the installer.
+**The root filesystem.** When something reads the `corium:` block, the root
+filesystem is already deployed and mounted. The process that reads the block
+runs from it. At that point, nothing can move the root filesystem onto an
+array. The tool that wrote the disk must set up a redundant root, and that
+tool is the installer.
 
 ## Decision
 
-`raid[]` covers spare disks. Arrays are created by `corium-agent` at first boot,
-before k0s is installed.
+`raid[]` covers spare disks. `corium-agent` creates the arrays at first boot,
+before it installs k0s.
 
-A RAID root filesystem is documented as an install-time Kickstart procedure,
-verified on hardware, and is not modelled in the schema.
+The documentation describes a RAID root filesystem as a Kickstart procedure at
+install time. We verified this procedure on hardware. The schema does not
+model it.
 
 ## Why spare-disk RAID earns its place
 
-cloud-init has no RAID support. `disk_setup` does partitions and filesystems,
-and the documentation has said for years that mdadm support is anticipated. The
-honest alternative is therefore a `runcmd` block calling `mdadm`, and three
-things make that worse than a field:
+cloud-init has no RAID support. `disk_setup` makes partitions and
+filesystems. For years, the documentation said that mdadm support was
+planned. Thus the real alternative is a `runcmd` block that calls `mdadm`.
+Three things make that worse than a field:
 
-- **Ordering.** `runcmd` races the kubelet. Losing that race means containerd
-  writes its state into the directory on the root disk that the array is then
-  mounted over. The data is invisible afterwards while still consuming the root
-  disk, and the node reports a full disk with no apparent cause. Corium builds
-  arrays before k0s is installed and writes `RequiresMountsFor` into the k0s
-  unit, so Kubernetes refuses to start rather than run without its storage.
-- **Refusing to destroy data.** A device already carrying a filesystem, a
-  partition table, or another array's metadata stops the bootstrap.
+- **Ordering.** `runcmd` races the kubelet. If `runcmd` loses that race,
+  containerd writes its state into the directory on the root disk. Then the
+  array mounts over that directory. After that, the data is invisible but it
+  still uses space on the root disk. The node reports a full disk with no
+  visible cause. Corium builds arrays before it installs k0s. It also writes
+  `RequiresMountsFor` into the k0s unit. Thus Kubernetes refuses to start
+  instead of running without its storage.
+- **Refusing to destroy data.** If a device already has a filesystem, a
+  partition table, or the metadata of another array, the bootstrap stops.
   `mdadm --create` by hand does not ask.
-- **Idempotency.** A second bootstrap adopts an existing array rather than
-  rebuilding it, and rewrites its own fstab line rather than appending another.
+- **Idempotency.** A second bootstrap adopts an existing array and does not
+  rebuild it. It rewrites its own fstab line and does not append another one.
 
 ## Why a RAID root is not a schema field
 
-Not because it does not work. It does: a bootc install onto RAID1 `/` and
-RAID1 `/boot` was verified on a two-disk machine, including detaching the first
-disk and booting from the second, with the arrays degraded and serving.
+The reason is not that it fails. It works. We verified a bootc install onto
+RAID1 `/` and RAID1 `/boot` on a machine with two disks. We detached the first
+disk and booted from the second. The arrays were degraded and still served
+data.
 
-It is not a field because a field would be a lie about *when* the decision is
-taken. The `corium:` block is read by `corium-agent` at first boot, by which
-point the root filesystem is deployed, mounted, and running the process reading
-the block. There is nothing a field could do at that moment.
+It is not a field because a field would give a false idea of *when* the
+decision happens. `corium-agent` reads the `corium:` block at first boot. At
+that point, the root filesystem is already deployed and mounted, and the
+process that reads the block runs from it. A field can do nothing at that
+moment.
 
-Three things additionally have to be done by hand at install time, none of which
-Anaconda does for you, and all of which are documented in `docs/raid.md`:
+You must also do three things by hand at install time. Anaconda does none of
+them for you. `docs/raid.md` documents all of them:
 
 1. Build a second ESP on the mirror disk and register it with the firmware.
-   Anaconda creates one ESP and warns that a drive failure will make the system
-   unbootable; it is right.
-2. Do that in `%post` using disk-level tools only — `%post` writes into the
-   deployment's `/etc` and `/var` do not survive a bootc install.
-3. Add `nofail` to the `/boot/efi` line in `/etc/fstab`. Without it the mount is
-   `RequiredBy=local-fs.target`, so losing the first disk drops the machine into
-   emergency mode with perfectly healthy mirrored filesystems.
+   Anaconda creates one ESP and warns that a drive failure will make the
+   system unbootable. The warning is correct.
+2. Do that in `%post` with disk-level tools only. Files that `%post` writes
+   into the `/etc` and `/var` of the deployment do not survive a bootc
+   install.
+3. Add `nofail` to the `/boot/efi` line in `/etc/fstab`. Without it, the mount
+   is `RequiredBy=local-fs.target`. If the first disk fails, the machine goes
+   into emergency mode, although the mirrored filesystems are fully healthy.
 
-Fedora CoreOS collapses all three into Ignition's `boot_device.mirror`, which
-builds the array in the initramfs and replicates `/boot` per disk. bootc has no
-equivalent. Until it does, this belongs in a procedure, not a field.
+Fedora CoreOS does all three with `boot_device.mirror` in Ignition. It builds
+the array in the initramfs and copies `/boot` to each disk. bootc has no
+equivalent. Until bootc has one, this belongs in a procedure, not a field.
 
 ## Consequences
 
-A node whose root disk dies is reprovisioned rather than repaired. That is the
-model the rest of Corium is built around: the OS is an image, the node is
-cattle, and a replacement boots the same digest.
+If the root disk of a node fails, you reprovision the node. You do not repair
+it. The rest of Corium uses the same model: the OS is an image, the node is
+replaceable, and a replacement boots the same digest.
 
-Spare-disk arrays cover the case that is actually expensive — local state that
-is slow to rebuild — while the cluster covers the case of losing a whole node.
+Spare-disk arrays cover the case that actually costs much: local state that
+is slow to rebuild. The cluster covers the loss of a whole node.
 
-If bootc grows a declarative equivalent of `boot_device.mirror`, this decision
-should be revisited; the schema has room for it.
+If bootc adds a declarative equivalent of `boot_device.mirror`, revisit this
+decision. The schema has room for it.
 
 ## Alternatives considered
 
 **Documentation only, no field.** Ship the mdadm recipe and add no permanent
-key. Rejected: it leaves the ordering problem unsolved, and the ordering problem
-is the one that silently corrupts a node.
+key. Rejected, because the ordering problem stays unsolved. That is the
+problem that corrupts a node without any warning.
 
 **Support a RAID root via Kickstart as a product feature.** Rejected for now,
-but on narrower grounds than "it does not work". It does work, and the procedure
-is documented. What it is not is *declarative*: it needs a hand-written
-kickstart, a `%post` block, and a post-install `fstab` edit, and it applies only
-to the ISO path. Wrapping that in a Corium field would promise a uniformity the
-install paths do not have.
+but for a narrower reason than "it does not work". It works, and the
+procedure is documented. But it is not *declarative*. It needs a hand-written
+kickstart, a `%post` block, and an edit to `fstab` after the install. It also
+applies only to the ISO path. A Corium field for it would promise a uniformity
+that the install paths do not have.
 
-`bootc-generic-growpart.service` also fails permanently on an md root — it reads
-`/sys/class/block/<name>/partition`, which an md device lacks. Harmless, but it
-leaves every such node reporting `degraded`, which is a poor thing to ship as a
-supported configuration.
+`bootc-generic-growpart.service` also always fails on an md root. It reads
+`/sys/class/block/<name>/partition`, and an md device does not have that file.
+The failure causes no damage. But every such node reports `degraded`, and
+that is a bad result to ship as a supported configuration.
 
-If bootc grows a declarative equivalent of `boot_device.mirror`, revisit both
-this and the decision above.
+If bootc adds a declarative equivalent of `boot_device.mirror`, revisit both
+this alternative and the decision above.
