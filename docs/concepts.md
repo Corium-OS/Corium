@@ -1,31 +1,33 @@
 # Concepts
 
-The model underneath everything else. Read this once and the
-[quick start](quickstart.md) and [reference](reference.md) stop being
-surprising.
+This page explains the model that the rest of the documentation uses. Read it
+once, and the [quick start](quickstart.md) and the [reference](reference.md)
+will be easier to follow.
 
 ---
 
 ## The operating system is an image
 
-Most Linux systems are assembled on the machine: install, add packages, edit
-configuration, apply updates. Two machines that started identical drift apart,
-and neither matches what anyone intended.
+On most Linux systems, you build the system on the machine. You install it, add
+packages, edit the configuration, and apply updates. Two machines that start
+identical become different over time, and neither matches the plan.
 
 Corium is built once, as an OCI image, with an ordinary `Containerfile`. That
-image *is* the operating system — pushed to a registry, addressed by digest,
-installed onto machines that are identical by construction.
+image *is* the operating system. You push it to a registry, address it by
+digest, and install it onto machines. Each machine starts identical to the
+others because each one gets the same image.
 
-You already own the tools: inspect it with `podman`, scan it with your scanner,
-promote it by moving a tag. And because two builds share most of their layers,
-upgrading transfers only the difference — 214 MB measured on a 2.3 GB image.
+You already have the tools for it. You inspect the image with `podman`, scan it
+with your scanner, and promote it when you move a tag. Two builds share most of
+their layers, so an upgrade transfers only the difference. On a 2.3 GB image, we
+measured 214 MB.
 
-The mechanism is [bootc](https://bootc.dev/), which boots a container image as
-a system on top of OSTree.
+The mechanism is [bootc](https://bootc.dev/). It boots a container image as a
+system on top of OSTree.
 
 ## The filesystem contract
 
-Nearly every mistake in this kind of system comes from getting this wrong.
+Most mistakes in this type of system come from a wrong model of the filesystem.
 
 ```
                   ┌──────────────── the image ────────────────┐
@@ -40,25 +42,27 @@ Nearly every mistake in this kind of system comes from getting this wrong.
                   └───────────────────────────────────────────┘
 ```
 
-**`/usr` is the image.** Nothing writes here at runtime, and all of it is
-replaced when you boot a new image. That is why the k0s binary lives here, and
-why upgrading Kubernetes means upgrading the OS.
+`/usr` is the image. Nothing writes to it at runtime. When you boot a new image,
+all of `/usr` is replaced. The k0s binary in `/usr` is the default Kubernetes
+version of the image. A signed system extension can put another version over it,
+as [shown below](#kubernetes-ships-with-the-os).
 
-**`/etc` is merged.** OSTree reconciles the image's defaults against the
-machine's edits. A file you have edited stops tracking the image's version of
-it — convenient, and worth remembering.
+`/etc` is merged. OSTree compares the defaults of the image with the edits on
+the machine and combines them. If you edit a file, that file stops following the
+version in the image. This is useful, but you must remember it.
 
-**`/var` is yours.** The image never touches it. This is what makes upgrades
-safe and rollbacks partial: rolling back the OS does not roll back what the
-cluster wrote.
+`/var` is yours. The image never changes it. For this reason, upgrades are safe
+and rollbacks are partial. When you roll back the OS, the data that the cluster
+wrote stays.
 
-One corollary catches people out: you cannot ship data in `/var` by baking it
-into the image. It is seeded once at install and never again. State directories
-are declared in `tmpfiles.d` instead.
+One result of this surprises people. You cannot ship data in `/var` by putting
+it into the image. The installer writes `/var` once, at install time, and never
+again. You declare state directories in `tmpfiles.d` instead.
 
 ## First boot, exactly once
 
-A generic image has to become *this* node. That is `corium-agent`, run once.
+A generic image must become one specific node. `corium-agent` does this, and it
+runs once.
 
 ```
   ┌─ configuration sources, most specific first ─┐
@@ -82,43 +86,43 @@ A generic image has to become *this* node. That is `corium-agent`, run once.
                         sees the marker and does nothing
 ```
 
-Once is the operative word. Re-running cluster bootstrap on a node that already
-joined destroys data, so the marker is written last and checked first — and it
-lives in `/var`, which survives upgrades.
+"Once" is the important word. If cluster bootstrap runs again on a node that
+already joined, it destroys data. For this reason, the agent writes the marker
+last and reads it first. The marker is in `/var`, so it stays after upgrades.
 
-The agent fails loudly and early. It validates the whole configuration before
-changing anything and reports every problem at once, because a node that stops
-with a reason in the journal beats one that half-joins a cluster and looks
-healthy.
+The agent stops early and reports clearly. It validates the whole configuration
+before it changes anything, and it reports all problems at the same time. A node
+that stops with a reason in the journal is better than a node that joins a
+cluster halfway and looks healthy.
 
-Two details follow from the same reasoning. A node's name is **derived from the
-machine ID**, not randomised: a random name would register a new node on every
-reboot and leave the old one behind. And a source that fails for any reason
-other than being absent stops the search, because falling through to a
-baked-in default when your intent is merely unreachable is how a node joins the
-wrong cluster.
+Two more details come from the same reasoning. First, the agent derives the
+name of a node from the machine ID. It does not make a random name, because a
+random name registers a new node at each reboot and leaves the old one behind.
+Second, if a source fails for a reason other than "absent", the search stops.
+Your configuration can be only unreachable. If the search then continues to a
+default in the image, the node can join the wrong cluster.
 
 ### What a machine does on its very first boot
 
-Which of these happens is decided entirely by the document the chain found. It
-is worth reading once, because the difference between the last two rows costs
-a `cctl reset` to discover the hard way.
+The document that the chain found decides which of these happens. Read this
+table once. If you confuse the last two rows, you discover the difference with
+a `cctl reset`.
 
 | The document says | The machine does |
 |---|---|
-| nothing — no `corium:` block anywhere | No cluster, and a daemon waiting to be told what the machine is. Somebody wanted a host and has one; somebody who did not can claim it from the console |
-| a `role`, no `api:` | Builds that node, unattended. Claimable by pairing code until it does, and not afterwards |
-| a `role` and an `operatorCA` | Builds that node, unattended, and is already owned by the CA it names |
-| a `role` and `api.enabled: true` | Waits to be claimed, then **builds that node at once** |
-| `api.enabled: true` and **no role** | Waits to be claimed *and* to be told what it is. Builds nothing until both happen |
+| nothing, no `corium:` block anywhere | No cluster. A daemon waits for someone to tell it what the machine is. If somebody wanted a host, they have one. If not, they can claim it from the console |
+| a `role`, no `api:` | Builds that node, without an operator. You can claim it with a pairing code until the build starts, but not after |
+| a `role` and an `operatorCA` | Builds that node, without an operator. The CA that it names already owns it |
+| a `role` and `api.enabled: true` | Waits for a claim, then builds that node at once |
+| `api.enabled: true` and no role | Waits for a claim *and* for someone to tell it what it is. Builds nothing until both happen |
 
-The fourth row is the one to be deliberate about. Claiming is what releases the
-bootstrap, so `cctl enroll` against such a node is not a reservation — it is
-the start of a cluster, and undoing it means `cctl reset`. The node says so and
-asks before it goes ahead.
+Be careful with the fourth row. A claim releases the bootstrap. So
+`cctl enroll` against such a node is not a reservation. It starts a cluster, and
+to undo it you must run `cctl reset`. The node tells you this and asks before it
+continues.
 
-The fifth row is how a whole fleet is described by one identical cloud-config
-that carries no secrets and names no machine:
+With the fifth row, one identical cloud-config describes a whole fleet. The
+document carries no secrets and names no machine:
 
 ```yaml
 #cloud-config
@@ -127,66 +131,67 @@ corium:
     enabled: true
 ```
 
-Everything machine-specific then arrives over the API, with
-`cctl enroll --config` or `cctl apply`. Writing `api.awaitConfig: true` says the
-same thing out loud, and is the way to ask for the wait in a document that does
-name a role.
+All machine-specific configuration then comes over the API, with
+`cctl enroll --config` or `cctl apply`. `api.awaitConfig: true` says the same
+thing explicitly. Use it to ask for the wait in a document that names a role.
 
 ## Configuration is cloud-init, not a new API
 
-The `corium:` block rides inside an ordinary cloud-config — the mechanism every
-cloud, hypervisor and PXE setup already speaks. `role` is the only required
-field — and a node that is waiting to be told what it is may leave even that
-out, as [above](#first-boot-exactly-once).
+The `corium:` block is part of an ordinary cloud-config. Every cloud, hypervisor
+and PXE setup already supports cloud-config. `role` is the only required field.
+A node that waits for someone to tell it what it is can leave out even `role`,
+as described [above](#first-boot-exactly-once).
 
-Everything the schema does not model stays reachable through `k0s.patch`,
-applied verbatim. The rule the project holds itself to: **no k0s feature is
-unreachable; some have no shorter name.** See
+Everything that the schema does not model is available through `k0s.patch`,
+which Corium applies verbatim. The project follows this rule: you can reach
+every k0s feature, but some features have no shorter name. See
 [feature support](features.md).
 
-There *is* a management API, and it does not contradict that heading, because
-the two answer different questions. Cloud-init describes what a machine should
-become, once, before it exists. The API answers what a running machine is and
-does the handful of things an operator needs afterwards — read it, restart k0s,
-upgrade it, take it out of service. It cannot write a `corium:` block, and a
-node that needs different configuration is reprovisioned rather than edited.
+There *is* a management API. It does not contradict the heading of this
+section, because the two answer different questions. Cloud-init describes what
+a machine will become, once, before it exists. The API tells you what a running
+machine is. It also does the few tasks that an operator needs after that: read
+the node, restart k0s, upgrade it, and take it out of service. The API cannot
+write a `corium:` block. If a node needs a different configuration, you
+reprovision it. You do not edit it.
 
-It is off unless a node's configuration asks for it. See [cctl](cli.md), and
-[ADR 4](adr/0004-management-api.md) for why it is shaped that way.
+The API is off unless the configuration of a node asks for it. See
+[cctl](cli.md), and [ADR 4](adr/0004-management-api.md) for the reasons for its
+design.
 
 ## Kubernetes ships with the OS
 
 [k0s](https://k0sproject.io/) is a single static binary with no host
-dependencies that keeps its state under `/var/lib/k0s` — which fits the
-filesystem contract exactly: binary in `/usr`, state in `/var`.
+dependencies. It keeps its state under `/var/lib/k0s`. This matches the
+filesystem contract: the binary is in `/usr`, and the state is in `/var`.
 
-The image carries a Kubernetes version, but no longer decides it. That binary
-in `/usr` is a *floor* — what a node runs when it is told nothing, and what it
-falls back to — and a signed system extension can overlay it with another
-version from the window the image supports. So the OS and Kubernetes move on
-separate axes: [rolling a new image](upgrades.md) upgrades the OS, and
-`kubernetes.version` or `cctl k8s upgrade` moves Kubernetes, without either
-dragging the other along. Neither is ever written in place. See
+The image carries a Kubernetes version, but that version is not fixed. The
+binary in `/usr` is a *floor*. A node runs it when the configuration names no
+version, and it is what the node falls back to. A signed system extension can put
+another version over it, from the window of versions that the image supports.
+So the OS and Kubernetes move on separate axes. [A new image](upgrades.md)
+upgrades the OS. `kubernetes.version` or `cctl k8s upgrade` changes Kubernetes.
+Neither one forces the other to change, and neither one writes in place. See
 [ADR 10](adr/0010-kubernetes-version-axis.md).
 
 ## What Corium is not
 
-It does not manage fleets, fork k0s, or invent a configuration language. Those
-omissions are deliberate: the project is an opinionated integration, and much
-of its value is in what it declines to do.
+Corium does not manage fleets, fork k0s, or invent a configuration language.
+These limits are intentional. The project is an integration with strong
+opinions, and much of its value comes from what it does not do.
 
-The management API is not an exception to the first of those. It is one daemon
-per node, answering for that node, with no registry, no inventory and nothing
-that reconciles. Upgrading a cluster is a `cctl` loop over addresses you
-supplied, running on your machine — the sequencing lives with the operator
-rather than on any node. The reasoning for each is in
+The management API is not an exception to the first limit. It is one daemon
+per node, and it answers only for that node. It has no registry, no inventory,
+and no reconcile loop. A cluster upgrade is a `cctl` loop over addresses that
+you supply, and it runs on your machine. The operator controls the order, not a
+node. The reasons for each limit are in
 [feature support](features.md#out-of-scope).
 
 ---
 
 ## Next
 
-- [Quick start](quickstart.md) — put this into practice on a real node
-- [Examples](examples.md) — a complete document for each common node shape
-- [Configuration reference](reference.md) — every field, and what Corium does with it
-- [Comparison](comparison.md) — how this model differs from Talos, Kairos and the rest
+- [Quick start](quickstart.md): use this model on a real node
+- [Examples](examples.md): a complete document for each common node shape
+- [Configuration reference](reference.md): every field, and what Corium does with it
+- [Comparison](comparison.md): how this model is different from Talos, Kairos and others

@@ -1,50 +1,53 @@
 # A desktop PC, from a USB stick
 
-A spare tower or mini-PC turned into a single-node Kubernetes cluster. Two USB
-sticks: one installs the operating system, the other tells the node what it is.
+This page turns a spare tower or mini-PC into a single-node Kubernetes cluster.
+You need two USB sticks. One stick installs the operating system. The other
+stick tells the node what it is.
 
-For a dedicated server reached through a provider's rescue system, see
-[rescue mode](rescue.md); for a VM, [Proxmox](proxmox.md) or the
+For a dedicated server that you reach through the rescue system of a provider,
+see [rescue mode](rescue.md). For a VM, see [Proxmox](proxmox.md) or the
 [quick start](../quickstart.md).
 
-> Unlike [Proxmox](proxmox.md), no CI run backs this page — nothing in the
-> project boots the ISO on physical hardware. If your machine disagrees with a
-> step here, that is worth an issue.
+> A CI run tests the [Proxmox](proxmox.md) page, but no CI run tests this page.
+> Nothing in the project boots the ISO on physical hardware. If your machine
+> does not behave as a step here says, open an issue.
 
 ## Before you start
 
 - **A 64-bit x86 machine that boots UEFI.** Corium boots UEFI only.
-- **A whole disk you are willing to lose.** The installer wipes its target. If
+- **A whole disk that you can lose.** The installer erases its target disk. If
   the machine has more than one disk, disconnect the others.
-- **Two USB sticks.** 4 GB or more for the ISO, which is about 2.4 GB; any size
-  for the seed.
-- **Wired ethernet.** Corium configures no wireless.
-- **4 GB of RAM and 32 GB of disk**, 8 GB of RAM more comfortably.
+- **Two USB sticks.** The stick for the ISO must be 4 GB or more, because the
+  ISO is about 2.4 GB. The stick for the seed can be any size.
+- **Wired ethernet.** Corium does not configure wireless.
+- **4 GB of RAM and 32 GB of disk**. 8 GB of RAM is better.
 - **A public SSH key.**
 
 ## How the install is shaped
 
 Two separate things happen:
 
-1. **The ISO lays down the operating system.** Unattended — Anaconda deploys the
-   bootc image embedded in it, with no prompts and no kickstart to write. It
-   never asks what the node is.
-2. **cloud-init configures the node on its first real boot.** That is where the
-   `corium:` block and your login account come from.
+1. **The ISO installs the operating system.** This step needs no operator.
+   Anaconda deploys the bootc image that is inside the ISO. It shows no prompts,
+   and you do not write a kickstart file. It never asks what the node is.
+2. **cloud-init configures the node on its first real boot.** cloud-init applies
+   the `corium:` block and creates your login account.
 
-A desktop PC has no metadata service for step 2, so you supply it from a
-**NoCloud seed**: a USB stick whose filesystem is labelled `CIDATA`. It is the
-first datasource Corium probes, and the only offline one. Installing without one
-is allowed, and [recoverable](#if-you-install-without-a-seed).
+A desktop PC has no metadata service for step 2. You supply the data from a
+**NoCloud seed**: a USB stick with a filesystem that has the label `CIDATA`.
+Corium looks for this datasource first, and it is the only datasource that works
+offline. You can also install without a seed, and that state is
+[recoverable](#if-you-install-without-a-seed).
 
 ---
 
 ## 1. Write the ISO to a stick
 
-Fetch `corium-0.5.0-x86_64.iso` and check it — [downloads](downloads.md) covers
-all three routes and the verification.
+Download `corium-0.5.0-x86_64.iso` and verify it. [downloads](downloads.md)
+gives all three download routes and the verification steps.
 
-**`dd` to the wrong device destroys that device.** Run the listing first:
+**Run the listing command first. If `dd` writes to the wrong device, it destroys
+that device.**
 
 ```bash
 # linux
@@ -59,11 +62,12 @@ diskutil unmountDisk /dev/diskN
 sudo dd if=corium-0.5.0-x86_64.iso of=/dev/rdiskN bs=4m
 ```
 
-`/dev/rdiskN` rather than `/dev/diskN` on macOS: the raw device is roughly an
-order of magnitude faster for a write this size.
+On macOS, use `/dev/rdiskN` and not `/dev/diskN`. For a write of this size, the
+raw device is approximately ten times faster.
 
-A graphical writer works too — Rufus, balenaEtcher, GNOME Disks — as long as it
-writes the image verbatim. In Rufus that is **DD image mode**, not ISO mode.
+A graphical writer also works, for example Rufus, balenaEtcher, or GNOME Disks.
+The writer must copy the image exactly as it is. In Rufus, use **DD image mode**,
+not ISO mode.
 
 ## 2. Write the configuration seed
 
@@ -83,17 +87,18 @@ users:
 ```
 
 `role` is the only required field. See [examples](../examples.md) for workers,
-add-ons and a custom CNI, and the [reference](../reference.md) for every field.
-From a checkout, validate it before you walk to the machine. Validation is
-offline and reports every problem at once, and `mise exec` supplies the pinned
-Go toolchain, so this works on a machine that has never installed Go:
+add-ons, and a custom CNI. See the [reference](../reference.md) for every field.
+If you have a checkout of the repository, validate the file before you go to the
+machine. Validation works offline and reports all problems at once. `mise exec`
+supplies the pinned Go toolchain, so the command works on a machine that never
+installed Go:
 
 ```bash
 mise exec -- go run ./cmd/corium-agent validate node.yaml
 ```
 
-Two files on a filesystem labelled `CIDATA`. The label is what cloud-init looks
-for; nothing else about the stick matters.
+Put two files on a filesystem with the label `CIDATA`. cloud-init looks for this
+label. Nothing else about the stick is important.
 
 ```bash
 # linux. /dev/sdY is the *second* stick, not the one holding the ISO.
@@ -113,13 +118,14 @@ cp node.yaml /Volumes/CIDATA/user-data
 printf 'instance-id: corium-01\nlocal-hostname: corium-01\n' > /Volumes/CIDATA/meta-data
 ```
 
-Both at the root, both named exactly that. `meta-data` may be nearly empty but
-must exist, or cloud-init rejects the seed.
+Both files must be at the root, with exactly these names. `meta-data` can be
+almost empty, but it must exist. If it does not exist, cloud-init rejects the
+seed.
 
 ## 3. Set up the firmware
 
-Enter the setup screen — usually `Del`, `F2` or `F12` at power-on — and settle
-three things:
+Open the setup screen. Usually you press `Del`, `F2`, or `F12` at power-on. Set
+these three values:
 
 | Setting | Value | Why |
 |---|---|---|
@@ -127,31 +133,32 @@ three things:
 | Boot order | **Internal disk first, USB second** | See below |
 | Secure Boot | Off, if the install does not boot | See below |
 
-**Disk first, USB second** is not a typo. An empty disk has no UEFI boot entry,
-so the firmware falls through to the stick and installs; afterwards the disk has
-an entry and wins. With the stick first, the machine reinstalls itself on every
-reboot, and the install being unattended, nothing on screen says so.
+**Disk first, USB second** is correct. An empty disk has no UEFI boot entry, so
+the firmware goes to the stick and installs. After the install, the disk has an
+entry and boots first. If the stick is first, the machine installs itself again
+at every reboot. The install shows no prompts, so nothing on the screen tells
+you.
 
-**Secure Boot** is unverified on bare metal. The image ships Fedora's signed
-shim, so it may well work; if the machine refuses to boot after the install,
-turn it off.
+**Secure Boot** is not tested on bare metal. The image includes the signed shim
+from Fedora, so Secure Boot can work. If the machine does not boot after the
+install, turn Secure Boot off.
 
 ## 4. Install
 
-Plug in **only the ISO stick** — one fewer disk for the installer to consider —
-and power the machine on. Anaconda reboots when it is done, a few minutes on an
-SSD. Pull the stick during that reboot.
+Connect **only the ISO stick**, and turn on the machine. The installer then has
+one less disk to look at. Anaconda reboots when it is done, after a few minutes
+on an SSD. Remove the stick during that reboot.
 
 ## 5. Configure it
 
-Plug in the seed stick and boot.
+Connect the seed stick and boot the machine.
 
-cloud-init finds `CIDATA`, creates your user, and `corium-bootstrap` reads the
-`corium:` block and brings k0s up. A minute or so from power-on to a `Ready`
-node. The console banner reports the node's role, its cluster and whether k0s is
-running.
+cloud-init finds `CIDATA` and creates your user. Then `corium-bootstrap` reads
+the `corium:` block and starts k0s. The node is `Ready` approximately one minute
+after power-on. The console banner shows the role of the node, its cluster, and
+whether k0s is running.
 
-The seed stick can come out once the node is up, or stay in.
+When the node is up, you can remove the seed stick or leave it in.
 
 ## 6. Check it worked
 
@@ -160,18 +167,19 @@ ssh core@<the node's address>
 sudo k0s kubectl get nodes
 ```
 
-For the kubeconfig and everything after it, carry on with the
-[quick start](../quickstart.md#4-check-it-worked). Managing the node with
-[`cctl`](../cli.md) is a separate step: the management API is off by default and
-a node has to be claimed before it answers.
+For the kubeconfig and the next steps, continue with the
+[quick start](../quickstart.md#4-check-it-worked). Management of the node with
+[`cctl`](../cli.md) is a separate step. The management API is off by default,
+and you must claim a node before it answers.
 
 ---
 
 ## If you install without a seed
 
-You do not have to. The ISO installs a node that then **waits to be told what it
-is**, prints a pairing code on its console, and can be claimed from your own
-machine. The seed stick is the unattended path, not the only one.
+The seed is optional. Without a seed, the ISO installs a node that waits for its
+configuration. The node shows a pairing code on its console, and you can claim
+it from your own machine. The seed stick is the path that needs no operator, but
+it is not the only path.
 
 | | After the install |
 |---|---|
@@ -180,7 +188,8 @@ machine. The seed stick is the unattended path, not the only one.
 | k0s | Not started. A node nobody has claimed is in no cluster |
 | Accounts | None. Corium creates no default user, and `PermitRootLogin` is `no` |
 
-The console carries the code and the fingerprint to check the node against:
+The console shows the code and the fingerprint. Use the fingerprint to make
+sure that you claim the correct node:
 
 ```
   This node is not part of a cluster.
@@ -191,62 +200,63 @@ The console carries the code and the fingerprint to check the node against:
   cctl enroll 192.168.0.42 --code K4M2-8QT9
 ```
 
-From your own machine, with an operator PKI already made
-([cctl](../cli.md#2-from-nothing-to-a-managed-node) covers making one):
+Run this command from your own machine. You must already have an operator PKI.
+[cctl](../cli.md#2-from-nothing-to-a-managed-node) shows how to make one.
 
 ```bash
 cctl enroll 192.168.0.42 --code K4M2-8QT9 --config node.yaml
 ```
 
-`node.yaml` is the same document as the seed in step 2, `users:` included — which
-is what gives the machine an account it never had. The node pins your CA, builds
-the role, and comes up as a cluster.
+`node.yaml` is the same document as the seed in step 2, with the `users:` block.
+The `users:` block gives the machine its first account. The node pins your CA,
+builds the role, and starts as a cluster.
 
 This is the default since [ADR 11](../adr/0011-api-on-by-default.md).
-Before it, a machine installed this way had no account, no API and no way in
-short of another trip with a USB stick.
+Before ADR 11, a machine installed this way had no account and no API. The only
+way in was to go back to the machine with a USB stick.
 
-**The seed stick still works, and is still the better choice when you have one.**
-It is unattended: no console to read, no code to type, and the node is owned by
-your CA from its first boot rather than for the minute between boot and being
-claimed. Plug a `CIDATA` stick in and reboot — because no bootstrap marker was
-written, step 5 runs as if it were the first boot.
+**The seed stick still works, and it is still the better choice when you have
+one.** It needs no operator: you read no console and type no code. Your CA owns
+the node from its first boot, not only after the minute between boot and claim.
+Connect a `CIDATA` stick and reboot. The node wrote no bootstrap marker, so
+step 5 runs as if it were the first boot.
 
-Two limits worth knowing before you rely on enrolment:
+Know these two limits before you rely on enrolment:
 
-- **It closes when the node bootstraps.** A node that has built its role cannot
-  be claimed, whatever its configuration says. That is deliberate — it is what
-  stops a machine running your workloads from being taken over by whoever reads
-  its screen — and it means a node configured by seed is claimable only during
-  the minute it takes to come up. Afterwards, taking it over means `cctl reset`.
-- **It needs the console.** The pairing code is on a channel an attacker on the
-  network does not have, which is the whole of its security. On a headless
-  machine with no IPMI, that channel is a monitor you have to go and plug in.
+- **It closes when the node bootstraps.** You cannot claim a node that built its
+  role, whatever its configuration says. This is intentional. It stops a person
+  who reads the screen from taking over a machine that runs your workloads. As a
+  result, you can claim a node configured by seed only during the minute that
+  it takes to come up. After that, you must use `cctl reset` to take it over.
+- **It needs the console.** The pairing code is on a channel that an attacker on
+  the network cannot see. All of its security comes from this. On a headless
+  machine with no IPMI, that channel is a monitor that you must go and connect.
 
-`corium.config=<url>` on the kernel command line is the third option and the
-weakest: it configures the node but creates no account, so you end up in a
-cluster you still cannot log into.
+`corium.config=<url>` on the kernel command line is the third option, and the
+weakest. It configures the node but creates no account. The result is a cluster
+that you cannot log in to.
 
 ---
 
 ## What goes wrong on a desktop that does not on a hypervisor
 
-**It installs itself again on every boot.** The boot order. Disk first, USB
-second, and pull the ISO stick once the install is done.
+**It installs itself again on every boot.** The boot order causes this. Put the
+disk first and USB second, and remove the ISO stick after the install.
 
 **The node comes up with no user and no cluster.** cloud-init did not find the
-seed. Check the filesystem label is exactly `CIDATA`, that both `user-data` and
-`meta-data` sit at the root of it, and that `user-data` starts with the
-`#cloud-config` line. `sudo cloud-init query --all` on the node says which
-datasource it settled on.
+seed. Make sure that the filesystem label is exactly `CIDATA`. Make sure that
+`user-data` and `meta-data` are both at the root of the filesystem. Make sure
+that `user-data` starts with the `#cloud-config` line. On the node,
+`sudo cloud-init query --all` shows which datasource cloud-init selected.
 
-**The node has an address but resolves no names.** A static address configured
-without a resolver. Leave the machine on DHCP for the first boot; if it has to
-be static, it is cloud-init's `network:` block that sets it, and that block has
-to carry a nameserver of its own.
+**The node has an address but resolves no names.** The cause is a static address
+without a resolver. Keep the machine on DHCP for the first boot. If the address
+must be static, set it in the `network:` block of cloud-init, and give that
+block its own nameserver.
 
-**Nothing on the console after the firmware.** Almost always the boot mode:
-a firmware in CSM/legacy finds no bootloader on a UEFI-only image, and says so
-in a way that reads as a dead machine.
+**Nothing on the console after the firmware.** The cause is almost always the
+boot mode. A firmware in CSM/legacy mode finds no bootloader on a UEFI-only
+image. Its message makes the machine look dead.
 
-The rest is indexed by symptom in [troubleshooting](../troubleshooting.md).
+For other problems, see [troubleshooting](../troubleshooting.md). It lists them
+by symptom.

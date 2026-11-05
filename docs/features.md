@@ -1,17 +1,17 @@
 # Feature support
 
-What Corium models, what it passes through, and what it deliberately does
-not do.
+This page lists what Corium models, what it passes through, and what it does
+not do on purpose.
 
-This page exists so you can tell, before committing to Corium, whether it will
-get in your way. The short answer: Corium models the settings most clusters
+Read this page before you commit to Corium, to find out if Corium will get in
+your way. The short answer: Corium models the settings that most clusters
 need, and **everything else in k0s stays reachable** through a passthrough
-patch. There is no feature you can configure in k0s that Corium prevents you
-from configuring — only features it does not give a shorter name to.
+patch. Corium does not prevent you from configuring any k0s feature. It only
+gives a shorter name to some of them and not to others.
 
-Anything describing k0s behaviour here links to the
+Each description of k0s behavior on this page links to the
 [official k0s documentation](https://docs.k0sproject.io/). Corium does not fork
-or patch k0s; when the two disagree, k0s is right and this page is stale.
+or patch k0s. If the two disagree, k0s is right and this page is out of date.
 
 ---
 
@@ -19,11 +19,11 @@ or patch k0s; when the two disagree, k0s is right and this page is stale.
 
 | Level | Meaning |
 |---|---|
-| **Modelled** | A first-class field in the `corium:` schema. Validated, with defaults, and documented in the [configuration reference](reference.md) |
-| **Passthrough** | Not modelled, but reachable verbatim through `k0s.patch`. Corium neither validates nor interferes |
-| **Out of scope** | Deliberately not supported. Each has a reason below |
+| **Modelled** | A first-class field in the `corium:` schema. Corium validates it, gives it a default, and documents it in the [configuration reference](reference.md) |
+| **Passthrough** | Not modelled, but reachable verbatim through `k0s.patch`. Corium does not validate it or change it |
+| **Out of scope** | Not supported, on purpose. Each one has a reason below |
 
-Passthrough is not a lesser tier for things that were forgotten — see
+Passthrough is not a lower tier for forgotten settings. See
 [why a setting ends up there](#passthrough).
 
 ---
@@ -34,12 +34,12 @@ Passthrough is not a lesser tier for things that were forgotten — see
 
 | Feature | Field | Notes |
 |---|---|---|
-| Single-node cluster | `role: single` | Implies SQLite storage; cannot gain nodes later |
+| Single-node cluster | `role: single` | Implies SQLite storage. You cannot add nodes later |
 | Control plane only | `role: controller` | Runs no workloads |
-| Control plane plus workloads | `role: controller+worker` | Corium passes `--no-taints`, so the node actually schedules |
+| Control plane plus workloads | `role: controller+worker` | Corium passes `--no-taints`, so the node runs workloads |
 | Worker | `role: worker` | Requires a join token |
-| Cluster name | `cluster.name` | Reaches generated kubeconfig contexts |
-| API endpoint | `cluster.endpoint` | Becomes `spec.api.externalAddress`, and is added to the certificate |
+| Cluster name | `cluster.name` | Appears in the generated kubeconfig contexts |
+| API endpoint | `cluster.endpoint` | Becomes `spec.api.externalAddress`. Corium also adds it to the certificate |
 | Extra certificate names | `cluster.subjectAltNames` | Appended to `spec.api.sans` |
 
 ### Networking
@@ -48,16 +48,16 @@ Passthrough is not a lesser tier for things that were forgotten — see
 |---|---|---|
 | Pod address range | `network.podCIDR` | Default `10.244.0.0/16`, matching k0s |
 | Service address range | `network.serviceCIDR` | Default `10.96.0.0/12`, matching k0s |
-| kube-router | `network.cni: kuberouter` | k0s's default: networking, policy and service proxy in one component |
+| kube-router | `network.cni: kuberouter` | The k0s default: networking, policy, and service proxy in one component |
 | Calico | `network.cni: calico` | |
-| Bring your own CNI | `network.cni: custom` | k0s deploys nothing; the node stays `NotReady` until you install one. [Worked example with Cilium](cilium.md) |
+| Bring your own CNI | `network.cni: custom` | k0s deploys nothing. The node stays `NotReady` until you install a CNI. [Worked example with Cilium](cilium.md) |
 
 ### Storage
 
 | Feature | Field | Notes |
 |---|---|---|
 | Embedded etcd | `storage.type: etcd` | Default for every multi-node role |
-| SQLite | `storage.type: sqlite` | Rendered as k0s's `kine`. Single controller only, and Corium rejects it with `role: controller` |
+| SQLite | `storage.type: sqlite` | Rendered as the k0s `kine`. For a single controller only. Corium rejects it with `role: controller` |
 
 ### High availability
 
@@ -65,8 +65,8 @@ Passthrough is not a lesser tier for things that were forgotten — see
 |---|---|---|
 | Virtual IP for the control plane | `ha.enabled`, `ha.virtualIP` | k0s [control plane load balancing](https://docs.k0sproject.io/stable/cplb/) with keepalived. No external load balancer needed |
 | VRRP group | `ha.virtualRouterID` | Must be unique in the broadcast domain |
-| VRRP password | `ha.authPass`, `ha.authPassFrom` | Capped at eight characters, because keepalived silently truncates beyond that |
-| Interface | `ha.interface` | Defaults to the one holding the default route |
+| VRRP password | `ha.authPass`, `ha.authPassFrom` | Eight characters at most, because keepalived cuts longer passwords without a warning |
+| Interface | `ha.interface` | Defaults to the interface that holds the default route |
 | Non-multicast networks | `ha.unicastPeers` | Required on most clouds |
 
 ### Nodes
@@ -74,9 +74,9 @@ Passthrough is not a lesser tier for things that were forgotten — see
 | Feature | Field | Notes |
 |---|---|---|
 | Node name | `node.name` | Derived from the machine ID when unset |
-| Labels | `node.labels` | Sorted before reaching the command line, so identical input gives an identical command |
+| Labels | `node.labels` | Corium sorts them before they reach the command line, so identical input gives an identical command |
 | Taints | `node.taints` | `key`, `value`, `effect` |
-| Node address | `wireguard[].nodeAddress` | Set automatically with HA (excluding the virtual IP), or pinned to a WireGuard overlay interface |
+| Node address | `wireguard[].nodeAddress` | Set automatically with HA (without the virtual IP), or pinned to a WireGuard overlay interface |
 
 ### Joining
 
@@ -84,14 +84,14 @@ Passthrough is not a lesser tier for things that were forgotten — see
 |---|---|---|
 | Inline token | `join.token` | Or minted and rendered for you by `cctl worker-config` |
 | Token from a URL or file | `join.tokenFrom` | HTTPS only |
-| Waiting for a token to appear | `join.tokenFrom.waitFor` | Lets every node start at once instead of in sequence |
+| Waiting for a token to appear | `join.tokenFrom.waitFor` | Every node can start at the same time instead of one after another |
 | Bearer auth for that URL | `join.tokenFrom.authFile` | |
 
 ### Add-ons
 
 | Feature | Field | Notes |
 |---|---|---|
-| Helm charts at bootstrap | `addons[]` | Rendered into [`spec.extensions.helm`](https://docs.k0sproject.io/stable/helm-charts/). No Helm binary, no in-cluster operator |
+| Helm charts at bootstrap | `addons[]` | Rendered into [`spec.extensions.helm`](https://docs.k0sproject.io/stable/helm-charts/). No Helm binary and no in-cluster operator |
 | Chart repositories | `addons[].repository` | |
 | Chart values | `addons[].values` | Converted to the YAML string k0s expects |
 
@@ -99,133 +99,134 @@ Passthrough is not a lesser tier for things that were forgotten — see
 
 | Feature | Field | Notes |
 |---|---|---|
-| Plain Kubernetes YAML at bootstrap | `manifests[]` | Written to `/var/lib/k0s/manifests/<stack>/` before k0s starts, for objects with no chart of their own. See [Manifest Deployer](https://docs.k0sproject.io/stable/manifests/) |
-| Several files, several documents | `manifests[].files` | One file may hold documents separated by `---`, the way kubectl accepts them |
-| Checked offline | `manifests[].files[].content` | Parsed as YAML by `corium-agent validate`; Corium has no schema for a Kubernetes object and does not pretend to |
-| `.yml` refused | n/a | The deployer reads `.yaml` and no other extension, so `.yml` would be skipped in silence. Corium rejects it instead |
-| Reconciling and pruning | n/a | k0s's, not Corium's: it watches each stack and prunes the resources of a file that is removed |
+| Plain Kubernetes YAML at bootstrap | `manifests[]` | Written to `/var/lib/k0s/manifests/<stack>/` before k0s starts. Use it for objects that have no chart. See [Manifest Deployer](https://docs.k0sproject.io/stable/manifests/) |
+| Several files, several documents | `manifests[].files` | One file can hold documents separated by `---`, as kubectl accepts them |
+| Checked offline | `manifests[].files[].content` | `corium-agent validate` parses it as YAML. Corium has no schema for a Kubernetes object and does not claim to have one |
+| `.yml` refused | n/a | The deployer reads only the `.yaml` extension and skips a `.yml` file without a warning. Corium rejects `.yml` instead |
+| Reconciling and pruning | n/a | Done by k0s, not by Corium. k0s watches each stack and prunes the resources of a file that you remove |
 
 ### Upgrades
 
 | Feature | Field | Notes |
 |---|---|---|
-| Unattended staging | `upgrades.automatic: download` | Stages a new image, never reboots on its own |
-| Unattended reboot | `upgrades.automatic: apply` | Drains the node, reboots, uncordons. A drain a PDB refuses cancels the upgrade |
+| Unattended staging | `upgrades.automatic: download` | Stages a new image, and never reboots on its own |
+| Unattended reboot | `upgrades.automatic: apply` | Drains the node, reboots, and uncordons. If a PDB refuses the drain, the upgrade is cancelled |
 | Check schedule | `upgrades.schedule` | systemd `OnCalendar`, default daily |
-| Version ladder | n/a | `0.5.0`, `0.5` and `latest` per release. No major rung below 1.0, because a 0.x minor may break. See [upgrades](upgrades.md#choosing-what-to-track) |
-| Automatic rollback on failure | n/a | greenboot health check; a node that cannot run k0s returns to its previous image |
+| Version ladder | n/a | `0.5.0`, `0.5` and `latest` per release. No major rung below 1.0, because a 0.x minor can break things. See [upgrades](upgrades.md#choosing-what-to-track) |
+| Automatic rollback on failure | n/a | greenboot health check. A node that cannot run k0s returns to its previous image |
 
 ### Backups
 
 | Feature | Field | Notes |
 |---|---|---|
-| Scheduled control plane snapshot | `backup.enabled` | A systemd timer running [`k0s backup`](https://docs.k0sproject.io/stable/backup/): etcd or kine, the PKI, `k0s.yaml`, manifests and Helm config. Controllers only, and rejected on a worker |
+| Scheduled control plane snapshot | `backup.enabled` | A systemd timer that runs [`k0s backup`](https://docs.k0sproject.io/stable/backup/): etcd or kine, the PKI, `k0s.yaml`, manifests, and Helm configuration. For controllers only. Corium rejects it on a worker |
 | Schedule | `backup.schedule` | systemd `OnCalendar`, default daily |
-| Target directory | `backup.path` | Default `/var/lib/corium/backups`. Archives written `0600` in a `0700` directory |
-| Retention | `backup.keep` | Default 7. Deletes only the archives Corium named, never a glob |
-| Restore | n/a | Manual. `k0s restore` on a stopped node is an operator decision, not a timer's. See [reference §3.18](reference.md#318-backup) |
-| Workload data | n/a | Out of scope: a `k0s backup` holds the control plane, not PersistentVolumes |
+| Target directory | `backup.path` | Default `/var/lib/corium/backups`. Corium writes archives with mode `0600` in a `0700` directory |
+| Retention | `backup.keep` | Default 7. Deletes only the archives that Corium named, never a glob |
+| Restore | n/a | Manual. An operator decides to run `k0s restore` on a stopped node, not a timer. See [reference §3.18](reference.md#318-backup) |
+| Workload data | n/a | Out of scope. A `k0s backup` holds the control plane, not PersistentVolumes |
 
 ### Kubernetes version
 
 | Feature | Field | Notes |
 |---|---|---|
-| Pin a Kubernetes version | `kubernetes.version` | Independent of the OS image: a signed system extension overlays `/usr/bin/k0s`. Empty runs the version the image ships. See [ADR 10](adr/0010-kubernetes-version-axis.md) |
-| Pull from an internal registry | `kubernetes.mirror` | For a site that cannot reach the default. A mirror changes where an artefact comes from, not whether it has to be signed |
-| Supported window | n/a | Three Kubernetes minors per image, listed in `/usr/lib/corium/k0s.window`. Reaching another is an OS upgrade |
-| Skew enforcement | n/a | One minor at a time, no going back a minor — k0s's own rules, refused with the rule named before anything is stopped |
-| Rolling a version back | n/a | Not the free operation an OS rollback is: k0s does not support downgrading a minor, so reverting is a second forward move |
+| Pin a Kubernetes version | `kubernetes.version` | Independent of the OS image. A signed system extension overlays `/usr/bin/k0s`. If empty, the node runs the version that the image ships. See [ADR 10](adr/0010-kubernetes-version-axis.md) |
+| Pull from an internal registry | `kubernetes.mirror` | For a site that cannot reach the default registry. A mirror changes where an artefact comes from. The artefact must still be signed |
+| Supported window | n/a | Three Kubernetes minors per image, listed in `/usr/lib/corium/k0s.window`. To get a different minor, upgrade the OS |
+| Skew enforcement | n/a | One minor at a time, and no move back to an older minor. These are the k0s rules. Corium refuses a change that breaks them, names the rule, and stops nothing |
+| Rolling a version back | n/a | Not free, as an OS rollback is. k0s does not support a downgrade of a minor, so a revert is a second forward move |
 
 ### Disks
 
 | Feature | Field | Notes |
 |---|---|---|
-| Software RAID on spare disks | `raid[]` | Levels 0, 1, 5, 6, 10; created before k0s starts |
-| Hot spares | `raid[].spares` | Pulled in automatically when a member fails |
+| Software RAID on spare disks | `raid[]` | Levels 0, 1, 5, 6, 10. Created before k0s starts |
+| Hot spares | `raid[].spares` | Added automatically when a member fails |
 | Filesystem | `raid[].filesystem` | `ext4` (default), `xfs`, or `none` for a raw device |
 | Mount and persist | `raid[].mountPoint` | Written to `/etc/fstab` by UUID |
-| Refuses to destroy data | `raid[].wipe` | Off by default; a device holding data stops the bootstrap |
-| Root filesystem on RAID | n/a | Works, but install-time only: hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](raid.md) |
-| ZFS pools on data disks | `zfs[]` | Mirror/raidz, created before k0s; needs the ZFS image variant. See [ZFS on data disks](zfs.md) |
+| Refuses to destroy data | `raid[].wipe` | Off by default. A device that holds data stops the bootstrap |
+| Root filesystem on RAID | n/a | Works, but only at install time. It needs a hand-written Kickstart, a second ESP, and an fstab edit. See [software RAID](raid.md) |
+| ZFS pools on data disks | `zfs[]` | Mirror or raidz, created before k0s. Needs the ZFS image variant. See [ZFS on data disks](zfs.md) |
 | ZFS datasets | `zfs[].datasets` | Per-dataset mount points and properties (compression, recordsize, quota) |
-| ZFS refuses to destroy data | `zfs[].wipe` | Off by default; a device in a pool cannot also be in a `raid[]` array |
-| Root filesystem on ZFS | n/a | Out of scope: needs the module in the initramfs, which bootc has no declarative path for. See [ADR 7](adr/0007-zfs-data-disks.md) |
+| ZFS refuses to destroy data | `zfs[].wipe` | Off by default. A device in a pool cannot also be in a `raid[]` array |
+| Root filesystem on ZFS | n/a | Out of scope. It needs the module in the initramfs, and bootc has no declarative way to put it there. See [ADR 7](adr/0007-zfs-data-disks.md) |
 
 ### Overlay networking
 
 | Feature | Field | Notes |
 |---|---|---|
-| Host WireGuard interface | `wireguard[]` | Brought up before k0s so a cluster can run over an encrypted overlay between hosts. See [ADR 6](adr/0006-host-wireguard-overlay.md) |
-| Overlay as the node address | `wireguard[].nodeAddress` | The kubelet registers this address, not the physical NIC — the field that makes an overlay a cluster transport |
-| Peers | `wireguard[].peers` | Public key, endpoint, allowed IPs, keepalive, optional preshared key |
-| Private key as a secret | `wireguard[].privateKeyFrom` | Resolved at first boot, written `0600`, never logged — like a join token |
-| k0s waits for the overlay | n/a | The k0s service is ordered to require the interface, so a node whose overlay failed does not half-join |
+| Host WireGuard interface | `wireguard[]` | Started before k0s, so that a cluster can run over an encrypted overlay between hosts. See [ADR 6](adr/0006-host-wireguard-overlay.md) |
+| Overlay as the node address | `wireguard[].nodeAddress` | The kubelet registers this address, not the physical NIC. This field makes the overlay the transport for the cluster |
+| Peers | `wireguard[].peers` | Public key, endpoint, allowed IPs, keepalive, and an optional preshared key |
+| Private key as a secret | `wireguard[].privateKeyFrom` | Resolved at first boot, written with mode `0600`, and never logged, as for a join token |
+| k0s waits for the overlay | n/a | The k0s service requires the interface. If the overlay fails, the node does not half-join |
 
 #### Not the same as a CNI's encryption
 
-This is a host concern, distinct from the pod-traffic encryption a CNI offers:
-the overlay is what lets hosts on different sites or providers reach each other
-at all. `wireguard-tools` ships present but inert until an interface is
-declared.
+This is a host concern. It is different from the pod-traffic encryption that a
+CNI gives. The overlay lets hosts on different sites or providers reach each
+other at all. `wireguard-tools` is in the image but does nothing until you
+declare an interface.
 
 ### Management API
 
-Off unless asked for. The decision is [ADR 4](adr/0004-management-api.md); the
-commands are [cctl](cli.md).
+Off unless you ask for it. The decision is [ADR 4](adr/0004-management-api.md).
+The commands are in [cctl](cli.md).
 
 #### Schema fields
 
 | Feature | Field | Notes |
 |---|---|---|
-| The API itself | `api.enabled` | On by default. `enabled: false` is the only way to run no daemon and bind no port; a node that has bootstrapped and names no operator CA also binds none |
-| Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. Public material, so it is safe in cloud-init in clear |
+| The API itself | `api.enabled` | On by default. `enabled: false` is the only way to run no daemon and bind no port. A bootstrapped node that names no operator CA also binds no port |
+| Operator CA, inline | `api.operatorCA` | The certificate of the CA that signs operator client certificates. It is public, so it is safe in clear text in cloud-init |
 | Operator CA, resolved | `api.operatorCAFrom` | The same `SecretSource` as `join.tokenFrom`, `waitFor` included |
 | Maintenance mode | `api.enabled: true`, no CA | The node holds its bootstrap and prints a pairing code on the console until an operator claims it |
-| Open enrolment | `api.insecure` | Drops the pairing code: the first client to reach the node claims it |
+| Open enrolment | `api.insecure` | Removes the pairing code. The first client that reaches the node claims it |
 
-`api.insecure` is for benches and controlled provisioning networks. The node
-says so on its console, and records that its claim was unauthenticated.
+`api.insecure` is for test benches and controlled provisioning networks. The
+node shows this on its console, and records that its claim was not
+authenticated.
 
-A node in maintenance mode is not a cluster member: it validates its
-configuration and waits, rather than joining first and being claimed later.
-Enrolment carries no configuration — it sends a CA certificate and nothing
-else, and the node's role and join token still come from cloud-init.
+A node in maintenance mode is not a cluster member. It validates its
+configuration and waits. It does not join first and then wait for a claim.
+Enrolment carries no configuration. It sends a CA certificate and nothing
+else. The role and the join token of the node still come from cloud-init.
 
 #### How the daemon works
 
 | Property | Notes |
 |---|---|
-| Transport | JSON over HTTP and mutual TLS on `7443`, on the standard library alone: no dependency ships to a node for it |
-| Roles | Carried in the client certificate's organisation: `corium:readonly`, `corium:operator`, `corium:admin`. Every route names the lowest role that may call it |
-| Image validation | A node refuses an image its own signing policy would accept unsigned. Not a label check: labels are forgeable |
-| SELinux | The daemon runs unconfined, as the agent always has. `/var/lib/corium/api` carries a type of its own so a confined domain has an anchor; the parent keeps `var_lib_t` because greenboot and systemd read it |
+| Transport | JSON over HTTP and mutual TLS on `7443`. It uses only the standard library, so no dependency ships to a node for it |
+| Roles | Carried in the organization field of the client certificate: `corium:readonly`, `corium:operator`, `corium:admin`. Every route names the lowest role that can call it |
+| Image validation | A node refuses an image that its own signing policy accepts without a signature. This is not a label check, because anyone can forge a label |
+| SELinux | The daemon runs unconfined, as the agent does. `/var/lib/corium/api` has its own type, so that a confined domain has an anchor. The parent keeps `var_lib_t` because greenboot and systemd read it |
 
 #### What it can be asked to do
 
-Commands rather than schema fields. The syntax, flags and output are in
+These are commands, not schema fields. The syntax, flags, and output are in
 [cctl](cli.md).
 
 | Command | What it does |
 |---|---|
-| `cctl status` | Role, cluster, booted and staged image digests, kernel, k0s version and service, greenboot verdict, uptime. Read-only |
-| `cctl services` | Lists what the API knows about. Units come from a fixed list, never passed through |
-| `cctl logs` | Journals, per unit or across all of them, with `--since`, `--follow` and `--unit kernel`. Bounded: 10000 records, one hour of following |
-| `cctl restart --unit k0sworker` | At `corium:operator`. Units that run once — the bootstrap above all — are readable and not restartable |
-| `cctl upgrade <nodes...> --image` | One node at a time, stopping at the first that does not come back on the digest it was sent |
-| `cctl rollback <node>` | Marks the previous image as next to boot, and does not reboot |
-| `cctl cordon` / `cctl drain` | At `corium:operator`, **on controllers only**. A drain a pod disruption budget refuses is not forced, and the node stays cordoned |
-| `cctl reboot` / `cctl shutdown` | At `corium:admin`. The node answers before it goes |
-| `cctl kubeconfig <node>` | At `corium:admin`. Points at the cluster's virtual IP where there is one; `--server` overrides |
-| `cctl config <node>` | At `corium:admin`. Prints the `corium:` document the node recorded applying — the same baseline `cctl apply` diffs against, not the file in `/etc` somebody may have edited since. Says so when the two disagree |
-| `cctl worker-config <controller>` | At `corium:admin`, **on controllers only**. Mints a fresh worker token and prints the `corium:` block to paste into a cloud-config; `--name`, `--label` and `--expiry` fill it in |
-| `cctl reset --confirm <node name>` | Leaves the cluster, erases the bootstrap, forgets its owner, reboots unclaimed — in that order. The reboot takes a staged image if one is waiting |
-| `cctl ca rotate <nodes...> --to <dir>` | At `corium:admin`. A node refuses a CA the caller cannot show a signed certificate for, so rotating cannot lock you out |
+| `cctl status` | Role, cluster, booted and staged image digests, kernel, k0s version and service, greenboot result, and uptime. Read-only |
+| `cctl services` | Lists the units that the API knows about. Units come from a fixed list. The caller cannot pass a unit name through |
+| `cctl logs` | Journals, for one unit or for all of them, with `--since`, `--follow` and `--unit kernel`. Limits: 10000 records, and one hour of following |
+| `cctl restart --unit k0sworker` | At `corium:operator`. You can read units that run once, for example the bootstrap, but you cannot restart them |
+| `cctl upgrade <nodes...> --image` | One node at a time. It stops at the first node that does not come back on the digest that it received |
+| `cctl rollback <node>` | Marks the previous image as the next to boot, and does not reboot |
+| `cctl cordon` / `cctl drain` | At `corium:operator`, **on controllers only**. If a pod disruption budget refuses the drain, the command does not force it, and the node stays cordoned |
+| `cctl reboot` / `cctl shutdown` | At `corium:admin`. The node answers before it goes down |
+| `cctl kubeconfig <node>` | At `corium:admin`. Points at the virtual IP of the cluster, if there is one. `--server` overrides it |
+| `cctl config <node>` | At `corium:admin`. Prints the `corium:` document that the node recorded when it applied it. `cctl apply` compares against the same baseline. It does not print the file in `/etc`, which somebody can edit later. The command tells you when the two disagree |
+| `cctl worker-config <controller>` | At `corium:admin`, **on controllers only**. Creates a new worker token and prints the `corium:` block to paste into a cloud-config. `--name`, `--label` and `--expiry` fill in the block |
+| `cctl reset --confirm <node name>` | In this order: leaves the cluster, erases the bootstrap, forgets its owner, and reboots unclaimed. If a staged image is waiting, the reboot uses it |
+| `cctl ca rotate <nodes...> --to <dir>` | At `corium:admin`. A node refuses a CA unless the caller shows a certificate signed by it. Thus a rotation cannot lock you out |
 | `cctl pki init`, `cctl pki issue` | Create the operator CA and sign client certificates. The CA key stays on your machine |
-| `corium-agent api set-ca --file` | Run as root on the node when the operator CA key is lost. Local only; the node keeps its cluster membership |
+| `corium-agent api set-ca --file` | If you lose the operator CA key, run this as root on the node. Local only. The node stays a member of its cluster |
 
 **Why `cctl drain` is controllers only.** A worker holds kubelet credentials,
-which cannot evict pods. Drain a worker with `kubectl drain` instead, using the
-kubeconfig that `cctl kubeconfig` fetches.
+and these cannot evict pods. To drain a worker, use `kubectl drain` with the
+kubeconfig that `cctl kubeconfig` gets.
 
 ### Where configuration comes from
 
@@ -240,17 +241,17 @@ kubeconfig that `cctl kubeconfig` fetches.
 
 ## Passthrough
 
-Everything else k0s exposes is set through `k0s.patch`, applied verbatim to the
-rendered `k0s.yaml` after Corium is done. Maps merge key by key; lists are
-replaced wholesale.
+You set everything else that k0s exposes through `k0s.patch`. Corium applies
+the patch verbatim to the rendered `k0s.yaml` after it is done. It merges maps
+key by key and replaces lists in full.
 
-A setting lives here when it is rarely needed, cluster-specific, or changes
-faster upstream than a schema should. A modelled field is a promise to support
-that spelling for ever, and that promise is expensive enough to be made
-sparingly.
+A setting goes here when few clusters need it, when it is specific to one
+cluster, or when upstream changes it faster than a schema can follow. A
+modelled field is a promise to support that spelling forever. That promise is
+expensive, so Corium makes it only for a small number of settings.
 
-This is verified, not asserted — the example below renders with every field
-intact alongside the values Corium computed:
+This was tested. The example below renders with every field intact, next to
+the values that Corium computed:
 
 ```yaml
 corium:
@@ -302,39 +303,41 @@ Commonly reached this way:
 
 ### What a patch can and cannot do
 
-**Avoid `spec.extensions.storage`.** It is a deprecated no-op from k0s 1.31
-onwards. It still parses, so a configuration using it looks accepted and does
-nothing. Install storage as an add-on instead.
+**Avoid `spec.extensions.storage`.** From k0s 1.31, it is deprecated and does
+nothing. It still parses, so a configuration that uses it looks accepted but
+has no effect. Install storage as an add-on instead.
 
-**A patch can override anything Corium computed**, including values it treats
-as load-bearing. That is what makes it an escape hatch rather than a
+**A patch can override anything Corium computed**, including values that
+Corium needs to work. This makes the patch an escape hatch and not only a
 suggestion. Corium checks only that the result is valid YAML.
 
 **Your document stays an ordinary cloud-config.** `write_files`, `runcmd`,
-`users` and every other module keep working. Corium is a guest in that
+`users` and every other module continue to work. Corium is a guest in that
 document, not its owner.
 
 ---
 
 ## Static configuration, not dynamic
 
-k0s can run in two modes. By default it reads `k0s.yaml` from disk on every
-controller. With `--enable-dynamic-config` it instead stores a `ClusterConfig`
-resource in the cluster, and controllers reconcile against that.
+k0s can run in two modes. By default, it reads `k0s.yaml` from disk on every
+controller. With `--enable-dynamic-config`, it stores a `ClusterConfig`
+resource in the cluster instead, and controllers reconcile against that
+resource.
 
 **Corium writes a static configuration file.** It does not pass
-`--enable-dynamic-config`, which means:
+`--enable-dynamic-config`. This has two results:
 
-- Changing the configuration means reprovisioning the node, in keeping with the
-  rest of the design: a node is rebuilt from an image, not adjusted in place.
-- Mixing controllers that use dynamic config with ones that do not is a
-  documented conflict in k0s. If you enable it, enable it everywhere.
+- To change the configuration, you reprovision the node. This agrees with
+  the rest of the design: you rebuild a node from an image, you do not adjust
+  it in place.
+- k0s documents a conflict when some controllers use dynamic configuration and
+  others do not. If you enable it, enable it on all controllers.
 
-If you want dynamic configuration, three parts of the configuration stay
-file-local and per-controller regardless — `spec.api`, `spec.storage`, and
-`spec.network.controlPlaneLoadBalancing` — so they must still be identical
-across controllers. That is precisely what Corium's rendering already
-guarantees, since every controller in an HA cluster renders the same file.
+If you use dynamic configuration, three parts of the configuration always stay
+in a local file on each controller: `spec.api`, `spec.storage`, and
+`spec.network.controlPlaneLoadBalancing`. Thus they must be identical on all
+controllers. Corium already makes sure of this, because every controller in an
+HA cluster renders the same file.
 
 See [k0s: dynamic
 configuration](https://docs.k0sproject.io/stable/dynamic-configuration/).
@@ -343,45 +346,45 @@ configuration](https://docs.k0sproject.io/stable/dynamic-configuration/).
 
 ## Out of scope
 
-These are decisions, not gaps. Each would be straightforward to add; none
-should be.
+These are decisions, not gaps. Each one is easy to add, but Corium must not
+add any of them.
 
 | Not supported | Why |
 |---|---|
-| **k0s Autopilot** | Autopilot upgrades Kubernetes by replacing the k0s binary on disk. Corium's binary lives in the read-only `/usr`, because Kubernetes ships with the OS. Two upgrade mechanisms, each able to move the version independently, is a worse position than one |
-| **Fleet management** | Corium provisions a node and stops: it does not track, group or reconcile machines, and that is a control plane's job. See the note below |
-| **A configuration API for machines in service** | The value of cloud-init is that every cloud, hypervisor and PXE setup already speaks it, and Corium does not replace it with a protocol of its own. `cctl apply` writes `/etc/corium/config.yaml`, which is first in the source chain and is there for the machines cloud-init never reaches — it fills a slot the design already reserved rather than inventing an authority. What stays out of scope is the part the heading names: a node whose role, cluster, name, network or disks can be rewritten underneath a running Kubernetes. A bootstrapped node re-applies only the safe subset and refuses each of those by name, nothing watches a document between one apply and the next, and `cctl config` reads a node's own record back without being able to change it. See [ADR 4](adr/0004-management-api.md) and [ADR 8](adr/0008-day-two-reconcile.md) |
-| **Arbitrary command execution over the API** | There is no `exec` endpoint and no endpoint taking a command line. One would make the API an SSH with a worse client, and every argument for keeping its surface small would stop applying |
-| **Forking or patching k0s** | Corium configures upstream k0s. A fork would mean owning Kubernetes bugs, which is not a business worth being in |
-| **Removing add-ons** | k0s's Helm extensions install charts; Corium does not model uninstalling one. Dropping a chart from the configuration leaves the release running — remove it with `kubectl delete chart <name> -n kube-system`, per [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/). For the same reason, `cctl apply` refuses a day-two document that drops a chart rather than reporting a removal that did not happen |
-| **Multiple Kubernetes distributions** | Only k0s. Supporting k3s or RKE2 as well would mean an abstraction that fits none of them properly |
+| **k0s Autopilot** | Autopilot upgrades Kubernetes by replacing the k0s binary on disk. The Corium binary is in the read-only `/usr`, because Kubernetes ships with the OS. Two upgrade mechanisms that can each change the version independently are worse than one |
+| **Fleet management** | Corium provisions a node and stops. It does not track, group, or reconcile machines. That is the job of a control plane. See the note below |
+| **A configuration API for machines in service** | Every cloud, hypervisor, and PXE setup already supports cloud-init. That is its value, and Corium does not replace it with a protocol of its own. `cctl apply` writes `/etc/corium/config.yaml`. This file is first in the source chain, and it exists for the machines that cloud-init never reaches. Thus `cctl apply` fills a slot that the design already reserved. It does not add a new authority. The part that the heading names stays out of scope: a node whose role, cluster, name, network, or disks can change under a running Kubernetes. A bootstrapped node re-applies only the safe subset, and refuses each of those fields by name. Nothing watches a document between one apply and the next. `cctl config` reads the record of a node but cannot change it. See [ADR 4](adr/0004-management-api.md) and [ADR 8](adr/0008-day-two-reconcile.md) |
+| **Arbitrary command execution over the API** | There is no `exec` endpoint and no endpoint that accepts a command line. Such an endpoint makes the API an SSH with a worse client. Then no argument for a small API surface applies |
+| **Forking or patching k0s** | Corium configures upstream k0s. With a fork, Corium owns the Kubernetes bugs, and that work has no value for the project |
+| **Removing add-ons** | The k0s Helm extensions install charts. Corium does not model the removal of a chart. If you remove a chart from the configuration, the release continues to run. To remove it, run `kubectl delete chart <name> -n kube-system`, as [k0s: Helm charts](https://docs.k0sproject.io/stable/helm-charts/) describes. For the same reason, `cctl apply` refuses a day-two document that removes a chart. It does not report a removal that did not happen |
+| **Multiple Kubernetes distributions** | Only k0s. Support for k3s or RKE2 too needs an abstraction that fits none of them correctly |
 
-**On fleet management.** The management API does not change that answer: it is
-one daemon per node, answering for that node, with no registry, no inventory
-and no desired state. A rolling upgrade is a `cctl` loop over addresses you
-supplied.
+**On fleet management.** The management API does not change that answer. It
+is one daemon per node that answers for that node. It has no registry, no
+inventory, and no desired state. A rolling upgrade is a `cctl` loop over the
+addresses that you supply.
 
-**On removing add-ons.** Deleting a chart from the configuration leaves the
-release in place, so `cctl apply` refuses a day-two document that drops one
-rather than reporting a removal that did not happen.
+**On removing add-ons.** If you delete a chart from the configuration, the
+release stays in place. Thus `cctl apply` refuses a day-two document that
+removes a chart. It does not report a removal that did not happen.
 
 ### Not supported yet
 
-Honest about the difference: these are absent because nobody has needed them
-enough, not because they are wrong.
+These features are absent because nobody needed them enough, not because they
+are wrong.
 
 | Missing | Notes |
 |---|---|
-| **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) by dropping an image bundle in `<data-dir>/images/`. Corium can already bake one into the image with a `COPY`, but there is no `corium:` field for it and it is untested |
-| **Worker profiles as a modelled field** | Reachable through the patch today |
+| **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) with an image bundle in `<data-dir>/images/`. You can already bake a bundle into the Corium image with a `COPY`. But there is no `corium:` field for it, and it is not tested |
+| **Worker profiles as a modelled field** | Reachable through the patch |
 
 
 ---
 
 ## Defaults
 
-Corium's defaults match k0s's wherever k0s has one, so that a Corium node and a
-hand-configured k0s node agree unless there is a reason to differ.
+Where k0s has a default, Corium uses the same default. Thus a Corium node and a
+k0s node configured by hand agree, unless there is a reason to differ.
 
 | Setting | Corium | k0s |
 |---|---|---|
@@ -394,10 +397,11 @@ hand-configured k0s node agree unless there is a reason to differ.
 | Cluster name | `corium` | `k0s` |
 | Add-on namespace | `default` | same |
 
-The one deliberate difference is the cluster name, which only affects generated
-kubeconfig contexts.
+The only intentional difference is the cluster name. It affects only the
+generated kubeconfig contexts.
 
-Values k0s sets that Corium does not touch — API port `6443`, join API port
-`9443`, konnectivity ports `8132`/`8133`, cluster domain `cluster.local`,
-certificate lifetimes — keep their k0s defaults. Run `k0s config create` on a
-node to see the full set as your version defines it.
+Some values that k0s sets keep their k0s defaults, because Corium does not
+change them. These are the API port `6443`, the join API port `9443`, the
+konnectivity ports `8132`/`8133`, the cluster domain `cluster.local`, and the
+certificate lifetimes. To see the full set for your version, run
+`k0s config create` on a node.
