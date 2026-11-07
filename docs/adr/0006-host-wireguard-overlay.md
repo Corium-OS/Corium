@@ -5,135 +5,138 @@ Status: accepted
 ## Context
 
 [Issue #7](https://github.com/Corium-OS/Corium/issues/7) asks for a way to
-declare a WireGuard interface on the node itself, from the `corium:` block, so
-that nodes across sites or providers can form one cluster over an encrypted
-overlay. It carries the same caveat [issue #5](https://github.com/Corium-OS/Corium/issues/5)
-did for RAID: only add it if it earns its place over a plain cloud-init
+declare a WireGuard interface on the node itself, from the `corium:` block. With
+it, nodes across sites or providers can form one cluster over an encrypted
+overlay (a private network that runs on top of the public one). The issue
+carries the same caveat that [issue #5](https://github.com/Corium-OS/Corium/issues/5)
+carried for RAID: add the feature only if it is better than a plain cloud-init
 WireGuard setup. Decision 9 in `AGENTS.md` is the standing rule behind that
-caveat — every abstraction has an escape hatch, and `write_files` plus `runcmd`
-are always there — so the burden is on the field to justify itself, not on the
-escape hatch to justify its absence.
+caveat. Every abstraction has an escape hatch, and `write_files` plus `runcmd`
+are always available. So the field must justify itself. The escape hatch does
+not have to justify its absence.
 
-Three facts have to be established before the decision means anything, because
-each of them changes what "the plain cloud-init alternative" actually is on this
+Three facts must be established before the decision means anything. Each of
+them changes what "the plain cloud-init alternative" actually is on this
 operating system.
 
 **The problem is a host problem, and the CNI does not solve it.** k0s can
-already encrypt pod-to-pod traffic — kube-router and Calico both offer a
-WireGuard or IPsec mode — but that operates *between pods* and takes for granted
-that the *hosts* can already reach one another. Across sites or providers they
-cannot: the only address every node shares is its public one, and the control
-plane's own traffic — kubelet to API server, etcd peer replication, the
-konnectivity tunnel, the join API — would otherwise cross the open internet.
-A host overlay gives every node a stable address in one private range and lets
-k0s run over it. That is a different problem from the one the CNI solves, and it
-is the problem this feature exists for. If there were no such problem the
-feature would have no case; there is one.
+already encrypt pod-to-pod traffic. kube-router and Calico both offer a
+WireGuard or IPsec mode. But that encryption operates *between pods*, and it
+assumes that the *hosts* can already reach one another. Across sites or
+providers, the hosts cannot. The only address that every node shares is its
+public address. Without an overlay, the traffic of the control plane itself
+crosses the open internet: kubelet to API server, etcd peer replication, the
+konnectivity tunnel, and the join API. A host overlay gives every node a stable
+address in one private range, and k0s runs over it. That is a different problem
+from the one that the CNI solves, and this feature exists for it. Without that
+problem, the feature has no case. The problem is real.
 
 **The tooling is an image concern, and half of it is already met.** On a mutable
-distribution "a plain cloud-init WireGuard setup" starts with
-`packages: [wireguard-tools]`. On Corium that step is a no-op: `/usr` is
-read-only, the package set is fixed at build time, and `05-corium.cfg` disables
-`package_upgrade`/`package_update` precisely so a first-boot install fails early
-and legibly instead of late and mysteriously. So the tooling cannot be a boot
-concern at all — it is an image concern, and this was checked against the base
-image rather than assumed. The kernel module is already there: the Fedora 44
-base carries `wireguard.ko.xz` under
-`/usr/lib/modules/<kver>/kernel/drivers/net/wireguard/`, present-but-unloaded,
-which *is* the disabled state; a `modules-load.d` entry would only make the load
-early and deterministic. The userspace half is not there — `rpm -q
-wireguard-tools` on `quay.io/fedora/fedora-bootc:44` reports it not installed, so
-`wg`, `wg-quick` and the `wg-quick@.service` template are all absent. Making it
-present is therefore the decision: add `wireguard-tools` to Corium's own image,
-present but with nothing enabled, exactly the posture ADR 5 takes for `sshd`
-(present, but with an empty guest list). A `wg-quick@.service` template that is
-never instantiated is not a running service, so the cost is one small, dormant
-package, not a listening surface — and it is the same one line the escape-hatch
-recipe would need anyway.
+distribution, "a plain cloud-init WireGuard setup" starts with
+`packages: [wireguard-tools]`. On Corium, that step does nothing. `/usr` is
+read-only and the package set is fixed at build time. `05-corium.cfg` disables
+`package_upgrade`/`package_update` on purpose, so that a first-boot install
+fails early with a clear error, not late with an unclear one. So the tooling
+cannot be a boot concern at all. It is an image concern. This is a checked fact
+about the base image, not an assumption. The kernel module is already there. The
+Fedora 44 base carries `wireguard.ko.xz` under
+`/usr/lib/modules/<kver>/kernel/drivers/net/wireguard/`. The module is present
+but not loaded, and that *is* the disabled state. A `modules-load.d` entry only
+makes the load early and deterministic. The userspace half is not there.
+`rpm -q wireguard-tools` on `quay.io/fedora/fedora-bootc:44` reports that the
+package is not installed. So `wg`, `wg-quick` and the `wg-quick@.service`
+template are all absent. The decision is therefore to make them present: add
+`wireguard-tools` to the Corium image, present but with nothing enabled. This is
+the same posture that ADR 5 takes for `sshd` (present, but with an empty guest
+list). A `wg-quick@.service` template that nobody instantiates is not a running
+service. So the cost is one small, dormant package, not a listening surface. The
+escape-hatch recipe needs that same one line anyway.
 
-The point of stating this first is to take the tooling *off the table* as the
-thing that distinguishes a field from a recipe. Both stand on the same image
-with the same dormant tools. What separates them is everything below: where the
-configuration can come from, which address the node registers, and where the
-private key lives. Those are the comparison this ADR argues.
+This fact comes first because it removes the tooling from the comparison between
+a field and a recipe. Both use the same image with the same dormant tools. Three
+other things separate them: where the configuration can come from, which address
+the node registers, and where the private key is stored. This ADR argues from
+those three things.
 
 **NetworkManager is the only renderer.** `05-corium.cfg` records that the image
-runs NetworkManager and nothing else manages the network. `systemd-networkd` is
-not the active renderer, so a `.netdev`/`.network` approach would mean running a
-second network daemon alongside NetworkManager — two authorities over the same
-interfaces, which is the shape of problem decision 7 rejected Ignition to avoid.
-That leaves two materialisation paths worth considering: `wg-quick` reading
+runs NetworkManager and that nothing else manages the network. `systemd-networkd`
+is not the active renderer. So a `.netdev`/`.network` approach means a second
+network daemon next to NetworkManager. That gives two authorities over the same
+interfaces, which is the type of problem that decision 7 rejected Ignition to
+avoid. Two paths to create the interface remain: `wg-quick` that reads
 `/etc/wireguard` (needs `wireguard-tools`), or a NetworkManager keyfile
-connection (native, no extra package, but couples the design to NM and still
-writes the key into `/etc`). The decision below picks one and records the other
-as an alternative.
+connection. The keyfile is native and needs no extra package, but it couples the
+design to NM and still writes the key into `/etc`. The decision below picks one
+path and records the other as an alternative.
 
 ## Decision
 
-Add a `wireguard:` block to the `corium:` schema, describing **this node's**
-participation in a host overlay: one or more interfaces, each with its address,
-listen port, private key (inline or resolved at boot), and peers. It is
-provisioned by `corium-agent` at first boot, before k0s, on the same footing as
+Add a `wireguard:` block to the `corium:` schema. The block describes **this
+node's** participation in a host overlay: one or more interfaces, each with its
+address, listen port, private key (inline or resolved at boot), and peers.
+`corium-agent` provisions it at first boot, before k0s, in the same way as
 `raid[]`.
 
 The first reason to prefer the field is where it can be read from. A recipe is
-made of `write_files` and `runcmd`, which are cloud-init modules and run only
-where cloud-init runs. But Corium deliberately does not depend on cloud-init for
-its configuration: `internal/source` resolves the `corium:` block from a chain —
-`/etc/corium/config.yaml` first, then cloud-init, then the kernel command line,
-then an image default — precisely because "bare metal without a seed device,
-PXE, and pre-baked appliances all need a configuration and have no datasource."
-That is not a corner case for this feature; it is its centre. An overlay exists
-to join nodes across sites and providers, which is where on-premise and
-bare-metal nodes without a cloud-init datasource are most common — and on those
-nodes the recipe simply never executes, while a `corium:` field is read from
-`/etc/corium/config.yaml` or the kernel command line like any other. The escape
-hatch is weakest in exactly the environment the feature targets.
+made of `write_files` and `runcmd`. These are cloud-init modules, and they run
+only where cloud-init runs. But Corium does not depend on cloud-init for its
+configuration, by design. `internal/source` resolves the `corium:` block from a
+chain: `/etc/corium/config.yaml` first, then cloud-init, then the kernel command
+line, then an image default. The chain exists because "bare metal without a seed
+device, PXE, and pre-baked appliances all need a configuration and have no
+datasource." For this feature, that is not an edge case. It is the main case. An
+overlay exists to join nodes across sites and providers. That is where
+on-premise and bare-metal nodes without a cloud-init datasource are most common.
+On those nodes, the recipe never runs. A `corium:` field is read from
+`/etc/corium/config.yaml` or the kernel command line like any other field. The
+escape hatch is weakest in exactly the environment that the feature targets.
 
-Beyond that reach, the field owns three things a recipe cannot own well, and
-together with it they are the whole justification:
+Beyond that reach, the field owns three things that a recipe cannot own well.
+Together with the reach, they are the whole justification:
 
-1. **The interface is up before k0s starts, and stays a boot-time artefact.**
-   `corium-agent` runs only on first boot; the overlay has to survive every
-   reboot after that and be up before the kubelet registers. So the agent
-   materialises a persistent unit — `wg-quick@<name>.service` over an
-   agent-written `/etc/wireguard/<name>.conf` — enables it, and brings the
-   interface up synchronously during bootstrap before it renders k0s or detects
-   the node address. It then writes a drop-in onto the k0s unit ordering it
-   `After=`/`Requires=` the interface, reusing exactly the mechanism
-   `internal/bootstrap/raid.go` already uses to make k0s wait for a mount
-   (`requireMountsForK0s`). A node whose overlay is down does not half-join a
-   cluster; k0s refuses to start and says why.
+1. **The interface is up before k0s starts, and stays a boot-time artifact.**
+   `corium-agent` runs only on first boot. The overlay must survive every reboot
+   after that, and it must be up before the kubelet registers. So the agent
+   creates a persistent unit: `wg-quick@<name>.service` over an
+   `/etc/wireguard/<name>.conf` file that the agent writes. The agent enables the
+   unit. It brings the interface up synchronously during bootstrap, before it
+   renders k0s or detects the node address. It then writes a drop-in on the k0s
+   unit that orders k0s `After=`/`Requires=` the interface. This reuses the same
+   mechanism that `internal/bootstrap/raid.go` uses to make k0s wait for a mount
+   (`requireMountsForK0s`). If the overlay of a node is down, the node does not
+   half-join a cluster. k0s refuses to start and gives the reason.
 
 2. **The overlay address becomes the address the node registers.** This is the
-   `nodeip.go` failure class, and it is the reason a recipe is not enough. Today
-   `--node-ip` is passed only when HA is enabled; for a plain cross-site cluster
-   the kubelet picks whatever address the interface scan finds first, which is
-   the physical NIC, not the overlay. The node then registers an address its
-   peers cannot reach, and logs, exec, port-forward and metrics all go nowhere —
-   the same delayed, confusing failure that `detectNodeIP` was written to
-   prevent for the VRRP virtual IP, and one a cloud-init `runcmd` cannot fix
-   because the address is chosen *inside `corium-agent`*, after cloud-init has
-   finished. An interface the operator marks as the node's cluster address is
-   the address `corium-agent` registers with k0s, is added to the API server's
-   SANs on a controller, and is the address `detectNodeIP` selects from (rather
-   than the default route) when HA also runs over the overlay.
+   `nodeip.go` failure class, and it is the reason why a recipe is not enough.
+   Today, `--node-ip` is passed only when HA is enabled. For a plain cross-site
+   cluster, the kubelet picks the first address that the interface scan finds.
+   That address is on the physical NIC, not on the overlay. The node then
+   registers an address that its peers cannot reach, and logs, exec,
+   port-forward and metrics all fail. This is the same delayed, confusing
+   failure that `detectNodeIP` was written to prevent for the VRRP virtual IP. A
+   cloud-init `runcmd` cannot fix it, because the choice of address happens
+   *inside `corium-agent`*, after cloud-init finished. The operator can mark one
+   interface as the cluster address of the node. `corium-agent` registers that
+   address with k0s. On a controller, the address is also added to the SANs of
+   the API server. When HA also runs over the overlay, `detectNodeIP` selects
+   from that interface, not from the default route.
 
 3. **The private key is handled as a secret.** A `write_files` recipe puts the
-   WireGuard private key in cleartext into the instance metadata — the precise
-   thing `join.tokenFrom`, `ha.authPassFrom` and `api.operatorCAFrom` exist to
-   avoid. The field reuses `SecretSource`: `privateKeyFrom` resolves the key at
-   boot from an HTTPS URL or a local file, with the established `waitFor`
+   WireGuard private key in cleartext into the instance metadata.
+   `join.tokenFrom`, `ha.authPassFrom` and `api.operatorCAFrom` exist to prevent
+   exactly that. The field reuses `SecretSource`. `privateKeyFrom` resolves the
+   key at boot from an HTTPS URL or a local file, with the existing `waitFor`
    retry semantics, and `internal/secret` never logs it. `corium-agent` writes
-   the rendered `/etc/wireguard/<name>.conf` `0600`, root-owned, and redacts the
-   key everywhere it reports. A peer's *public* key is not a secret and sits
-   inline; a peer preshared key is, and takes the same `...From` treatment.
+   the rendered `/etc/wireguard/<name>.conf` with mode `0600`, owned by root, and
+   redacts the key in all of its reports. The *public* key of a peer is not a
+   secret and stays inline. A peer preshared key is a secret, and gets the same
+   `...From` treatment.
 
 ### Schema sketch
 
-Not final types — a sketch of the surface, to argue about shape rather than to
-implement. A list, like `raid[]`, because a node may in principle carry more
-than one interface, though one is the expected case.
+These are not the final types. This is a sketch of the surface, to discuss its
+shape, not to implement it. It is a list, like `raid[]`, because a node can in
+principle carry more than one interface. One interface is the expected case.
 
 ```yaml
 corium:
@@ -159,141 +162,154 @@ corium:
             file: /run/corium/wg0.psk
 ```
 
-An inline `privateKey:` field exists alongside `privateKeyFrom` for labs, mirror
-of `join.token`/`join.tokenFrom`, and is documented as a liability for the same
-reason: anything that can read the instance metadata can read it.
+An inline `privateKey:` field exists next to `privateKeyFrom` for labs. It
+mirrors `join.token`/`join.tokenFrom`. The documentation calls it a liability for
+the same reason: anything that can read the instance metadata can read the key.
 
 ### Validation rules
 
-Offline, all-at-once, `errors.Join` — the same contract as the rest of
-`Validate()`: no network, no filesystem, every problem reported in one boot.
+Validation is offline and reports all problems at once with `errors.Join`. This
+is the same contract as the rest of `Validate()`: no network, no filesystem, and
+every problem reported in one boot.
 
 - `wireguard[].name`: required, unique across the block, and a valid Linux
-  interface name (`^[a-z0-9][-a-z0-9]*$`, ≤ 15 characters — `IFNAMSIZ`).
-- `wireguard[].address`: required, valid CIDR (`netip.ParsePrefix`). This is a
+  interface name (`^[a-z0-9][-a-z0-9]*$`, ≤ 15 characters, the `IFNAMSIZ`
+  limit).
+- `wireguard[].address`: required, a valid CIDR (`netip.ParsePrefix`). This is a
   host address with a prefix length, not a bare IP.
-- `wireguard[].listenPort`: if set, 1–65535. Required to be set on any node a
-  peer names in its `endpoint` (a node with no listen port cannot be dialled).
-- `wireguard[].mtu`: if set, a sane range (576–65535); default left to the tool.
-- `privateKey` / `privateKeyFrom`: set exactly one; reject both, and reject
+- `wireguard[].listenPort`: if set, 1–65535. It must be set on any node that a
+  peer names in its `endpoint`, because nobody can dial a node with no listen
+  port.
+- `wireguard[].mtu`: if set, in the range 576–65535. If it is not set, the tool
+  picks the default.
+- `privateKey` / `privateKeyFrom`: set exactly one. Reject both, and reject
   neither. `SecretSource.validate` already covers the `...From` half (https-only
-  URL, absolute file path, bounded `waitFor`). An inline key is checked for
-  base64 shape and 32-byte length, so a truncated paste fails at validation
-  rather than at `wg` runtime.
-- `nodeAddress`: at most one interface across the block may set it true. If none
-  does and the node joins over the overlay, that is a likely mistake — warn in
-  the "settings that do nothing" style already used for a disabled `ha:` block,
-  because a node whose overlay is not its registered address will look healthy
-  and be unreachable.
-- `peers[].publicKey`: required, base64, 32 bytes. Duplicate public keys within
-  one interface are rejected (a copy-paste error that silently drops a peer).
-- `peers[].endpoint`: if set, `host:port`; the host may be a name or an address,
-  but an IP is recommended, since a name has to resolve before the network the
-  overlay itself may gate is up.
-- `peers[].allowedIPs`: required, each a valid CIDR. Overlapping `allowedIPs`
-  across peers on one interface are rejected — WireGuard routes by longest
-  match and two peers claiming the same range is a routing ambiguity, not a
-  configuration two people can both have meant.
+  URL, absolute file path, bounded `waitFor`). Validation checks an inline key
+  for base64 shape and 32-byte length. So a truncated paste fails at validation,
+  not at `wg` runtime.
+- `nodeAddress`: at most one interface across the block can set it to true. If
+  no interface sets it and the node joins over the overlay, that is a likely
+  mistake. Validation warns in the "settings that do nothing" style that it
+  already uses for a disabled `ha:` block. The reason is that a node whose
+  registered address is not its overlay address looks healthy and is
+  unreachable.
+- `peers[].publicKey`: required, base64, 32 bytes. Validation rejects duplicate
+  public keys within one interface. A duplicate is a copy-paste error that
+  silently drops a peer.
+- `peers[].endpoint`: if set, `host:port`. The host can be a name or an address,
+  but an IP is recommended. A name must resolve before the network is up, and
+  that network can depend on the overlay itself.
+- `peers[].allowedIPs`: required, each a valid CIDR. Validation rejects
+  overlapping `allowedIPs` across peers on one interface. WireGuard routes by
+  longest match. Two peers that claim the same range are a routing ambiguity,
+  not a configuration that an operator can intend.
 - `peers[].persistentKeepalive`: if set, 1–65535 (seconds).
-- If `wireguard:` is empty the block does nothing and is silent; a `wireguard:`
-  block on a node whose `role` never joins anything is not itself an error, since
-  an overlay can exist for reasons other than the cluster.
+- If `wireguard:` is empty, the block does nothing and is silent. A `wireguard:`
+  block on a node whose `role` never joins anything is not an error by itself,
+  because an overlay can exist for reasons other than the cluster.
 
 ## Consequences
 
 **A permanent, non-trivial schema surface.** The package doc in `types.go` says
 it plainly: a key added here is permanent, ships to every node, and must be
-supported forever — add them reluctantly. An interface with peers is more
-surface than any single key added so far, and this ADR spends it on purpose. The
-scope is held down by what the block deliberately is *not*: it describes one
-node's view of an overlay, not a mesh. It mints no keys, distributes none,
-rotates none, and knows nothing of the other nodes beyond the peers it is told
-about. Key material and topology management across a fleet is a control-plane
-concern, and Corium provisioning nodes rather than managing them (a non-goal)
-is the line that keeps this from growing into one.
+supported forever, so add them reluctantly. An interface with peers is more
+surface than any single key added so far, and this ADR spends that surface on
+purpose. What the block is *not* keeps the scope small. It describes the view of
+one node on an overlay, not a mesh. It creates no keys, distributes none, and
+rotates none. It knows nothing of the other nodes beyond the peers that it is
+given. Key material and topology management across a fleet are a control-plane
+concern. Corium provisions nodes and does not manage them (a non-goal), and that
+line keeps this block from growing into a control plane.
 
 **A third deliberate `/etc` exception.** `wg-quick` reads `/etc/wireguard`, as
 `sshd` reads `/etc/ssh/sshd_config.d` and cloud-init reads `/etc/cloud`. The
-justification is the same as ADR 5's: it is the only place the tool reads from,
-so the config has to live there or not be read. It is named as an exception
-rather than slipped in, and the file is written `0600` because it carries the
-private key — where the sshd drop-in could be world-readable, this cannot.
+justification is the same as in ADR 5: it is the only place that the tool reads
+from, so the configuration must live there or nothing reads it. This ADR names it
+as an exception and does not slip it in silently. The file is written with mode
+`0600` because it carries the private key. The sshd drop-in can be
+world-readable, but this file cannot.
 
 **`wireguard-tools` added to the image, present on every node, used by few.**
-The package is not in the base — this was verified — so accepting this decision
-means adding it to Corium's `Containerfile`, where it then ships whether or not a
-node ever declares an interface: a small, dormant package on machines that will
-never use it, which is the cost of any package in an OS image. It is deliberately
-the same bargain ADR 5 struck for `sshd`: present and inert until something turns
-it on, rather than absent and un-turn-on-able on an immutable OS. The module is
-already present in the base kernel; the package addition and the
-`wg-quick@.service` template it brings should be re-checked per release with
-`rpm -q`, exactly as ADR 5 pinned the inherited `sshd`.
+The package is not in the base image, and this was verified. So to accept this
+decision is to add the package to the Corium `Containerfile`. It then ships
+whether or not a node ever declares an interface. It is a small, dormant package
+on machines that never use it, which is the cost of any package in an OS image.
+This is on purpose the same bargain that ADR 5 made for `sshd`: present and inert
+until something turns it on. The other choice is a package that is absent and
+cannot be turned on, on an immutable OS. The module is already in the base
+kernel. For each release, re-check the package addition and the
+`wg-quick@.service` template that it brings with `rpm -q`, exactly as ADR 5
+pinned the inherited `sshd`.
 
 **`corium-agent` learns to configure a host interface.** This is the first host
-*network interface* Corium declares — until now host networking was cloud-init's
-alone, and the `corium:` block spoke only of cluster addressing (pod/service
-CIDRs, the VRRP VIP). That boundary moves here, a little, and the ADR names it
-so the next person does not have to rediscover that it moved. `detectNodeIP` and
-the HA path both grow an awareness of the overlay interface; a WireGuard overlay
-carrying a VRRP VIP works only over `unicastPeers`, since multicast does not
-cross a point-to-point tunnel, and `detectNodeIP` must select from the overlay
-interface rather than the default route. These are real changes to the most
-delicate code in the tree, and their tests are the price of the feature.
+*network interface* that Corium declares. Until now, host networking belonged to
+cloud-init alone, and the `corium:` block described only cluster addressing
+(pod/service CIDRs, the VRRP VIP). That boundary moves a little here. The ADR
+names the move so that the next person does not have to discover it again.
+`detectNodeIP` and the HA path both learn about the overlay interface. A
+WireGuard overlay that carries a VRRP VIP works only over `unicastPeers`, because
+multicast does not cross a point-to-point tunnel. `detectNodeIP` must select
+from the overlay interface, not from the default route. These are real changes
+to the most delicate code in the tree, and their tests are the price of the
+feature.
 
 **One window this record will not pretend is closed.** A peer `endpoint` given
-as a hostname has to resolve before the overlay is up, and if DNS itself is only
-reachable over the overlay that is a cycle the field cannot break. The
-validation warns and the documentation says to use addresses; the field does not
-make a hostname endpoint safe, it only makes the failure legible.
+as a hostname must resolve before the overlay is up. If DNS itself is reachable
+only over the overlay, that is a cycle that the field cannot break. Validation
+warns, and the documentation says to use addresses. The field does not make a
+hostname endpoint safe. It only makes the failure clear.
 
 ## Alternatives considered
 
-**Documentation only: a cloud-init recipe, no field.** The honest baseline, and
-rejected on three counts a recipe cannot reach. First, it runs only where
-cloud-init runs: `write_files` and `runcmd` are cloud-init modules, so on an
-on-premise or bare-metal node with no datasource — configured through
-`/etc/corium/config.yaml` or the kernel command line, the paths `internal/source`
-exists to serve — the recipe never executes at all, and that is the very
-population an overlay across sites and providers is for. Second, it cannot make
-the overlay address the address the kubelet registers, because that choice is
-made inside `corium-agent` after cloud-init has run and there is no kubelet-args
-escape hatch to reach it from a `runcmd`. Third, it cannot keep the private key
-out of cleartext instance metadata. Everything else about a recipe works — a
-`write_files` config and an enabled `wg-quick@.service` do bring an interface up
-before k0s — but those three gaps are what turn a working demo into a node that
-is unconfigured off-cloud, quietly unreachable from across the overlay, or a
-cluster whose keys leak with its metadata. That is the same reasoning ADR 3 used
-to reject documentation-only for spare-disk RAID: the ordering problem is the one
-that silently breaks a node. A recipe will still be documented as the escape
-hatch (decision 9), and will still be the right tool for an overlay that is *not*
-the cluster transport, on a node that has cloud-init anyway.
+**Documentation only: a cloud-init recipe, no field.** This is the honest
+baseline. It is rejected for three reasons that a recipe cannot fix. First, it
+runs only where cloud-init runs, because `write_files` and `runcmd` are
+cloud-init modules. Some on-premise or bare-metal nodes have no datasource. They
+get their configuration from `/etc/corium/config.yaml` or the kernel command
+line, the paths that `internal/source` exists to serve. On those nodes, the
+recipe never runs at all, and those nodes are the exact population that an
+overlay across sites and providers is for. Second, the recipe cannot make the
+overlay address the address that the kubelet registers. `corium-agent` makes
+that choice after cloud-init ran, and no kubelet-args escape hatch lets a
+`runcmd` reach it. Third, the recipe cannot keep the private key out of
+cleartext instance metadata. Everything else about a recipe works. A
+`write_files` configuration and an enabled `wg-quick@.service` do bring an
+interface up before k0s. But the three gaps turn a working demo into one of
+three failures: a node that is unconfigured off-cloud, a node that is quietly
+unreachable from across the overlay, or a cluster whose keys leak with its
+metadata. ADR 3 used the same reasoning to reject documentation-only for
+spare-disk RAID: the ordering problem is the one that silently breaks a node.
+The recipe will still be documented as the escape hatch (decision 9). It is
+still the right tool for an overlay that is *not* the cluster transport, on a
+node that has cloud-init anyway.
 
-**A bare node-IP override field plus the recipe.** Tempting as the smaller move:
-ship `wireguard-tools`, add a general `node.address` override so the kubelet
-registers what it is told, and document the interface as a recipe. Rejected
-because it splits one invariant — "the node registers its overlay address" —
-across two places the operator keeps in sync by hand, with the agent unable to
-check that the interface actually carries the address the field names. It also
-leaves the private key in the recipe's `write_files`, unsolved. ADR 3 could
-decompose cleanly because there was a real seam: spare disks are declarable at
-first boot, a RAID root is genuinely impossible at first boot. Here there is no
-such seam — interface bring-up, node addressing and the secret are all
-first-boot-and-after, agent-adjacent and key-bearing — so a decomposition cuts
-through the middle of one problem rather than between two.
+**A bare node-IP override field plus the recipe.** This is tempting as the
+smaller move: ship `wireguard-tools`, add a general `node.address` override so
+that the kubelet registers the address it is given, and document the interface
+as a recipe. It is rejected because it splits one invariant, "the node registers
+its overlay address", across two places. The operator must keep the two in sync
+by hand, and the agent cannot check that the interface actually carries the
+address that the field names. It also leaves the private key in the
+`write_files` of the recipe, unsolved. ADR 3 was able to split its problem cleanly
+because there was a real seam: spare disks are declarable at first boot, and a
+RAID root is impossible at first boot. Here there is no such seam. Interface
+bring-up, node addressing and the secret all apply at first boot and after, all
+sit close to the agent, and all involve the key. So a split cuts through the
+middle of one problem, not between two problems.
 
 **A NetworkManager keyfile connection instead of `wg-quick`.** NetworkManager
-manages WireGuard natively and is the one renderer the image already runs, so it
-could materialise the interface without `wg-quick` at all. Rejected as the
-primary path for two reasons: it couples the feature to NM being the renderer
-forever, where `wg-quick` is renderer-agnostic and survives a future change of
-mind; and since `wireguard-tools` ships present-but-inert regardless — `wg` is
-wanted for diagnostics on a node whose overlay is misbehaving — the package it
-would save is one Corium keeps anyway, so avoiding `wg-quick` buys little. The
-schema does not depend on which of the two materialises the interface, so this
-stays an implementation choice the ADR need not freeze.
+manages WireGuard natively, and it is the one renderer that the image already
+runs. So it can create the interface without `wg-quick` at all. It is rejected as
+the primary path for two reasons. First, it couples the feature to NM as the
+renderer forever, but `wg-quick` is renderer-agnostic and survives a future
+change of mind. Second, `wireguard-tools` ships present but inert in all cases,
+because `wg` is wanted for diagnostics on a node whose overlay misbehaves. So
+the package that NM saves is one that Corium keeps anyway, and avoiding
+`wg-quick` gains little. The schema does not depend on which of the two creates
+the interface. So this stays an implementation choice that the ADR does not need
+to freeze.
 
-**Managing the overlay's keys and mesh from the `corium:` block.** No. Minting
-and distributing keys, and knowing the whole topology, is fleet management, and
-Corium provisions nodes rather than managing them. The block describes one
-node's peers and no more.
+**Managing the overlay's keys and mesh from the `corium:` block.** No. To create
+and distribute keys, and to know the whole topology, is fleet management. Corium
+provisions nodes and does not manage them. The block describes the peers of one
+node and nothing more.

@@ -5,239 +5,247 @@ Status: accepted
 ## Context
 
 [Issue #2](https://github.com/Corium-OS/Corium/issues/2) asks for an API to
-manage the operating system. The discussion on it converged quickly on the two
-things worth having first — reading a node's state and driving its upgrade —
-and just as quickly on the two questions that actually decide the design: what
-such an API is allowed to do, and how a node learns which operator to obey.
+manage the operating system. The discussion on it agreed quickly on the two
+features to build first: reading the state of a node and driving its upgrade.
+It also agreed quickly on the two questions that decide the design. What is
+such an API allowed to do? How does a node learn which operator to obey?
 
-Today the answer to both is SSH. That is worth stating plainly, because an
-immutable OS makes SSH a poor fit in a way that is easy to miss. The shell you
-land in is a shell over a system where almost nothing you type persists: `dnf`
-is absent, `/usr` is read-only, and the changes that do survive land in `/etc`
-and `/var` where they silently diverge from the image on the next upgrade. What
-an operator actually wants — the booted image digest, the last hundred lines of
-the k0s journal, a staged upgrade, a drain and a reboot — are a handful of
-operations, and SSH grants root to get at them.
+Today the answer to both questions is SSH. This record says so plainly,
+because on an immutable OS, SSH is a poor fit, and the reason is easy to miss.
+The shell you get runs on a system where almost nothing you type persists.
+`dnf` is absent and `/usr` is read-only. The changes that survive land in `/etc`
+and `/var`, and on the next upgrade they silently diverge from the image. An
+operator wants a small set of operations: the digest of the booted image, the
+last hundred lines of the k0s journal, a staged upgrade, a drain, and a reboot.
+SSH grants root to get them.
 
-Two of Corium's stated non-goals sit close enough to this request to be worth
-disarming before going further.
+Two of the stated non-goals of Corium are close to this request. This record
+answers them before it continues.
 
-**"Corium is not a fleet-management control plane."** It is not, and this does
-not make it one. What is proposed is a daemon on each node that answers
+**"Corium is not a fleet-management control plane."** It is not, and this API
+does not make it one. The proposal is a daemon on each node. The daemon answers
 questions about that node and acts on that node. There is no registry, no
-inventory, no desired state, nothing that reconciles, and no server anywhere
-holding a list of machines. A cluster-wide upgrade is a `cctl` loop over
-addresses the operator supplied, running on the operator's laptop. If that
-sequencing should one day be driven by a controller, the controller will be
-somebody else's, and it will talk to this same API.
+inventory, no desired state, nothing that reconciles, and no server that holds
+a list of machines. A cluster-wide upgrade is a `cctl` loop over addresses that
+the operator supplied, and it runs on the laptop of the operator. If a
+controller drives that sequence one day, the controller will belong to somebody
+else, and it will talk to this same API.
 
 **"A bespoke configuration API" is out of scope.** It stays out of scope for a
-node in service: this API will not rewrite the `corium:` block of a machine
-that has bootstrapped, and a node that needs different configuration is
-reprovisioned. Provisioning remains cloud-init's job (decisions 6 and 7), and
-the API covers day two, after the machine exists.
+node in service. This API will not rewrite the `corium:` block of a machine
+that bootstrapped. If a node needs a different configuration, the operator
+reprovisions it. Provisioning stays the job of cloud-init (decisions 6 and 7),
+and the API covers day two, after the machine exists.
 
-*Amended.* A node that has **not** bootstrapped is not yet a machine in
-service, and refusing it a configuration left maintenance mode unable to serve
-the case it was built for. See "Configuration, before a node is a node" below.
+*Amended.* A node that is **not** bootstrapped yet is not a machine in service.
+When the API refused to give it a configuration, maintenance mode could not
+serve the case it was built for. See "Configuration, before a node is a node"
+below.
 
 ## Decision
 
-Corium grows `corium-apid`, a Go daemon shipped in `/usr`, serving JSON over
-HTTP and mutual TLS on `7443/tcp`, on the standard library alone. The client is
-`cctl`. Trust is anchored in an
-**operator CA** whose certificate the node is given, and which signs the client
-certificates the node will accept.
+Corium adds `corium-apid`, a Go daemon that ships in `/usr`. It serves JSON
+over HTTP and mutual TLS on `7443/tcp`, and it uses only the standard library.
+The client is `cctl`. Trust is anchored in an **operator CA**. The node
+receives the certificate of this CA, and the CA signs the client certificates
+that the node accepts.
 
-The daemon is off unless a node is told to run it, and a node that has not yet
-been claimed by an operator is not a cluster member. Those two are as much a
-part of this decision as the API surface itself.
+The daemon is off unless the configuration of the node tells it to run. A node
+that no operator claimed yet is not a cluster member. These two rules are as
+much a part of this decision as the API surface itself.
 
 ### What it manages
 
-Four surfaces, every one of them scoped to the machine answering the call.
+Four surfaces. Each one is scoped to the machine that answers the call.
 
 **Node state**, read-only: role, hostname, machine ID, the booted and staged
 bootc images with their digests, the k0s version, the greenboot verdict,
-uptime, kernel. This is the endpoint that makes the other three safe to use,
-because it is how an operator finds out what a node is before doing anything
-to it.
+uptime, and kernel. This endpoint makes the other three safe to use. An
+operator uses it to find out what a node is before doing anything to it.
 
-**Services and journals**: the state of the units Corium owns and of k0s;
-restarting k0s; reading the journal for a named unit over a bounded range, with
-follow; `dmesg`. Units are named from an allowlist rather than passed through,
-so that the API is not a way to start arbitrary systemd units.
+**Services and journals**: the state of the units that Corium owns and of k0s,
+a restart of k0s, the journal of a named unit over a bounded range (with
+follow), and `dmesg`. The API takes unit names from an allowlist and does not
+pass names through. As a result, the API is not a way to start arbitrary
+systemd units.
 
-**Upgrades**, the mechanism issue #2 spends most of its length on: stage an
-image, apply it, roll back. The node refuses an image its own signing policy
-would accept unsigned, so that a typo cannot rebase a cluster node onto
-Silverblue. Health gating and the one-node-at-a-time roll-out live in `cctl`,
-which knows about the other nodes; the daemon only ever knows about its own.
+**Upgrades**, the mechanism that issue #2 spends most of its length on: stage
+an image, apply it, and roll back. The node refuses an image that its own
+signing policy accepts without a signature. Thus a typo cannot rebase a cluster
+node onto Silverblue. Health gating and the roll-out of one node at a time live
+in `cctl`, which knows about the other nodes. The daemon only knows about its
+own node.
 
-An earlier version of this record said the image's *labels* would be checked as
-well. They are not, for two reasons found while building it. A Corium node
-ships no skopeo, no podman and no jq — a container engine on the host is
-deliberately absent, because k0s supervises its own — and bootc's status output
-carries no labels, so there is nothing on the machine that can read them.
-More importantly, a label is not worth reading: anybody can write
-`LABEL org.opencontainers.image.title="Corium"`, so it catches a typo and
-nothing else.
+An earlier version of this record said that the API would also check the
+*labels* of the image. It does not, for two reasons that came up while building
+it. First, a Corium node ships no skopeo, no podman and no jq. A container
+engine on the host is absent by design, because k0s supervises its own. Also,
+the status output of bootc carries no labels. So nothing on the machine can
+read them. Second, and more important, a label is not worth reading. Anybody
+can write `LABEL org.opencontainers.image.title="Corium"`, so a label check
+catches a typo and nothing else.
 
-The signing policy catches the typo *and* the attacker, needs no tooling, and
-is enforced by the runtime at pull time regardless. It is also the right shape
-for the derived images Corium supports: an operator who builds their own adds
-their repository and key to `/etc/containers/policy.json`, and their image
-becomes acceptable because they said so rather than because it claimed to be
-Corium.
+The signing policy catches the typo *and* the attacker. It needs no tooling,
+and the runtime enforces it at pull time in all cases. It also fits the derived
+images that Corium supports. An operator who builds their own image adds their
+repository and key to `/etc/containers/policy.json`. Their image then becomes
+acceptable because they said so, not because it claimed to be Corium.
 
 *Amended, once the first real node was upgraded.* Staging streams. `cctl` opens
-`POST /v1/upgrade/stage` and reads newline-delimited JSON until the pull ends: a
-`progress` line for each line bootc prints, then one terminal record — `staged`
-with what is now waiting, or `error` with what went wrong. It falls back to a
-single JSON object and a status code only for the refusals that happen before
-the pull starts, a malformed reference or an image the policy rejects, because
-nothing has been written yet and a `400` or `403` is still the node's to send.
+`POST /v1/upgrade/stage` and reads newline-delimited JSON until the pull ends.
+The node sends a `progress` line for each line that bootc prints, then one
+terminal record: `staged` with what is now waiting, or `error` with what went
+wrong. The node falls back to a single JSON object and a status code only for
+the refusals that happen before the pull starts: a malformed reference, or an
+image that the policy rejects. At that point nothing is written yet, and the
+node can still send a `400` or `403`.
 
-Two facts forced this, and both are worth recording because the first cut got
-them wrong. A pull is hundreds of megabytes over whatever link a node has, so it
-is minutes, not the "answers immediately or not at all" the client's timeout
-assumed — and a 30-second client deadline did not merely cut a working upgrade
-off, it *cancelled* it, because the abandoned request cancelled the context the
-pull ran under, so the node's own 30-minute `pullTimeout` was never reachable.
-And an operator watching a silent terminal for those minutes cannot tell a slow
-pull from a stuck one. Streaming answers both: the node's `pullTimeout` is the
-only clock, and the operator sees where the pull has got to. This is the same
-`http.Flusher` and newline-delimited JSON the followed-journal route already
-uses; it adds no dependency, which is the test this record sets for the daemon.
+Two facts forced this change. This record keeps both, because the first
+version got them wrong. First, a pull is hundreds of megabytes over whatever
+link the node has, so it takes minutes. The client timeout assumed that the
+node "answers immediately or not at all". A 30-second client deadline did more
+than cut off a working upgrade: it *cancelled* the upgrade. The abandoned
+request cancelled the context that the pull ran under, so the pull could never
+reach the 30-minute `pullTimeout` of the node. Second, an operator who watches
+a silent terminal for those minutes cannot tell a slow pull from a stuck one.
+Streaming solves both problems. The `pullTimeout` of the node is the only
+clock, and the operator sees how far the pull got. This uses the same
+`http.Flusher` and newline-delimited JSON that the followed-journal route
+already uses. It adds no dependency, which is the test that this record sets
+for the daemon.
 
-The same mismatch was latent in `drain` and `reset`, whose work is also minutes
-— a drain waits on pod disruption budgets. They keep a single response, but the
-client now gives them a deadline that matches the node's rather than the 30
-seconds meant for the calls that answer at once. `apply` is untouched: it starts
-a systemd unit and returns, and the drain and reboot happen in that unit, off
-the request entirely.
+The same mismatch was hidden in `drain` and `reset`. Their work also takes
+minutes, because a drain waits on pod disruption budgets. They keep a single
+response, but the client now gives them a deadline that matches the deadline of
+the node, not the 30 seconds meant for the calls that answer at once. `apply`
+does not change: it starts a systemd unit and returns. The drain and the reboot
+happen in that unit, completely outside the request.
 
-**Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These are
-destructive and are marked as such in the schema.
+**Node lifecycle**: reboot, shutdown, cordon, drain, and reset. These
+operations are destructive, and the schema marks them as destructive.
 
-Cordon and drain land differently from the rest, and the record should say so
-rather than let somebody discover it: they work on controllers only. A node
-acts on itself, and evicting a pod needs cluster admin credentials that only a
-controller holds locally. Draining a worker stays a cluster operation, done
-with `kubectl` against the kubeconfig this API will hand over — which is a
-consequence of the node-local rule rather than a gap in it, and is the second
-place that rule costs something visible. Reset is the strongest of
-them: it takes the node out of the cluster, wipes `/var/lib/k0s`, and drops the
-machine back to unenrolled — it is the one operation that returns a node to
-maintenance mode, and it cannot leave it half-way.
+Cordon and drain behave differently from the rest, and this record states it so
+that nobody discovers it by surprise: they work on controllers only. A node acts
+on itself, and to evict a pod you need cluster admin credentials, which only a
+controller holds locally. To drain a worker, you still use a cluster operation:
+`kubectl` against the kubeconfig that this API hands over. This is a
+consequence of the node-local rule, not a gap in it, and it is the second place
+where that rule has a visible cost. Reset is the strongest of these operations.
+It takes the node out of the cluster, wipes `/var/lib/k0s`, and puts the
+machine back in the unenrolled state. It is the only operation that returns a
+node to maintenance mode, and it cannot leave the node half-way.
 
 *Amended, for etcd quorum during a rollout.* A controller reports its own etcd
-member on `GET /v1/etcd`: etcd's `/health` verdict and the member list that
-member sees. It is a reading of local state, like the k0s version, and judges
-nothing about its peers — it cannot, since k0s binds etcd's client port to
-`127.0.0.1`. Whether the cluster can lose a member is decided in `cctl`, from
-every controller's answer, which keeps the split this section draws.
+member on `GET /v1/etcd`: the `/health` verdict of etcd and the member list
+that this member sees. This is a reading of local state, like the k0s version.
+It judges nothing about the peers of the member, and it cannot, because k0s
+binds the client port of etcd to `127.0.0.1`. `cctl` decides whether the
+cluster can lose a member, from the answers of every controller. This keeps the
+split that this section draws.
 
 ### What it does not manage
 
 No arbitrary command execution. There is no `exec`, no `shell`, and no endpoint
-that takes a command line. The moment one exists this is SSH with a worse client
-and a second authentication system to keep correct, and every argument for
-keeping the surface small stops applying.
+that takes a command line. If one existed, this API would be SSH with a worse
+client and a second authentication system to keep correct. Every argument for
+a small surface would then stop applying.
 
-Almost no Kubernetes. The API does not proxy the apiserver, list pods, or keep
-a kubeconfig on the operator's behalf. `kubectl` is not a gap.
+Almost no Kubernetes. The API does not proxy the apiserver, does not list pods,
+and does not keep a kubeconfig for the operator. `kubectl` already does these
+things, so this is not a gap.
 
-The exception, added after the rest was built and working: it will hand over
-the administrator kubeconfig k0s minted, once, on request. That was left out of
-the first version of this record on the grounds above, and leaving it out was
-wrong — it is the one Kubernetes-adjacent thing with no other answer. Without
-it, getting a usable `kubectl` out of a freshly bootstrapped node means SSHing
-into a controller and running `cat` on a file, which is the exact shape of
-problem this API exists to remove.
+The exception, added after the rest was built and working: the API hands over
+the administrator kubeconfig that k0s minted, once, on request. The first
+version of this record left it out for the reasons above, and that was wrong.
+It is the one Kubernetes-adjacent need that has no other answer. Without it, to
+get a working `kubectl` from a freshly bootstrapped node, you SSH into a
+controller and run `cat` on a file. That is exactly the kind of problem this
+API exists to remove.
 
-It is `admin`, and it outranks everything else here: every other call acts on
-one machine, and this one hands over a cluster. `reset` destroys a node; this
-gives away every workload in the cluster, to somebody nothing here can take it
-back from. The node says so in its journal for that reason.
+It requires `admin`, and it outranks everything else here. Every other call
+acts on one machine, but this one hands over a cluster. `reset` destroys a
+node. This call gives away every workload in the cluster, to somebody that
+nothing here can take it back from. For that reason, the node writes the event
+to its journal.
 
-What it does not become is a Kubernetes client. It reads the file k0s wrote,
-rewrites the server address to one that will keep working — the virtual IP on
-an HA control plane, since a kubeconfig aimed at one particular controller
-stops working the first time that controller does — and returns it.
+It does not make the API a Kubernetes client. The API reads the file that k0s
+wrote, rewrites the server address, and returns the file. The new address is
+one that keeps working: the virtual IP on an HA control plane. A kubeconfig
+that points at one particular controller stops working the first time that
+controller stops.
 
 No package installation and no file writing.
 
 #### Configuration, before a node is a node
 
-The second exception, and it reverses something this record stated flatly:
-**`cctl apply` writes a node's `corium:` document, and only before that node has
-bootstrapped.**
+This is the second exception, and it reverses something that this record
+stated without qualification: **`cctl apply` writes the `corium:` document of a
+node, and only before that node bootstraps.**
 
-What was written above — "this API cannot write a `corium:` block, and `cctl`
-has no `apply-config`" — was aimed at the right target and drawn too wide. The
-thing worth refusing is a configuration API for machines in service: a node
-whose role, cluster or join token can be rewritten underneath a running
-Kubernetes is a node whose configuration and behaviour are two different facts,
-and decisions 6 and 7 exist to stop exactly that. That refusal stands. A
-bootstrapped node returns `409` and is told to use `cctl reset`.
+What was written above, "this API cannot write a `corium:` block, and `cctl`
+has no `apply-config`", aimed at the right target but drew the line too wide.
+The thing to refuse is a configuration API for machines in service. If the
+role, cluster or join token of a node can be rewritten under a running
+Kubernetes, the configuration of the node and its behavior become two different
+facts. Decisions 6 and 7 exist to stop exactly that. That refusal stands. A
+bootstrapped node returns `409`, and the response tells the operator to use
+`cctl reset`.
 
-What the original wording also forbade, without meaning to, was the one case
+The original wording also forbade, without intent, the one case that
 maintenance mode was built for. A node held before bootstrap has no role, no
-cluster and no workloads; there is nothing underneath it to be inconsistent
-with. Yet it still had to be told what to be by cloud-init, which means the
-bare-metal machine with no datasource — the case mode C names as its
-justification — could be claimed and then had nothing to become. Enrolment
-handed over ownership and left the node useless.
+cluster and no workloads. Nothing underneath it can become inconsistent. But
+cloud-init still had to tell it what to be. So the bare-metal machine with no
+datasource, which is the case that mode C names as its reason to exist, could
+be claimed and then had nothing to become. Enrolment handed over ownership and
+left the node useless.
 
 Three things make this narrower than it sounds:
 
 - **It writes a source that already exists.** `/etc/corium/config.yaml` is
-  first in decision 6's chain, ahead of cloud-init, and is there precisely for
-  "bare metal, PXE and appliances [that] have no datasource". `cctl apply`
-  fills a slot the design already reserved; it does not invent an authority.
+  first in the chain of decision 6, ahead of cloud-init. It is there for "bare
+  metal, PXE and appliances [that] have no datasource". `cctl apply` fills a
+  slot that the design already reserved. It does not invent an authority.
 - **It is bounded by the bootstrap, not by a permission.** The node refuses
-  after it has bootstrapped, whoever asks and whatever role they hold. The
-  marker in `/var` that stops a node re-bootstrapping is the same one that
-  closes this door.
-- **It does not reconcile.** The document is written once, by an operator, and
-  read once, by the bootstrap. Nothing watches it, and nothing re-applies it.
+  after it bootstraps, whoever asks and whatever role they hold. The same
+  marker in `/var` that stops a node from bootstrapping again also closes this
+  door.
+- **It does not reconcile.** An operator writes the document once, and the
+  bootstrap reads it once. Nothing watches it, and nothing applies it again.
 
-`api.awaitConfig` completes it. Without it a claimed node bootstraps at once
-with whatever it booted with, which for a machine nobody described is a
-single-node cluster nobody asked for; with it the node holds for an operator to
-say what it is, and only then builds anything. It is opt-in rather than
-inferred from an empty document, because a node that waits for ever must do so
-because somebody said so.
+`api.awaitConfig` completes this. Without it, a claimed node bootstraps at once
+with whatever configuration it booted with. For a machine that nobody
+described, that is a single-node cluster that nobody asked for. With it, the
+node waits for an operator to say what it is, and only then builds anything.
+It is opt-in rather than inferred from an empty document, because a node that
+waits for ever must do so because somebody said so.
 
-What the bootstrap waits on is a marker `corium-apid` writes in `/run`, not the
-document. The two units are ordered against cloud-init and not against each
-other, so an apply can land before the bootstrap has read anything — and a node
-watching for a change that has already happened waits for ever. The marker
-answers the question actually being asked, which is whether somebody answered.
+The bootstrap waits on a marker that `corium-apid` writes in `/run`, not on the
+document. The two units are ordered against cloud-init but not against each
+other. So an apply can land before the bootstrap reads anything, and a node
+that watches for a change that already happened waits for ever. The marker
+answers the real question: did somebody answer?
 
-The cost, stated plainly: a fleet can now be provisioned with an identical
-four-line cloud-init that carries no secrets and says only `api.enabled: true`
-and `api.awaitConfig: true`, with everything machine-specific arriving over the
-API afterwards. That is a
-genuinely different provisioning story from the one the rest of this document
-describes, and it is closer to Talos's than anything else here. It is offered,
-not preferred — modes A and B remain the unattended path, and a node that can
-be described in cloud-init should be.
+The cost, stated plainly: you can now provision a fleet with an identical
+four-line cloud-init that carries no secrets. It says only `api.enabled: true`
+and `api.awaitConfig: true`, and everything specific to each machine arrives
+over the API later. That is a different provisioning story from the one that
+the rest of this document describes, and it is closer to the model of Talos
+than anything else here. It is offered, not preferred. Modes A and B stay the
+unattended path. If you can describe a node in cloud-init, describe it there.
 
 #### A document that names no role, and the question asked before a claim
 
-The third exception, and it reverses a paragraph three above this one.
-**`api.awaitConfig` is no longer the only way a document says it is waiting: a
-document that names no role says it by omission, and is valid wherever the API
-runs.**
+This is the third exception, and it reverses a paragraph three paragraphs above
+this one. **`api.awaitConfig` is no longer the only way for a document to say
+that it waits: a document that names no role says it by omission, and is valid
+wherever the API runs.**
 
-What was written above — that the wait is "opt-in rather than inferred from an
+What was written above, that the wait is "opt-in rather than inferred from an
 empty document, because a node that waits for ever must do so because somebody
-said so" — reads well and is wrong, for a reason that is only visible from the
-other end. It assumes the alternative to waiting is something reasonable. It
-is not. `role` was required unless `awaitConfig` was set, so the two lines an
-operator actually writes first —
+said so", reads well and is wrong. The reason is only visible from the other
+end. It assumes that the alternative to waiting is something reasonable. It is
+not. `role` was required unless `awaitConfig` was set. So the first two lines
+that an operator writes were a validation error:
 
 ```yaml
 corium:
@@ -245,64 +253,65 @@ corium:
     enabled: true
 ```
 
-— were a validation error. Both units validate, so both fail: `corium-apid`
-exits non-zero into its restart limit and `corium-bootstrap` stops. The node
-that results has no API *and* no cluster, which is the worst of the states
-available to it, reached by the most natural thing anybody types.
+Both units validate the configuration, so both fail: `corium-apid` exits
+non-zero into its restart limit, and `corium-bootstrap` stops. The resulting
+node has no API *and* no cluster. That is the worst state available to it, and
+the most natural thing that anybody types gets it there.
 
-And "somebody said so" was already satisfied. Turning the API on and naming no
-role is not an ambiguous document a heuristic has to interpret: it turns on the
-one channel by which a node could be told what it is, and declines to say. A
-document with no role describes no node, so there is nothing the bootstrap
-could build from it even if it wanted to. The only two readings available are
-"wait" and "fail", and the second is not a reading, it is a refusal to have
-one.
+And "somebody said so" was already true. A document that turns the API on and
+names no role is not ambiguous, and no heuristic has to interpret it. It turns
+on the one channel through which the node can learn what it is, and it declines
+to say. A document with no role describes no node, so the bootstrap has nothing
+to build from it in any case. Only two readings are possible: "wait" and
+"fail". The second is not a reading. It is a refusal to have one.
 
-So: an empty role is accepted whenever `api.Mode()` is not `disabled`, and it
-holds the bootstrap exactly as `awaitConfig` does. With the API off it is still
-refused, and for the original reason — the answer could never arrive.
-`awaitConfig` keeps its meaning as the explicit spelling, and earns a second
-one it did not have: a document that names a role *and* should still wait.
+So an empty role is accepted whenever `api.Mode()` is not `disabled`, and it
+holds the bootstrap exactly as `awaitConfig` does. With the API off, validation
+still refuses it, for the original reason: the answer could never arrive.
+`awaitConfig` keeps its meaning as the explicit form. It also gets a second
+meaning that it did not have before: a document that names a role *and* still
+asks the node to wait.
 
 Nothing that was valid before changes meaning. The fleet cloud-init loses a
-line; every other document behaves as it did.
+line. Every other document behaves as it did.
 
-**The claim is where the surprise was.** Recording an enrolment is what
-releases a held bootstrap, so a node whose document names a role starts
-becoming that node the instant somebody claims it. That is mode C working as
-designed. It is also the one consequence operators do not expect, because
-"claim it now, decide later" is not a thing this design can offer: deciding
-later means `cctl reset`, a drain and a reboot.
+**The claim is where the surprise was.** When the node records an enrolment, it
+releases a held bootstrap. So a node whose document names a role starts to
+become that node the instant somebody claims it. That is mode C working as
+designed. It is also the one consequence that operators do not expect, because
+this design cannot offer "claim it now, decide later". To decide later means
+`cctl reset`, a drain and a reboot.
 
-The node now says so. A claim that carries no document, against a node whose
-own document names a role, is refused with the role, the name and the cluster
-it would build, and the claim is repeated with an acknowledgement or not at
-all. It costs nothing to answer: the refusal runs in `beforeClaim`, which
-abandons the enrolment without claiming the node and without spending an
-attempt, so the same pairing code works on the way back.
+The node now warns about this. If a claim carries no document, and the own
+document of the node names a role, the node refuses the claim. The refusal
+gives the role, the name and the cluster that the node would build. The
+operator repeats the claim with an acknowledgement, or does not repeat it. The
+refusal costs nothing to answer. It runs in `beforeClaim`, which abandons the
+enrolment without claiming the node and without using up an attempt. So the
+same pairing code still works for the second claim.
 
 Three things make this narrow enough to be worth doing:
 
-- **It is not a permission check.** Whoever holds the pairing code is entitled
-  to claim the node and build it. The refusal is about the assumption, not the
-  authority, and an acknowledgement is the only thing it asks for.
-- **It fires only where it is true.** A node holding for a configuration — the
-  whole fleet pattern — builds nothing on being claimed and is claimed without
-  a question. A guard that cried wolf on the recommended path would train
-  operators to dismiss it.
+- **It is not a permission check.** Whoever holds the pairing code has the
+  right to claim the node and build it. The refusal is about the assumption,
+  not the authority, and it asks only for an acknowledgement.
+- **It fires only where it is true.** A node that waits for a configuration,
+  which is the whole fleet pattern, builds nothing when it is claimed, so the
+  node accepts the claim without a question. If a guard gave false alarms on
+  the recommended path, operators would learn to ignore it.
 - **It is enforced by the node.** `cctl` asks the person, but a client that
-  never asked would still be refused, which is the same stance every other
-  irreversible operation here takes.
+  never asked still gets the refusal. Every other irreversible operation here
+  takes the same position.
 
 The cost, stated plainly: a script that enrols a node whose cloud-init names a
-role now needs `--yes`. It breaks loudly, on the first run, with the flag in
-the message. That is a real break for a real convenience, and it is accepted
-here because the failure it prevents is a reset and the failure it causes is a
-flag.
+role now needs `--yes`. The script fails loudly on the first run, and the
+message names the flag. That is a real break for a real convenience. This
+record accepts it because the failure it prevents is a reset, and the failure
+it causes is a missing flag.
 
 ### Whether it runs at all
 
-The API is opt-in, and the default is off:
+The API is opt-in, and it is off by default:
 
 ```yaml
 corium:
@@ -310,39 +319,40 @@ corium:
     enabled: true
 ```
 
-A node with no `api:` block behaves exactly as a Corium node behaves today — no
-daemon, no listening port, nothing to authenticate against, managed over the
-console and SSH. Every existing configuration and every example in this
-repository keeps working unchanged and gains no new attack surface by being
-upgraded.
+A node with no `api:` block behaves exactly as a Corium node behaves today: no
+daemon, no listening port, nothing to authenticate against, and management over
+the console and SSH. Every existing configuration and every example in this
+repository keeps working without change. An upgrade adds no new attack surface
+to them.
 
-This is not only a compatibility convenience. A privileged daemon listening on
-every machine in a fleet is a legitimate thing to refuse, and an operator who
-refuses it should be able to say so in one line rather than by masking a unit
-after the fact. `enabled: false`, written explicitly, masks
-`corium-apid.service` at bootstrap so that nothing later re-enables it quietly.
+This is not only for compatibility. A privileged daemon that listens on every
+machine in a fleet is a valid thing to refuse. An operator who refuses it must
+be able to say so in one line, not by masking a unit after the fact. If you
+write `enabled: false` explicitly, the bootstrap masks `corium-apid.service`,
+so that nothing re-enables it quietly later.
 
-Setting `operatorCA` or `operatorCAFrom` implies `enabled: true`, because
-naming the CA that owns a node is an unambiguous statement that the node should
-be manageable. Setting either of them *alongside* `enabled: false` is a
-validation error rather than a precedence puzzle: the configuration says two
-contradictory things, and the agent's contract is to fail before it mutates
-anything.
+If you set `operatorCA` or `operatorCAFrom`, this implies `enabled: true`.
+Naming the CA that owns a node is a clear statement that the node is to be
+manageable. If you set either key *alongside* `enabled: false`, that is a
+validation error, not a precedence puzzle. The configuration says two
+contradictory things, and the contract of the agent is to fail before it
+changes anything.
 
 ### How trust is established
 
 A node that runs the API needs exactly one thing to be manageable: the
 certificate of the CA that signs operator client certificates. Note what that
-is — a **certificate**, not a key. It is public material. It can be pasted into
-a Git repository, a Terraform module, or an instance's metadata without leaking
-anything, which is what makes the first of the three modes below defensible
-rather than a compromise.
+is: a **certificate**, not a key. It is public material. You can paste it into
+a Git repository, a Terraform module, or the metadata of an instance, and it
+leaks nothing. This is why the first of the three modes below is defensible
+and not a compromise.
 
-The private key of that CA lives on the operator's workstation or in whatever
-mints short-lived client certificates for the team. It never reaches a node.
+The private key of that CA lives on the workstation of the operator, or in
+whatever system mints short-lived client certificates for the team. It never
+reaches a node.
 
-**Mode A — the certificate, in clear, in cloud-init.** The mode to reach for
-when a PKI already exists.
+**Mode A: the certificate, in clear, in cloud-init.** Use this mode when a PKI
+already exists.
 
 ```yaml
 corium:
@@ -354,12 +364,12 @@ corium:
       -----END CERTIFICATE-----
 ```
 
-Zero touch, no console, no post-boot step, and nothing secret in the metadata
+Zero touch: no console, no step after boot, and nothing secret in the metadata
 service. Every node in a fleet carries the same block.
 
-**Mode B — resolved at first boot from a `SecretSource`.** The same object
-`join.tokenFrom` and `ha.authPassFrom` already use, with the same `waitFor`
-semantics:
+**Mode B: resolved at first boot from a `SecretSource`.** This is the same
+object that `join.tokenFrom` and `ha.authPassFrom` already use, with the same
+`waitFor` semantics:
 
 ```yaml
 corium:
@@ -369,12 +379,12 @@ corium:
       waitFor: 15m
 ```
 
-This exists because a CA is sometimes minted by the same run that builds the
-cluster, and because an operator who would rather have metadata carry a pointer
-than material should not have to argue for it. It reuses the machinery in
-`internal/bootstrap/token.go` unchanged.
+This mode exists for two reasons. Sometimes the same run that builds the
+cluster also mints the CA. Also, an operator who prefers that the metadata
+carry a pointer, not the material itself, must not have to argue for it. Mode B
+reuses the code in `internal/bootstrap/token.go` without change.
 
-**Mode C — maintenance mode.** `enabled: true` and neither key set:
+**Mode C: maintenance mode.** `enabled: true` and neither key set:
 
 ```yaml
 corium:
@@ -383,11 +393,11 @@ corium:
     enabled: true
 ```
 
-The node boots, reads its configuration, validates it — and stops before
-bootstrapping k0s. `corium-apid` starts *unenrolled*: it serves TLS with a
-self-signed certificate and answers exactly one RPC, `Enroll`. On the console,
-on the serial port and in the journal it prints a pairing code and its own
-certificate fingerprint:
+The node boots, reads its configuration and validates it. Then it stops before
+it bootstraps k0s. `corium-apid` starts *unenrolled*: it serves TLS with a
+self-signed certificate and answers exactly one RPC, `Enroll`. It prints a
+pairing code and the fingerprint of its own certificate on the console, on the
+serial port and in the journal:
 
 ```
 Corium node is unenrolled and is not in a cluster.
@@ -400,149 +410,150 @@ Corium node is unenrolled and is not in a cluster.
 ```
 
 `cctl enroll` presents the code and the operator CA certificate. The node
-compares the code in constant time, writes the certificate to
+compares the code in constant time. It writes the certificate to
 `/var/lib/corium/api/operator-ca.pem` with mode `0644`, marks itself enrolled,
-restarts into the normal mTLS listener — and only then releases the bootstrap,
-which proceeds from the cloud-init configuration it has been holding all along.
+and restarts into the normal mTLS listener. Only then does it release the
+bootstrap. The bootstrap continues from the cloud-init configuration that the
+node held all along.
 
 #### A node in maintenance mode is not in a cluster
 
-That ordering is the load-bearing part, not an implementation detail.
+That order is the part that carries the design. It is not an implementation
+detail.
 
-The alternative — bootstrap first, enrol whenever somebody gets round to it —
-produces a node that is running workloads, holds a kubelet credential and a
-share of the cluster's secrets, and will obey the first stranger to reach an
-unauthenticated port. It is the worst combination available: the machine is
-valuable *and* it is unclaimed. Making the two states mutually exclusive
-removes that combination from the design rather than defending it.
+The alternative is to bootstrap first and enrol whenever somebody gets to it.
+That produces a node that runs workloads, holds a kubelet credential and a
+share of the secrets of the cluster, and obeys the first stranger who reaches
+an unauthenticated port. It is the worst combination available: the machine is
+valuable *and* it is unclaimed. Because the two states cannot exist together,
+the design removes that combination instead of defending it.
 
-What an attacker can win by racing an unenrolled node is therefore a bare
-machine that has joined nothing. That is still worth protecting — see below —
-but it is a bounded loss, and it is a loss the operator finds out about,
-because the node they were waiting on never appears in the cluster.
+So if an attacker wins a race against an unenrolled node, the attacker gets a
+bare machine that joined nothing. That machine is still worth protecting (see
+below), but the loss is bounded. Also, the operator finds out about it,
+because the node they were waiting for never appears in the cluster.
 
-The same rule runs the other way and gives `reset` its meaning: a node cannot
-go back to maintenance mode while it is a cluster member. Returning to
-maintenance is a reset — the node leaves the cluster, `/var/lib/k0s` is wiped,
-and it comes back up unenrolled and unbootstrapped, ready to be handed to
-somebody else. There is no operation that leaves a machine both in a cluster
-and unclaimed.
+The same rule works in the other direction and gives `reset` its meaning: a
+node cannot go back to maintenance mode while it is a cluster member. To return
+to maintenance is a reset. The node leaves the cluster, `/var/lib/k0s` is
+wiped, and the node comes back up unenrolled and not bootstrapped, ready to go
+to somebody else. No operation leaves a machine both in a cluster and
+unclaimed.
 
-Enrolment carries a CA certificate. It may also carry a configuration —
-`cctl enroll --config` — and when it does, the document is written before the
-claim is recorded, so the node is never released to bootstrap with a
-configuration its operator has already replaced. Sending one separately with
-`cctl apply` does the same thing in two steps, and is what a node whose
-bootstrap is still held or has already failed needs.
+Enrolment carries a CA certificate. It can also carry a configuration, with
+`cctl enroll --config`. In that case, the node writes the document before it
+records the claim. So the node is never released to bootstrap with a
+configuration that its operator already replaced. If you send the configuration
+separately with `cctl apply`, you do the same thing in two steps. A node whose
+bootstrap is still held, or already failed, needs this second form.
 
-The node re-reads its configuration after the hold is lifted, which is what
-makes either order work: the document the operator applied is the one that
-bootstraps, on the same boot, rather than the one the machine happened to boot
-with.
+The node reads its configuration again after the hold ends, and this is why
+either order works. The document that the operator applied is the one that
+bootstraps, on the same boot, not the one the machine happened to boot with.
 
 The cost is real and belongs in this record: **mode C is not zero touch.** A
-three-node cluster in mode C is three consoles to visit before any node joins
-anything, and `waitFor` on a join token does not help, because the joiner is
-not waiting on the token — it is waiting on a human. Modes A and B remain fully
-unattended, and an operator who wants both unattended provisioning and no
-secret in the metadata already has mode A, since the value there is not a
-secret.
+three-node cluster in mode C means three consoles to visit before any node
+joins anything. `waitFor` on a join token does not help, because the joiner
+does not wait on the token. It waits on a human. Modes A and B stay fully
+unattended. An operator who wants both unattended provisioning and no secret
+in the metadata already has mode A, because the value there is not a secret.
 
-The code is minted per boot from the kernel CSPRNG, uses an alphabet without
-the characters people transcribe wrongly, and is worth around forty bits. It is
-single-use, and five failed attempts end maintenance mode until the node is
-rebooted — an operator who has fat-fingered a code five times will not mind
-rebooting, and a script working through the keyspace gets one shot per boot.
+The node mints the code at each boot from the kernel CSPRNG. The code uses an
+alphabet without the characters that people often copy wrongly, and it is worth
+about forty bits. It is single-use. After five failed attempts, maintenance
+mode ends until the node reboots. An operator who mistyped a code five times
+will not mind a reboot, and a script that works through the keyspace gets one
+chance per boot.
 
-Both the code and the count of wrong ones are kept in `/run`, which is what
-makes "per boot" mean what it says. Holding them in the daemon's memory would
-make them per *process*: systemd brings this daemon back after a crash, and a
-restart would mint a second code while the first is still printed on the screen
-above it, and hand a guesser their five attempts back. `/run` is a tmpfs, so
-the state survives the restart, the reboot empties it, and none of it is ever
-written to a disk — which matters, because the disk image of an unclaimed node
-is exactly the one that gets passed around.
+The node keeps both the code and the count of wrong codes in `/run`, and this
+is what makes "per boot" mean what it says. If the daemon held them in memory,
+they would be per *process*. systemd restarts this daemon after a crash. A
+restart would then mint a second code while the first code is still printed on
+the screen above it, and it would give a guesser five new attempts. `/run` is a
+tmpfs, so the state survives a restart, a reboot empties it, and none of it is
+ever written to a disk. This is important, because the disk image of an
+unclaimed node is exactly the one that people pass around.
 
 #### Why a pairing code rather than an open port
 
-Talos is the obvious prior art and does not do this: its maintenance API on
+Talos is the obvious prior art, and it does not do this. Its maintenance API on
 `50000` accepts unauthenticated requests, `talosctl apply-config --insecure` is
-the documented first step, and verifying the node's identity is opt-in through
-`--cert-fingerprint`. That is a reasonable trade for Talos, where the prize for
-winning the race is a machine that has no configuration yet.
+the documented first step, and verification of the node identity is opt-in
+through `--cert-fingerprint`. That is a reasonable trade for Talos, where the
+attacker who wins the race gets a machine that has no configuration yet.
 
 A Corium node in mode C holds nothing either, which is the whole point of the
-section above — so the argument has to be made on what happens next rather than
-on what is there now.
+section above. So the argument must be about what happens next, not about what
+is there now.
 
-An unenrolled node is not an empty machine. It is a machine holding a validated
-configuration, a join token, and the intention to become a cluster member the
-moment somebody claims it. Enrolling it is not reading its state; it is
-acquiring the node for the rest of its life, since the CA it pins is the CA it
-will obey until it is reset. Two things follow. An attacker who wins the race
-gets a machine that proceeds to join the cluster with credentials the operator
-supplied, under an attacker's CA. An attacker who merely wants to be a nuisance
-wins by enrolling and doing nothing: the node is now claimed, the operator's own
-enrolment fails, and recovering it means a physical reset.
+An unenrolled node is not an empty machine. It holds a validated configuration,
+a join token, and the intention to become a cluster member the moment somebody
+claims it. To enrol it is not to read its state. It is to acquire the node for
+the rest of its life, because the node obeys the CA it pins until somebody
+resets it. Two things follow. An attacker who wins the race gets a machine that
+then joins the cluster with credentials that the operator supplied, under the
+CA of the attacker. An attacker who only wants to cause trouble wins by
+enrolling and doing nothing. The node is now claimed, the enrolment of the
+operator fails, and the only recovery is a physical reset.
 
-Neither is catastrophic. Both are avoided entirely by a code that takes one
-line of console output to read, and provisioning networks are shared often
-enough that the window is not theoretical.
+Neither result is catastrophic. A code that takes one line of console output to
+read prevents both completely. Provisioning networks are shared often enough
+that this window is a real risk.
 
-The code also closes the window in the other direction, which is the part worth
-noticing: the code authenticates the operator to the node, and the fingerprint
+The code also closes the window in the other direction, and this part is worth
+noticing. The code authenticates the operator to the node, and the fingerprint
 printed beside it authenticates the node to the operator. An operator who skips
-the fingerprint has not leaked anything — the CA certificate is public — but
-has no way to tell a node that enrolled from an impostor that answered. Both
-values arrive over the console, which is a channel an attacker on the network
-does not have.
+the fingerprint leaks nothing, because the CA certificate is public. But that
+operator cannot tell a real node that enrolled from an impostor that answered.
+Both values arrive over the console, and an attacker on the network does not
+have that channel.
 
-That last sentence is also the cost: **mode C needs console access** — serial,
-IPMI, SOL, or the hypervisor's view. An operator with neither a console nor a
-PKI is not served by mode C, and should use mode A.
+That last sentence is also the cost: **mode C needs console access**, through
+serial, IPMI, SOL, or the view of the hypervisor. Mode C does not serve an
+operator who has neither a console nor a PKI. That operator must use mode A.
 
 #### And an opt-in that gives the code up
 
-`api.insecure: true` drops the pairing code: the first client to reach an
-unclaimed node claims it. That is Talos's model, argued against above, and it
-is offered anyway — with the argument left standing rather than rewritten,
+`api.insecure: true` removes the pairing code: the first client to reach an
+unclaimed node claims it. That is the model of Talos, which this record argues
+against above. It is offered anyway, and the argument above stays as it is,
 because it is still the reason this is not the default.
 
-What makes it defensible where it is used is the rule the rest of this record
-already enforces. An unclaimed node is in no cluster, so winning the race gets
-a bare machine; and enrolment is still one-way, so the window closes the moment
-anybody uses it. The cases it is for are real: a bench, a lab, a provisioning
-network controlled end to end, a PXE fleet where visiting consoles is not a
-thing anybody is going to do. Mode C otherwise asks for one console visit per
-machine, which is a price some fleets will not pay and will route around with
-something worse.
+The rule that the rest of this record already enforces makes it defensible
+where it is used. An unclaimed node is in no cluster, so the winner of the race
+gets a bare machine. Enrolment is still one-way, so the window closes as soon
+as anybody uses it. The use cases are real: a bench, a lab, a provisioning
+network controlled end to end, or a PXE fleet where nobody is going to visit
+consoles. Otherwise, mode C asks for one console visit per machine. Some fleets
+will not pay that price, and they will work around it with something worse.
 
-Three things keep it honest. It is refused anywhere it would silently do
-nothing — with a CA configured, or with the API off — because a key that does
-nothing is the mistake that costs a reboot cycle to find. The node says so on
-its console, in words aimed at somebody who did not write the configuration
-that opened it. And the node **records that its claim was unauthenticated**,
-in `/var/lib/corium/api/claim.json`, which `cctl status` then shows: a node
-holds the same pinned CA whichever way it was claimed, so without that record
-there is no way to tell afterwards which of a fleet's machines were taken by
-whoever reached them first.
+Three things keep it honest. Validation refuses it anywhere it would silently
+do nothing: with a CA configured, or with the API off. A key that does nothing
+is a mistake that costs a reboot cycle to find. The node reports it on its
+console, in words for somebody who did not write the configuration that
+enabled it. And the node **records that its claim was unauthenticated**, in
+`/var/lib/corium/api/claim.json`, which `cctl status` then shows. A node holds
+the same pinned CA whichever way it was claimed. Without that record, you
+cannot tell later which machines of a fleet were taken by whoever reached them
+first.
 
 #### The node's own certificate
 
-The node mints its serving key at first boot and self-signs it. No private key
-is ever carried in a configuration, which is the whole point of the scheme, and
-it is why the operator CA cannot sign the serving certificate: the node has the
-CA's certificate and not its key, and there is nothing online to ask.
+The node mints its serving key at first boot and self-signs the certificate.
+No configuration ever carries a private key, which is the whole point of the
+scheme. This is also why the operator CA cannot sign the serving certificate.
+The node has the certificate of the CA but not its key, and there is no online
+service to ask.
 
-`cctl` therefore pins a node's fingerprint the first time it talks to it and
-records it next to the endpoint in `~/.corium/config.yaml`. In mode C the
-fingerprint was on the console next to the code. In modes A and B it is in the
-journal and in the instance console log, and `cctl` prints it and asks before
-pinning unless `--fingerprint` was passed.
+So `cctl` pins the fingerprint of a node the first time it talks to it, and
+records it next to the endpoint in `~/.corium/config.yaml`. In mode C, the
+fingerprint was on the console next to the code. In modes A and B, it is in
+the journal and in the console log of the instance. `cctl` prints it and asks
+before it pins it, unless you passed `--fingerprint`.
 
 #### Precedence, and why enrolment is sticky
 
-The whole resolution, in order:
+The full resolution, in order:
 
 | `api:` | Result |
 |---|---|
@@ -553,193 +564,191 @@ The whole resolution, in order:
 | `enabled: false` with either key set | Validation error |
 | both keys set | Validation error, matching `token` and `tokenFrom` |
 
-That table decides whether the daemon runs and who owns the node. `role`
-decides, orthogonally, what a released bootstrap builds — and whether there is
-anything to build at all: a document that names no role holds wherever the API
-runs, and is refused where it does not. See "A document that names no role"
-above.
+That table decides whether the daemon runs and who owns the node. Separately,
+`role` decides what a released bootstrap builds, and whether there is anything
+to build at all. A document that names no role holds the bootstrap wherever
+the API runs, and validation refuses it where the API does not run. See "A
+document that names no role" above.
 
-Enrolment is recorded in `/var/lib/corium/api/`, and `/var` survives upgrades
-and reboots. A node that has been enrolled — by any of the three modes — does
-not return to maintenance mode when it reboots. This is not a detail: if it
-did, anybody able to power-cycle a machine could take it, and the pairing code
-would be protecting a door that reopens on its own. It is also implied by the
-rule above, since a rebooting cluster member would otherwise come back up
-unenrolled and still in the cluster.
+The node records enrolment in `/var/lib/corium/api/`, and `/var` survives
+upgrades and reboots. A node that was enrolled, by any of the three modes, does
+not return to maintenance mode when it reboots. This is important. If it did,
+anybody who can power-cycle a machine could take it, and the pairing code would
+protect a door that opens again on its own. The rule above also requires it,
+because otherwise a cluster member that reboots would come back unenrolled and
+still in the cluster.
 
-Getting back to maintenance mode therefore means resetting the node, with
-everything that implies. That is deliberately more than an operator who has
-merely lost their CA key should have to do, so the recovery path is a different
-one: `corium-agent api set-ca --file operator-ca.pem`, run as root on the node.
-It is a local command, not a network operation — it opens no port and accepts
-no unauthenticated RPC — and root on the console already owns the machine, so
-it grants nothing that was not already granted. The cluster keeps running
-throughout.
+So to get back to maintenance mode, you must reset the node, with all the
+effects of a reset. That is intentionally too much for an operator who only
+lost their CA key, so the recovery path for that case is different:
+`corium-agent api set-ca --file operator-ca.pem`, run as root on the node. It
+is a local command, not a network operation. It opens no port and accepts no
+unauthenticated RPC. Root on the console already owns the machine, so the
+command grants nothing new. The cluster keeps running the whole time.
 
-Replacing the operator CA on a *reachable* node is done over the authenticated
-API, `cctl ca rotate`. Neither path goes back through maintenance mode.
+To replace the operator CA on a *reachable* node, use the authenticated API:
+`cctl ca rotate`. Neither path goes back through maintenance mode.
 
 ### Authorisation
 
-The client certificate's organisation carries the role: `corium:readonly`,
-`corium:operator`, `corium:admin`. Read-only reaches state and journals;
-operator adds services, upgrades, cordon and drain; admin adds reboot,
-shutdown, reset and CA rotation. Three roles because two were not enough to
-separate "let the on-call read the journal" from "let the on-call reboot it",
-and four would be a policy language nobody asked for.
+The organization field of the client certificate carries the role:
+`corium:readonly`, `corium:operator`, `corium:admin`. Read-only reaches state
+and journals. Operator adds services, upgrades, cordon and drain. Admin adds
+reboot, shutdown, reset and CA rotation. There are three roles because two
+were not enough to separate "let the on-call read the journal" from "let the
+on-call reboot it". Four would be a policy language that nobody asked for.
 
-OIDC, raised in the issue, is deferred rather than rejected. It authenticates
-humans far better than a certificate on a laptop does, and mapping its claims
-onto these same three roles is a small change. What it cannot be is the floor:
-it requires an identity provider to be reachable from the node, and the moment
-this API is most valuable is the moment the cluster and the network around it
-are least healthy. mTLS works on a machine that can reach nothing.
+OIDC, which the issue raised, is deferred, not rejected. It authenticates
+humans much better than a certificate on a laptop does, and to map its claims
+onto the same three roles is a small change. But it cannot be the floor. It
+needs an identity provider that the node can reach, and this API is most
+valuable exactly when the cluster and the network around it are least healthy.
+mTLS works on a machine that can reach nothing.
 
 ## Consequences
 
-The daemon is privileged. Reading the journal, calling `bootc`, and rebooting
-all require it, and no amount of capability trimming changes the fact that the
-process can reboot the machine. That is the argument for the surface being as
-small as it is, and the reason there is no `exec`. It also means SELinux policy
-is part of the work, not a follow-up.
+The daemon is privileged. It needs privilege to read the journal, call `bootc`
+and reboot. No amount of capability trimming changes the fact that the process
+can reboot the machine. That is the argument for a surface this small, and the
+reason there is no `exec`. It also means that SELinux policy is part of the
+work, not a follow-up.
 
 The daemon adds no third-party dependency. `net/http`, `crypto/tls` and
-`encoding/json` cover the transport, so the API ships to every node without
-enlarging what has to be trusted, audited or patched there. If that ever stops
-being true, it is a reason to revisit this record rather than a detail to
-absorb quietly.
+`encoding/json` cover the transport. So the API ships to every node and adds
+nothing there that must be trusted, audited or patched. If that stops being
+true one day, it is a reason to revisit this record, not a detail to absorb
+quietly.
 
-A node that opts in grows a listening port; a node that does not, does not.
-`7443` is clear of everything k0s binds — `6443`, `9443`, `8132`, `8133` — and
-of the kubelet's `10250`. Whether it should be reachable from anywhere but a
-management network is the operator's decision, and the documentation will say
-so.
+A node that opts in gets a listening port. A node that does not opt in does
+not get one. `7443` does not conflict with any port that k0s binds (`6443`,
+`9443`, `8132`, `8133`) or with the `10250` of the kubelet. The operator
+decides whether the port is reachable from anywhere other than a management
+network, and the documentation will say so.
 
-Mode C puts `corium-bootstrap.service` behind enrolment, which means the unit
-ordering has to be got right rather than assumed. The service already carries a
-comment about an ordering cycle that systemd resolved by silently deleting the
-job, so the gate is a target the daemon reaches rather than another `After=`
-edge on `cloud-final.service`. A node parked in maintenance mode must also read
-as parked and not as failed: greenboot must not mark the deployment bad, the
-unit must not sit in `failed`, and `systemctl list-units` should make the state
-obvious to somebody who did not provision the machine.
+Mode C puts `corium-bootstrap.service` behind enrolment, so the unit ordering
+must be correct, not assumed. The service already carries a comment about an
+ordering cycle that systemd resolved by silently deleting the job. So the gate
+is a target that the daemon reaches, not one more `After=` edge on
+`cloud-final.service`. A node parked in maintenance mode must also look parked,
+not failed. greenboot must not mark the deployment bad, the unit must not stay
+in `failed`, and `systemctl list-units` must make the state obvious to somebody
+who did not provision the machine.
 
-Losing the operator CA key means losing the ability to manage every node that
-trusts it, and the recovery is now a local one rather than a reset: console in,
-`corium-agent api set-ca --file`, done. Nodes keep running Kubernetes
-throughout, because none of this is in the data path. Losing the key is
-therefore an inconvenience proportional to the number of consoles, not an
-outage.
+If you lose the operator CA key, you lose the ability to manage every node that
+trusts it. The recovery is now local, not a reset: get to the console, run
+`corium-agent api set-ca --file`, and you are done. Nodes keep running
+Kubernetes the whole time, because none of this is in the data path. So a lost
+key is an inconvenience in proportion to the number of consoles, not an outage.
 
-The `corium:` block gains one optional key with three spellings under it. `api:`
-absent is the default and means no API at all, which keeps the promise that
-every line of a Corium configuration is optional — and keeps this ADR from
-changing the behaviour of a single node already in service.
+The `corium:` block gets one optional key with three spellings under it. When
+`api:` is absent, which is the default, there is no API at all. This keeps the
+promise that every line of a Corium configuration is optional. It also keeps
+this ADR from changing the behavior of any node already in service.
 
 ## Alternatives considered
 
-**SSH with a wrapper CLI.** Zero new attack surface, and it already works. The
-reason it loses is authorisation: SSH grants a shell, and there is no way to
-give somebody the journal without giving them the machine. Forced commands get
-partway there and turn into a second, worse policy engine written in
+**SSH with a wrapper CLI.** Zero new attack surface, and it already works. It
+loses on authorization. SSH grants a shell, and you cannot give somebody the
+journal without giving them the machine. Forced commands get part of the way,
+and then they turn into a second, worse policy engine written in
 `authorized_keys`.
 
-**A Kubernetes-native design — a DaemonSet and CRDs.** Tempting, because the
-cluster is right there and it would need no new transport. It fails on when it
-is needed: a node whose kubelet is wedged, whose etcd has lost quorum, or which
-is halfway through a bad upgrade is exactly the node an operator needs to reach,
-and it is exactly the node a DaemonSet cannot answer from. Putting node
-lifecycle inside the thing being upgraded also means the upgrade can sever the
-connection that was driving it.
+**A Kubernetes-native design: a DaemonSet and CRDs.** It is tempting, because
+the cluster is already there and it needs no new transport. It fails on timing.
+A node whose kubelet is stuck, whose etcd lost quorum, or which is halfway
+through a bad upgrade is exactly the node that an operator needs to reach. It
+is also exactly the node from which a DaemonSet cannot answer. Also, if node
+lifecycle lives inside the thing being upgraded, the upgrade can cut the
+connection that drives it.
 
-**A shared bearer token in cloud-init instead of mTLS.** Simpler, and it is
-what several projects in this space do. It reintroduces the problem the
-`SecretSource` machinery exists to avoid: a real secret sitting in instance
-metadata, readable by anything on the node that can reach `169.254.169.254`,
-identical across the fleet, and awkward to rotate. A CA certificate in the same
-place leaks nothing.
+**A shared bearer token in cloud-init instead of mTLS.** Simpler, and several
+projects in this space do it. It brings back the problem that the
+`SecretSource` machinery exists to avoid: a real secret in instance metadata.
+Anything on the node that can reach `169.254.169.254` can read it, it is
+identical across the fleet, and it is difficult to rotate. A CA certificate in
+the same place leaks nothing.
 
 **A cluster CA with its key in the configuration, as Talos does with
-`machine.ca`.** It is a genuinely nicer end state — one anchor, every node's
-serving certificate signed by it, no fingerprint pinning anywhere — and it is
-ruled out by the same sentence: it puts a private key in the configuration. If
-that key is in cloud-init, mode C has no reason to exist.
+`machine.ca`.** It is a better end state: one anchor, every serving certificate
+of every node signed by it, and no fingerprint pinning anywhere. The same
+sentence rules it out: it puts a private key in the configuration. If that key
+is in cloud-init, mode C has no reason to exist.
 
-**Letting an unenrolled node join the cluster and enrol later.** This is what
-the first draft of this record said, and it is worth keeping here because it is
-the obvious design and it is wrong. It makes mode C fully unattended, which is
-a genuine advantage, and it costs a node that is simultaneously valuable and
-unclaimed — running workloads, holding cluster credentials, and waiting to obey
-whoever reaches an unauthenticated port first. The pairing code was invented to
-defend that state. Deleting the state is better than defending it.
+**Letting an unenrolled node join the cluster and enrol later.** The first
+draft of this record said this. It stays here because it is the obvious design
+and it is wrong. It makes mode C fully unattended, which is a real advantage.
+The cost is a node that is valuable and unclaimed at the same time: it runs
+workloads, holds cluster credentials, and waits to obey whoever first reaches
+an unauthenticated port. The pairing code was invented to defend that state.
+To delete the state is better than to defend it.
 
-**An always-on API with no way to switch it off.** Fewer states, one less key,
-and a fleet where `cctl` always works. Rejected because a privileged daemon
-listening on every machine is a reasonable thing to veto, and because a node
-that has been running happily for a year should not acquire a new listening
-port by being upgraded. Off by default also means this ADR can be implemented
-without changing what any existing configuration does.
+**An always-on API with no way to switch it off.** Fewer states, one key less,
+and a fleet where `cctl` always works. It is rejected for two reasons. A
+privileged daemon that listens on every machine is a reasonable thing to veto.
+Also, a node that ran without problems for a year must not get a new listening
+port from an upgrade. Off by default also means that this ADR can be
+implemented without a change to what any existing configuration does.
 
-**gRPC instead of JSON over HTTP.** This is what the first version of this
-record chose, on two real advantages: streaming is in the framework rather than
-hand-rolled, and the client is generated from the schema so it cannot drift
-from the server. Talos is the prior art and does exactly this.
+**gRPC instead of JSON over HTTP.** The first version of this record chose
+this, for two real advantages. Streaming is part of the framework, not written
+by hand. The client is generated from the schema, so it cannot drift from the
+server. Talos is the prior art and does exactly this.
 
-It is reversed here on the cost, which is specific to what Corium is rather
-than to APIs in general. `google.golang.org/grpc` brings `protobuf`, `x/net`,
-`x/sys` and `x/text` behind it, and this repository has one dependency today.
-Those modules would not land in an application — they would be baked into an
-operating system image, on every node, in the read-only `/usr`, behind a
-listener that runs as root. That is the one place in this project where
-"prefer the standard library" is not a style preference, and the guidance in
-`AGENTS.md` is explicit that every dependency here is attack surface that ships
-to every node.
+This record reverses that choice because of the cost, which is specific to what
+Corium is, not to APIs in general. `google.golang.org/grpc` brings `protobuf`,
+`x/net`, `x/sys` and `x/text` with it, and this repository has one dependency
+today. Those modules would not go into an application. They would be baked
+into an operating system image, on every node, in the read-only `/usr`, behind
+a listener that runs as root. That is the one place in this project where
+"prefer the standard library" is not a style preference. The guidance in
+`AGENTS.md` says explicitly that every dependency here is attack surface that
+ships to every node.
 
-What is given up is smaller than it looks. `crypto/tls` does mutual TLS with
-client certificate verification directly, and it is the same code path either
-way. Streaming a journal is newline-delimited JSON and `http.Flusher`, which is
-a few dozen lines rather than a framework. The generated client is the real
-loss, and it is answered by the API surface being four endpoints rather than
-forty, and by the client living in this repository next to the server.
+The loss is smaller than it looks. `crypto/tls` does mutual TLS with client
+certificate verification directly, and it is the same code path in both
+designs. To stream a journal takes newline-delimited JSON and `http.Flusher`,
+which is a few dozen lines, not a framework. The generated client is the real
+loss. Two facts answer it: the API surface is four endpoints, not forty, and
+the client lives in this repository next to the server.
 
-`curl` working on a node that is half-broken turns out to be worth something
-too, which had been filed as a consolation and is closer to a feature.
+Also, `curl` works on a node that is half-broken, and that has value. This
+record first counted it as a consolation, but it is closer to a feature.
 
 ## What this does not settle
 
-The wire schema, the endpoint paths, and the `cctl` command tree. Those are the
-next pull requests. This record fixes the shape: off by default,
-node-local, four surfaces, no exec, mTLS anchored in an operator CA, three ways
-for that CA to arrive of which one requires nothing in cloud-init at all — and
-the rule that holds the last of them together, that a node nobody has claimed
-is a node in no cluster.
+The wire schema, the endpoint paths, and the `cctl` command tree. The next pull
+requests define them. This record fixes the shape: off by default, node-local,
+four surfaces, no exec, and mTLS anchored in an operator CA. That CA can arrive
+in three ways, and one of them needs nothing in cloud-init at all. One rule
+holds the last of them together: a node that nobody claimed is a node in no
+cluster.
 
 ## Implementation notes: confinement
 
-Recorded here rather than in the configuration reference, which specifies the
-schema and not the daemon's hardening. These are findings from a real node, not
-intentions.
+This section is here, not in the configuration reference, because that
+reference specifies the schema and not the hardening of the daemon. These are
+findings from a real node, not intentions.
 
 `corium-apid` runs as `unconfined_service_t`, like `corium-agent` and every
-other service on the image. There is no confined domain for it, and no policy
-module ships.
+other service on the image. It has no confined domain, and no policy module
+ships.
 
 A types-only module was tried and withdrawn. `semodule` writes the whole policy
-store into `/var/lib/selinux`, and `/var` on a bootc image is seeded at install
-and never updated afterwards — so the module would never reach a node that
-upgraded into it, and `bootc container lint` refuses the image for putting 1279
-files in `/var`. The same build passed in CI and failed on a real host, which is
-worth knowing before trusting either.
+store into `/var/lib/selinux`. On a bootc image, `/var` is seeded at install
+and never updated after that. So the module would never reach a node that
+upgraded into it. Also, `bootc container lint` refuses the image because it
+puts 1279 files in `/var`. The same build passed in CI and failed on a real
+host. Know this before you trust either one.
 
-What the unit enforces was checked on a node rather than reasoned about.
-`ProtectSystem=strict` had to go: it mounts everything read-only including
-`/run`, and bootc writes `/run/bootc/storage` while staging an image.
-`RestrictAddressFamilies` had to gain `AF_NETLINK`, which `k0s reset` needs to
-clean up a node's links. Everything else — `NoNewPrivileges`, `ProtectHome`,
-`PrivateTmp`, `RestrictNamespaces`, `MemoryDenyWriteExecute`, `LockPersonality`
-— survived a real `bootc switch` and a real `k0s reset`.
+What the unit enforces was tested on a node, not reasoned about.
+`ProtectSystem=strict` had to go: it mounts everything read-only, `/run`
+included, and bootc writes `/run/bootc/storage` while it stages an image.
+`RestrictAddressFamilies` had to gain `AF_NETLINK`, because `k0s reset` needs
+it to clean up the links of a node. Everything else (`NoNewPrivileges`,
+`ProtectHome`, `PrivateTmp`, `RestrictNamespaces`, `MemoryDenyWriteExecute`,
+`LockPersonality`) survived a real `bootc switch` and a real `k0s reset`.
 
-What the daemon touches, which is what a confined domain has to allow:
+What the daemon touches, which is what a confined domain must allow:
 
 | Access | What for |
 |---|---|
@@ -753,8 +762,8 @@ What the daemon touches, which is what a confined domain has to allow:
 | write `/dev/console` | the pairing code, for somebody who cannot log in yet |
 | execute `bootc`, `k0s`, `systemctl`, `journalctl` | every surface |
 
-Writing the domain wants a machine, not a desk. Boot a node, put it in
-permissive mode, exercise every command, and build the module from what was
+To write the domain, you need a machine, not a desk. Boot a node, put it in
+permissive mode, run every command, and build the module from what was
 actually denied:
 
 ```console
@@ -763,5 +772,6 @@ $ cctl status … && cctl logs … && cctl upgrade … && cctl reset …
 $ sudo ausearch -m AVC -ts recent | audit2allow -M corium-apid
 ```
 
-Rules derived from real denials rather than guessed at is the difference between
-a policy that confines the daemon and one that stops it answering on a fleet.
+Rules derived from real denials, not from guesses, make the difference between
+a policy that confines the daemon and a policy that stops it from answering on
+a fleet.
