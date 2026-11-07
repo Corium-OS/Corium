@@ -804,7 +804,9 @@ Each node downloads the extension *before* it goes out of service. So an
 unreachable registry, or a signature that does not verify, costs nothing. Then
 the node drains, stops k0s, swaps the extension, and comes back, without a
 reboot. If a pod disruption budget refuses the drain, the node cancels the
-change and does not force it.
+change and does not force it. The node then checks that k0s really started
+from the new binary. If it did not, the change fails and the node stays
+cordoned.
 
 A controller takes a `k0s backup` between the drain and the stop. The rollout
 prints the archive's path on the node's `snapshot` line. If the snapshot fails,

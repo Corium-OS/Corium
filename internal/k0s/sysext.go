@@ -237,14 +237,7 @@ func Activate(ctx context.Context, version Version) error {
 		return fmt.Errorf("installing the extension: %w", err)
 	}
 
-	// refresh, not merge: it unmerges whatever is there before merging what is
-	// there now, which is the difference between changing version and being
-	// told the slot is already occupied.
-	if err := run(ctx, "systemd-sysext", "refresh"); err != nil {
-		return fmt.Errorf("merging the extension: %w", err)
-	}
-
-	return nil
+	return mergeExtensions(ctx)
 }
 
 // ClearStaged removes the binaries k0s extracted from a previous version.

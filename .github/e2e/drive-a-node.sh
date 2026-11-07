@@ -183,12 +183,14 @@ fi
 FLOOR="$(awk -F= '/^K0S_FLOOR=/ { print $2 }' "${LOCK}")"
 [ -n "${FLOOR}" ] || fail "no K0S_FLOOR in ${LOCK}"
 
-# Same major.minor as the floor, different release. Sorted so the choice is
-# deterministic rather than whatever order the file happens to be in.
+# Same major.minor as the floor, different release. A release with another
+# Kubernetes patch is preferred: only then does the kubelet version change, and
+# that is what proves the new binary runs. Sorted so the choice is deterministic.
 MINOR="$(cut -d. -f1,2 <<<"${FLOOR}")"
-TARGET="$(awk -v m="${MINOR}." -v f="${FLOOR}" \
-	'!/^#/ && NF == 3 && $1 != f && index($1, m) == 1 { print $1 }' "${LOCK}" |
-	sort -u | tail -1)"
+CANDIDATES="$(awk -v m="${MINOR}." -v f="${FLOOR}" \
+	'!/^#/ && NF == 3 && $1 != f && index($1, m) == 1 { print $1 }' "${LOCK}" | sort -uV)"
+TARGET="$(grep -v "^${FLOOR%%+*}+" <<<"${CANDIDATES}" | tail -1 || true)"
+[ -n "${TARGET}" ] || TARGET="$(tail -1 <<<"${CANDIDATES}")"
 
 if [ -z "${TARGET}" ]; then
 	# Not a failure: a window can legitimately hold one release per minor, and
@@ -202,6 +204,31 @@ else
 		fail "the node reports ${RUNNING:-nothing} but its image's floor is ${FLOOR}; this step's premise is wrong before it starts"
 
 	# --- the refusals, which cost nothing and happen before anything moves ---
+
+	# What the host and the API each see when a swap fails. The API cannot run
+	# commands, so this grants a throwaway key and asks over SSH.
+	host_facts() {
+		echo "-- host facts"
+		ssh-keygen -t ed25519 -f "${WORK}/facts" -N '' -C 'e2e-facts' -q
+		"${CCTL}" access ssh add "${ADDRESS}" --user core --key-file "${WORK}/facts.pub" || return 0
+		ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes \
+			-o UserKnownHostsFile=/dev/null -p "${SSH_PORT:-2222}" -i "${WORK}/facts" \
+			"core@${SSH_HOST:-127.0.0.1}" 'sudo sh -s' <<-'FACTS' || true
+			set -x
+			unit=k0scontroller.service
+			pid=$(systemctl show --property MainPID --value "$unit")
+			apid=$(systemctl show --property MainPID --value corium-apid.service)
+			readlink "/proc/$pid/exe"
+			stat -L -c '%d %i %s %n' "/proc/$pid/exe" /usr/bin/k0s
+			sha256sum "/proc/$pid/exe" /usr/bin/k0s
+			/usr/bin/k0s version
+			findmnt /usr
+			nsenter -t "$apid" -m findmnt /usr
+			nsenter -t "$apid" -m stat -c '%d %i %s %n' /usr/bin/k0s
+			nsenter -t "$apid" -m sha256sum /usr/bin/k0s
+			systemd-sysext status
+			FACTS
+	}
 
 	# Built by insertion rather than with `sed a\`, whose continuation syntax
 	# differs between GNU and BSD -- and this script is meant to be runnable
@@ -231,8 +258,10 @@ else
 		fail "this script could not write the version into its own document"
 
 	# Minutes, not seconds: a quarter of a gigabyte to pull, then a drain.
-	CHANGED="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/new-version.yaml")" ||
+	if ! CHANGED="$("${CCTL}" apply "${ADDRESS}" --file "${WORK}/new-version.yaml")"; then
+		host_facts
 		fail "the node refused to move from ${FLOOR} to ${TARGET}, which is a legal change within one minor"
+	fi
 	echo "${CHANGED}"
 
 	grep -q "kubernetes" <<<"${CHANGED}" ||
@@ -260,6 +289,26 @@ else
 		sleep 5
 	done
 	kubectl get nodes
+
+	# The API's answer above comes from the node's own view. What actually runs
+	# is what Kubernetes reports: the API server and the kubelet each give their
+	# own version. They once kept the old one while the API reported the new.
+	WANT="${TARGET%%+*}"
+	if [ "${WANT}" = "${FLOOR%%+*}" ]; then
+		echo "${TARGET} has the floor's Kubernetes version, so the running version cannot tell them apart; skipping"
+	else
+		for attempt in $(seq 1 24); do
+			KUBELET="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true)"
+			SERVER="$(kubectl version -o json 2>/dev/null | grep -oE '"gitVersion": *"[^"]+"' | tail -1 | grep -oE 'v[^"]+' || true)"
+			if [[ "${KUBELET}" == "${WANT}+"* && "${SERVER}" == "${WANT}+"* ]]; then
+				break
+			fi
+			[ "${attempt}" -lt 24 ] ||
+				fail "after moving to ${TARGET} the kubelet reports ${KUBELET:-nothing} and the API server ${SERVER:-nothing}; the old binary is still running"
+			sleep 5
+		done
+		echo "kubelet ${KUBELET} and API server ${SERVER} both run ${WANT}"
+	fi
 fi
 
 step "ssh access, granted and taken away over the API"
