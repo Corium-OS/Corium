@@ -10,6 +10,7 @@ import (
 
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/etcd"
+	"github.com/Corium-OS/Corium/internal/k0s"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 )
 
@@ -48,6 +49,11 @@ type k8sNode struct {
 	// etcd serves GET /v1/etcd; nil means the node predates the route.
 	// etcdAfterMove replaces it once the node is moved.
 	etcd, etcdAfterMove *etcd.Status
+
+	hostname string
+
+	// lagging is what a controller's check reports behind the target minor.
+	lagging []k0s.Kubelet
 }
 
 func (n *k8sNode) service() string {
@@ -65,6 +71,7 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 
 	mux.HandleFunc("GET /v1/node", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(&nodeinfo.Node{
+			Hostname:     node.hostname,
 			Bootstrapped: true,
 			Role:         node.role,
 			Cluster:      node.cluster,
@@ -91,7 +98,10 @@ func newK8sClient(t *testing.T, node *k8sNode) *Client {
 				return
 			}
 
-			_ = json.NewEncoder(w).Encode(map[string]string{"kubernetes": node.version})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"kubernetes": node.version,
+				"lagging":    node.lagging,
+			})
 		})
 	}
 
@@ -381,6 +391,46 @@ func TestPreflightStopsTheRolloutBeforeAnyNodeMoves(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPreflightWarnsAboutAnUnlistedWorker is ADR 12: a lagging kubelet that no
+// listed node accounts for is named, and the rollout still goes ahead.
+func TestPreflightWarnsAboutAnUnlistedWorker(t *testing.T) {
+	t.Parallel()
+
+	fleet := &k8sFleet{t: t, nodes: map[string]*k8sNode{
+		"c1:7443": {
+			role: "controller", version: "v1.35.8+k0s.1", checks: true, hostname: "c1",
+			lagging: []k0s.Kubelet{
+				{Name: "w1", Version: "v1.35.8+k0s"},
+				{Name: "forgotten", Version: "v1.35.8+k0s"},
+			},
+		},
+		"w1:7443": {role: "worker", version: "v1.35.8+k0s.1", checks: true, hostname: "w1"},
+	}}
+
+	var out strings.Builder
+
+	rollout := &KubernetesRollout{
+		Version:     "v1.36.4+k0s.0",
+		Controllers: []string{"c1:7443"},
+		Workers:     []string{"w1:7443"},
+		Connect:     fleet.connect,
+		Out:         &out,
+		DryRun:      true,
+	}
+
+	if err := rollout.Run(t.Context()); err != nil {
+		t.Fatalf("Run() error = %v\n%s", err, out.String())
+	}
+
+	if !strings.Contains(out.String(), "warning: forgotten (kubelet v1.35.8+k0s) is not in this rollout") {
+		t.Errorf("no warning for the unlisted worker:\n%s", out.String())
+	}
+
+	if strings.Contains(out.String(), "warning: w1") {
+		t.Errorf("warned about a listed worker:\n%s", out.String())
 	}
 }
 
