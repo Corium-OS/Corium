@@ -1,0 +1,133 @@
+name: Build a bootable Corium disk
+description: Check KVM, build cctl, the OS image and a qcow2 disk from it, at output/qcow2/disk.qcow2.
+
+runs:
+  using: composite
+  steps:
+    - name: Check this runner can accelerate a virtual machine
+      shell: bash
+      run: |
+        # Without KVM, QEMU emulates, k0s takes ten to twenty times longer to
+        # come up, and this job times out with a failure that looks like a bug
+        # in Corium. Say what is actually wrong, first thing.
+        if [ ! -e /dev/kvm ]; then
+          echo "::error::/dev/kvm is absent: this runner cannot accelerate a VM." >&2
+          exit 1
+        fi
+
+        # Present but not usable by the runner user is the common case, and it
+        # is fixable rather than fatal.
+        if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm-for-the-runner.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+        fi
+
+        ls -l /dev/kvm
+        [ -r /dev/kvm ] && [ -w /dev/kvm ] || {
+          echo "::error::/dev/kvm exists but is not usable by this job." >&2
+          exit 1
+        }
+
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Install what boots a disk image
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          qemu-system-x86 ovmf cloud-image-utils dnsmasq-base
+
+    - name: Build cctl
+      shell: bash
+      run: |
+        # Plain go build: this runner has Go and not mise, and installing mise
+        # to run one task would pull Hugo and Node with it.
+        go build -o bin/cctl ./cmd/cctl
+        ./bin/cctl version
+
+    - name: Build the OS image
+      shell: bash
+      run: |
+        # sudo, because image-builder below runs as root and reads the
+        # root container store. Built rootless, the image lands in the runner
+        # user's store instead and the builder reports "image not known" --
+        # which is what happened the first time this ran. The release path
+        # never meets this: it pulls a published image, and the pull is what
+        # puts it where the builder looks.
+        sudo podman build --tag localhost/corium:e2e --file Containerfile .
+
+    - name: Build a disk from it
+      shell: bash
+      env:
+        # The same pin as mise.toml and the release workflow, bumped with
+        # them: a builder that only the release path has met is not tested.
+        # See docs/adr/0009-image-builder.md.
+        IMAGE_BUILDER: ghcr.io/osbuild/image-builder:v83.0.0@sha256:66b7505f1a14e4e9eae6eb4d840a2fb1418c56f7d1b6974ef89ff25c59d35156
+      run: |
+        mkdir -p output
+        # The same invocation the release path uses, so this exercises the
+        # artefact route rather than a private one: image-builder proper,
+        # --output-dir and --output-name putting the disk where everything
+        # below reads it, and no --ignore-warnings -- a warning that would
+        # stop a release should stop this first.
+        sudo podman run --rm --privileged \
+          --security-opt label=type:unconfined_t \
+          -v /var/lib/containers/storage:/var/lib/containers/storage \
+          -v "${PWD}/output:/output" \
+          "${IMAGE_BUILDER}" build \
+          --bootc-ref localhost/corium:e2e \
+          --output-dir /output/qcow2 \
+          --output-name disk \
+          qcow2
+        sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
+        qemu-img resize output/qcow2/disk.qcow2 20G
+
+    - name: Seed a configuration that says nothing about the node
+      shell: bash
+      run: |
+        # Deliberately minimal: the API on, and a node that waits to be told
+        # what it is. Everything that makes this machine a particular node
+        # arrives over the API, which is the thing under test. The account
+        # exists and has no key, so the SSH check has a baseline to fail
+        # against before the API grants one.
+        cat > user-data <<'CONFIG'
+        #cloud-config
+        corium:
+          api:
+            enabled: true
+            awaitConfig: true
+        users:
+          - name: core
+            groups: [wheel]
+            sudo: 'ALL=(ALL) NOPASSWD:ALL'
+            shell: /bin/bash
+        ssh_pwauth: false
+        CONFIG
+
+        # Checked before it is baked into a disk: a document the agent would
+        # refuse turns into a node that boots and does nothing, which reads
+        # like a bug in the boot path rather than a typo in this file.
+        go run ./cmd/corium-agent validate user-data
+
+        cloud-localds seed.iso user-data
+
+    - name: Find the UEFI firmware
+      shell: bash
+      run: |
+        # The firmware is UEFI because the image is: fedora-bootc ships no
+        # BIOS path. Ubuntu moved the 4 MB variants under new names, so take
+        # whichever this runner has rather than pinning one.
+        # `|| true`: shell: bash sets pipefail, and ls fails on the name that is absent.
+        code="$(ls /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd 2>/dev/null | head -1 || true)"
+        vars="$(ls /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd 2>/dev/null | head -1 || true)"
+        [ -n "${code}" ] && [ -n "${vars}" ] || {
+          echo "::error::no OVMF firmware found; the image only boots UEFI" >&2
+          ls -l /usr/share/OVMF/ || true
+          exit 1
+        }
+        echo "OVMF_CODE=${code}" >> "${GITHUB_ENV}"
+        echo "OVMF_VARS=${vars}" >> "${GITHUB_ENV}"

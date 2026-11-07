@@ -42,124 +42,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check this runner can accelerate a virtual machine
-        run: |
-          # Without KVM, QEMU emulates, k0s takes ten to twenty times longer to
-          # come up, and this job times out with a failure that looks like a bug
-          # in Corium. Say what is actually wrong, first thing.
-          if [ ! -e /dev/kvm ]; then
-            echo "::error::/dev/kvm is absent: this runner cannot accelerate a VM." >&2
-            exit 1
-          fi
-
-          # Present but not usable by the runner user is the common case, and it
-          # is fixable rather than fatal.
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
-              sudo tee /etc/udev/rules.d/99-kvm-for-the-runner.rules
-            sudo udevadm control --reload-rules
-            sudo udevadm trigger --name-match=kvm
-          fi
-
-          ls -l /dev/kvm
-          [ -r /dev/kvm ] && [ -w /dev/kvm ] || {
-            echo "::error::/dev/kvm exists but is not usable by this job." >&2
-            exit 1
-          }
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-
-      - name: Install what boots a disk image
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 ovmf cloud-image-utils
-
-      - name: Build cctl
-        run: |
-          # Plain go build: this runner has Go and not mise, and installing mise
-          # to run one task would pull Hugo and Node with it.
-          go build -o bin/cctl ./cmd/cctl
-          ./bin/cctl version
-
-      - name: Build the OS image
-        run: |
-          # sudo, because image-builder below runs as root and reads the
-          # root container store. Built rootless, the image lands in the runner
-          # user's store instead and the builder reports "image not known" --
-          # which is what happened the first time this ran. The release path
-          # never meets this: it pulls a published image, and the pull is what
-          # puts it where the builder looks.
-          sudo podman build --tag localhost/corium:e2e --file Containerfile .
-
-      - name: Build a disk from it
-        env:
-          # The same pin as mise.toml and the release workflow, bumped with
-          # them: a builder that only the release path has met is not tested.
-          # See docs/adr/0009-image-builder.md.
-          IMAGE_BUILDER: ghcr.io/osbuild/image-builder:v83.0.0@sha256:66b7505f1a14e4e9eae6eb4d840a2fb1418c56f7d1b6974ef89ff25c59d35156
-        run: |
-          mkdir -p output
-          # The same invocation the release path uses, so this exercises the
-          # artefact route rather than a private one: image-builder proper,
-          # --output-dir and --output-name putting the disk where everything
-          # below reads it, and no --ignore-warnings -- a warning that would
-          # stop a release should stop this first.
-          sudo podman run --rm --privileged \
-            --security-opt label=type:unconfined_t \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
-            -v "${PWD}/output:/output" \
-            "${IMAGE_BUILDER}" build \
-            --bootc-ref localhost/corium:e2e \
-            --output-dir /output/qcow2 \
-            --output-name disk \
-            qcow2
-          sudo chown "$(id -u):$(id -g)" output/qcow2/disk.qcow2
-          qemu-img resize output/qcow2/disk.qcow2 20G
-
-      - name: Seed it with a configuration that says nothing about the node
-        run: |
-          # Deliberately minimal: the API on, and a node that waits to be told
-          # what it is. Everything that makes this machine a particular node
-          # arrives over the API, which is the thing under test. The account
-          # exists and has no key, so the SSH check has a baseline to fail
-          # against before the API grants one.
-          cat > user-data <<'CONFIG'
-          #cloud-config
-          corium:
-            api:
-              enabled: true
-              awaitConfig: true
-          users:
-            - name: core
-              groups: [wheel]
-              sudo: 'ALL=(ALL) NOPASSWD:ALL'
-              shell: /bin/bash
-          ssh_pwauth: false
-          CONFIG
-
-          # Checked before it is baked into a disk: a document the agent would
-          # refuse turns into a node that boots and does nothing, which reads
-          # like a bug in the boot path rather than a typo in this file.
-          go run ./cmd/corium-agent validate user-data
-
-          cloud-localds seed.iso user-data
+      - uses: ./.github/actions/corium-disk
 
       - name: Boot it
         run: |
-          # The firmware is UEFI because the image is: fedora-bootc ships no
-          # BIOS path. Ubuntu moved the 4 MB variants under new names, so take
-          # whichever this runner has rather than pinning one.
-          code="$(ls /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd 2>/dev/null | head -1)"
-          vars="$(ls /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd 2>/dev/null | head -1)"
-          [ -n "${code}" ] && [ -n "${vars}" ] || {
-            echo "::error::no OVMF firmware found; the image only boots UEFI" >&2
-            ls -l /usr/share/OVMF/ || true
-            exit 1
-          }
-          cp "${vars}" vars.fd
+          cp "${OVMF_VARS}" vars.fd
 
           # User-mode networking, so no bridge and no privileges. cctl pins the
           # node by the fingerprint of the certificate it serves rather than by
@@ -167,7 +54,7 @@ jobs:
           # through a forwarded port legitimate instead of a fudge.
           qemu-system-x86_64 \
             -machine q35,accel=kvm -cpu host -smp 4 -m 4096 \
-            -drive "if=pflash,format=raw,readonly=on,file=${code}" \
+            -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
             -drive "if=pflash,format=raw,file=vars.fd" \
             -drive "file=output/qcow2/disk.qcow2,if=virtio,format=qcow2" \
             -drive "file=seed.iso,if=virtio,format=raw,readonly=on" \
@@ -224,4 +111,104 @@ jobs:
         with:
           name: node-console
           path: console.log
+          retention-days: 7
+
+  rollout:
+    name: Roll a two-node cluster and forget the worker
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'e2e')
+    # Same pin as the node job, for the same osbuild reason.
+    runs-on: ubuntu-24.04
+    # Two nodes, four extension pulls and three rollouts on top of the build.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/corium-disk
+
+      - name: A private network for the two nodes
+        run: |
+          # User-mode networking gives every VM the same address, which k0s
+          # would advertise. A bridge with NAT gives each its own, reachable
+          # from here and from the other. Docker's FORWARD DROP policy is why
+          # the forward rules are needed.
+          sudo ip link add br0 type bridge
+          sudo ip addr add 10.0.0.1/24 dev br0
+          sudo ip link set br0 up
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo iptables -t nat -A POSTROUTING -s 10.0.0.0/24 ! -o br0 -j MASQUERADE
+          sudo iptables -I FORWARD -i br0 -j ACCEPT
+          sudo iptables -I FORWARD -o br0 -j ACCEPT
+          sudo dnsmasq --interface=br0 --bind-interfaces --except-interface=lo \
+            --dhcp-range=10.0.0.100,10.0.0.200,12h \
+            --dhcp-host=52:54:00:00:00:10,10.0.0.10 \
+            --dhcp-host=52:54:00:00:00:11,10.0.0.11 \
+            --log-facility="${PWD}/dnsmasq.log"
+          sudo mkdir -p /etc/qemu
+          echo "allow br0" | sudo tee /etc/qemu/bridge.conf
+
+      - name: Boot them
+        run: |
+          for vm in ctrl:10 worker:11; do
+            name="${vm%:*}" mac="52:54:00:00:00:${vm#*:}"
+            qemu-img create -q -f qcow2 -F qcow2 -b "${PWD}/output/qcow2/disk.qcow2" "${name}.qcow2" 20G
+            cp "${OVMF_VARS}" "${name}-vars.fd"
+            cp seed.iso "${name}-seed.iso"
+            sudo qemu-system-x86_64 \
+              -machine q35,accel=kvm -cpu host -smp 2 -m 4096 \
+              -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
+              -drive "if=pflash,format=raw,file=${name}-vars.fd" \
+              -drive "file=${name}.qcow2,if=virtio,format=qcow2" \
+              -drive "file=${name}-seed.iso,if=virtio,format=raw,readonly=on" \
+              -netdev bridge,id=net0,br=br0 \
+              -device "virtio-net-pci,netdev=net0,mac=${mac}" \
+              -display none -serial "file:${name}.log" -daemonize
+          done
+
+      - name: Wait for both nodes to offer themselves
+        run: |
+          for name in ctrl worker; do
+            for attempt in $(seq 1 120); do
+              if sudo grep -q "pairing code" "${name}.log" 2>/dev/null; then
+                echo "${name} is waiting to be claimed"
+                continue 2
+              fi
+              sleep 5
+            done
+            echo "::error::${name} never printed a pairing code" >&2
+            sudo tail -60 "${name}.log" || true
+            exit 1
+          done
+          sudo chmod a+r ctrl.log worker.log
+
+      - name: Drive the rollouts with cctl
+        env:
+          CTRL: 10.0.0.10:7443
+          WORKER: 10.0.0.11:7443
+          CCTL: ${{ github.workspace }}/bin/cctl
+          CTRL_CONSOLE: ${{ github.workspace }}/ctrl.log
+          WORKER_CONSOLE: ${{ github.workspace }}/worker.log
+        run: .github/e2e/drive-a-rollout.sh
+
+      - name: What the nodes said, whatever happened
+        if: always()
+        run: |
+          for name in ctrl worker; do
+            echo "::group::${name} console"
+            sudo tail -200 "${name}.log" || true
+            echo "::endgroup::"
+          done
+          echo "::group::dnsmasq"
+          sudo cat dnsmasq.log || true
+          echo "::endgroup::"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rollout-consoles
+          path: |
+            ctrl.log
+            worker.log
           retention-days: 7
