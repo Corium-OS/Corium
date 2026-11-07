@@ -464,6 +464,31 @@ separate axis. Set `kubernetes.version`, or roll a cluster with
 `cctl k8s upgrade`. No OS image changes. See
 [reference §3.20](reference.md#320-kubernetes).
 
+### A controller snapshots its datastore first
+
+Before a controller stops k0s to change its version, it runs `k0s backup`. This
+happens after the drain, while the old version still runs, because `k0s backup`
+needs k0s to be up. The archive holds the datastore, the PKI and `k0s.yaml`.
+The datastore is etcd on `controller` and `controller+worker`, and kine/SQLite
+on `single`. A worker has no datastore, so it takes no snapshot.
+
+| | |
+|---|---|
+| Where | `backup.path`. If the node has no `backup` block, `/var/lib/corium/backups` |
+| Name | `corium-backup-<UTC timestamp>.tar.gz`, as for [scheduled backups](reference.md#318-backup) |
+| Retention | `backup.keep`, or `7`. Upgrade snapshots and scheduled backups count together |
+| Mode | `0600`, in a `0700` directory. The archive holds the cluster CA key and every Secret |
+
+The API returns the path, and `cctl k8s upgrade` and `cctl apply` print it. If
+k0s does not come back, the error names the path too. Restore from that
+archive. See [restore is manual](reference.md#restore-is-manual).
+
+**If the snapshot fails, the node cancels the change.** Nothing is stopped yet.
+So the node uncordons itself and stays on its version. The usual causes are a
+full disk, or k0s not running. Fix the cause, then try again. The snapshot is
+part of the change that continues after the drain starts. So it finishes even
+if your client disconnects.
+
 This section covers the other axis: how to change the version that an image
 *ships*, and the versions for which it accepts extensions. Both are in
 `build/k0s.lock`:

@@ -172,6 +172,7 @@ func (s *Server) applyToRunningNode(w http.ResponseWriter, r *http.Request, cfg 
 		"reconciled": result.changed,
 		"restarted":  result.restarted,
 		"kubernetes": result.kubernetes,
+		"backup":     result.backup,
 	})
 }
 

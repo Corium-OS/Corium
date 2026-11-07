@@ -1208,6 +1208,10 @@ name itself, so that the cleanup step can find the archives that Corium wrote. A
 run deletes only regular files with exactly this name format. It never touches
 other files in the directory, including a `k0s backup` that you made manually.
 
+A Kubernetes version change on a controller also writes an archive here, and
+`keep` counts it. This happens even if `enabled` is not set. See
+[upgrades](upgrades.md#a-controller-snapshots-its-datastore-first).
+
 The default `path` is on the disk of the node. A backup there survives an
 operator mistake and nothing else. If you need the backups to be useful, set the
 path to a mount on a different machine. Corium creates the directory, but not

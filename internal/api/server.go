@@ -126,6 +126,10 @@ type Server struct {
 	// a test has no /usr to write one into.
 	k0sWindowPath string
 
+	// k0sBinary is what takes the snapshot before a version change, a field so
+	// a test can supply its own.
+	k0sBinary string
+
 	// booted is the document this node started with, or nil on a node that
 	// found none. It is read to answer one question and no other: would
 	// claiming this node release it into building something? A field so a test
@@ -203,6 +207,7 @@ func NewServer(store *Store, address string, how Enrolment, session SessionDir) 
 		appliedPath:   nodeinfo.AppliedConfigFile,
 		k0sConfigPath: k0s.ConfigPath,
 		k0sWindowPath: k0s.WindowPath,
+		k0sBinary:     k0s.Binary,
 		sessionDir:    session,
 	}
 

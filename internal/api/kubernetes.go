@@ -41,32 +41,33 @@ var ErrSwapInProgress = errors.New(
 // automatically, on a node whose control plane is already unhappy, is how a
 // recoverable problem becomes an unrecoverable one. An operator decides.
 //
-// Returns the version now running.
-func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config) (string, error) {
+// A controller snapshots its datastore after the drain and before the stop,
+// and a failed snapshot cancels the swap.
+func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config) (kubernetesSwap, error) {
 	// A retried request must not start a second swap under one its client
 	// abandoned.
 	if !s.swapping.TryLock() {
-		return "", ErrSwapInProgress
+		return kubernetesSwap{}, ErrSwapInProgress
 	}
 	defer s.swapping.Unlock()
 
 	plan, err := s.checkKubernetesVersion(next)
 	if err != nil {
-		return "", err
+		return kubernetesSwap{}, err
 	}
 
 	active, requested := plan.active, plan.requested
 
 	if active.Raw == requested.Raw {
-		return active.Raw, nil
+		return kubernetesSwap{running: active.Raw}, nil
 	}
 
 	// Before anything is stopped. See the note above.
 	if err := k0s.Fetch(ctx, requested, next.Kubernetes.Mirror); err != nil {
-		return "", err
+		return kubernetesSwap{}, err
 	}
 
-	return s.commitSwap(ctx, plan, next.Role)
+	return s.commitSwap(ctx, plan, next)
 }
 
 // swapTimeout bounds a committed swap. It sits above the sum of its steps' own
@@ -76,18 +77,25 @@ const swapTimeout = 30 * time.Minute
 // commitSwap is the part of a swap that takes the node out of service.
 //
 // Detached from the caller: a client that leaves after the drain started would
-// otherwise strand the node cordoned, or with k0s stopped.
+// otherwise strand the node cordoned, or with k0s stopped. The snapshot is
+// here too, so a client leaving cannot cancel it and leave the node drained.
 func (s *Server) commitSwap(
-	ctx context.Context, plan kubernetesPlan, role config.Role,
-) (string, error) {
+	ctx context.Context, plan kubernetesPlan, next *config.Config,
+) (kubernetesSwap, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), swapTimeout)
 	defer cancel()
 
 	active, requested, window := plan.active, plan.requested, plan.window
+	role := next.Role
 
 	drained, err := s.drainForSwap(ctx)
 	if err != nil {
-		return "", err
+		return kubernetesSwap{}, err
+	}
+
+	backup, err := s.snapshotBeforeSwap(ctx, next)
+	if err != nil {
+		return kubernetesSwap{}, s.cancelSwap(ctx, drained, err)
 	}
 
 	service := k0s.ServiceName(role)
@@ -96,25 +104,25 @@ func (s *Server) commitSwap(
 		"from", active, "to", requested, "service", service)
 
 	if err := k0s.Stop(ctx, role); err != nil {
-		return "", fmt.Errorf("stopping %s: %w", service, err)
+		return kubernetesSwap{}, withSnapshot(fmt.Errorf("stopping %s: %w", service, err), backup)
 	}
 
 	if err := k0s.Activate(ctx, requested); err != nil {
 		// Nothing has started yet and the previous extension is still in the
 		// store, so saying so is the whole of the recovery advice.
-		return "", fmt.Errorf(
-			"%w; %s is stopped and the node is still on %s", err, service, active)
+		return kubernetesSwap{}, withSnapshot(fmt.Errorf(
+			"%w; %s is stopped and the node is still on %s", err, service, active), backup)
 	}
 
 	if err := k0s.ClearStaged(); err != nil {
-		return "", err
+		return kubernetesSwap{}, withSnapshot(err, backup)
 	}
 
 	if err := k0s.Start(ctx, role); err != nil {
-		return "", fmt.Errorf(
+		return kubernetesSwap{}, withSnapshot(fmt.Errorf(
 			"starting %s on k0s %s: %w; the node is cordoned and the previous "+
 				"version is still in %s",
-			service, requested, err, k0s.ExtensionStore)
+			service, requested, err, k0s.ExtensionStore), backup)
 	}
 
 	// Confirmed rather than assumed: an extension that does not match is not an
@@ -122,15 +130,17 @@ func (s *Server) commitSwap(
 	// back on its floor with the apply reporting success.
 	running, err := k0s.ActiveVersion(k0s.ExtensionRelease, window.Floor)
 	if err != nil {
-		return "", err
+		return kubernetesSwap{}, withSnapshot(err, backup)
 	}
 
 	if running.Raw != requested.Raw {
-		return "", fmt.Errorf(
+		return kubernetesSwap{}, withSnapshot(fmt.Errorf(
 			"k0s %s was installed but %s is merged; the extension does not match "+
 				"this image, and the node is cordoned",
-			requested, running)
+			requested, running), backup)
 	}
+
+	swap := kubernetesSwap{running: running.Raw, backup: backup}
 
 	if drained {
 		// Wait for the control plane before asking it for anything. On a
@@ -146,7 +156,7 @@ func (s *Server) commitSwap(
 		// instead of at timing. Found by the end-to-end test, which is the only
 		// place a real control plane is restarted.
 		if err := s.waitForClusterAccess(ctx); err != nil {
-			return running.Raw, fmt.Errorf(
+			return swap, fmt.Errorf(
 				"k0s %s is running, but %w; uncordon it with `cctl uncordon`",
 				running, err)
 		}
@@ -156,16 +166,79 @@ func (s *Server) commitSwap(
 			// rather than swallowed, but named precisely, because "run cctl
 			// uncordon" is a much smaller problem than the message would
 			// otherwise suggest.
-			return running.Raw, fmt.Errorf(
+			return swap, fmt.Errorf(
 				"k0s %s is running, but the node could not be returned to "+
 					"service: %w; uncordon it with `cctl uncordon`",
 				running, err)
 		}
 	}
 
-	slog.Warn("k0s version swapped", "from", active, "to", running)
+	slog.Warn("k0s version swapped", "from", active, "to", running, "backup", backup)
 
-	return running.Raw, nil
+	return swap, nil
+}
+
+// kubernetesSwap is what a version change reports.
+type kubernetesSwap struct {
+	// running is the version now running.
+	running string
+
+	// backup is the snapshot taken before the stop, empty when none was.
+	backup string
+}
+
+// snapshotBeforeSwap backs up a controller's datastore, etcd or kine/SQLite,
+// while the old version still runs: `k0s backup` needs k0s up, and a minor
+// upgrade may migrate state k0s cannot move back. A worker holds none.
+//
+// It writes where scheduled backups do, under the same name and retention, so
+// one directory and one keep bound every archive on the node.
+func (s *Server) snapshotBeforeSwap(ctx context.Context, cfg *config.Config) (string, error) {
+	if !cfg.Role.IsController() {
+		return "", nil
+	}
+
+	// Defaults are filled in only when backup.enabled is set.
+	dir, keep := cfg.Backup.Path, cfg.Backup.Keep
+	if dir == "" {
+		dir = config.DefaultBackupPath
+	}
+
+	if keep == 0 {
+		keep = config.DefaultBackupKeep
+	}
+
+	path, err := k0s.Backup(ctx, s.k0sBinary, dir, keep)
+	if err != nil {
+		return "", fmt.Errorf(
+			"snapshotting the control plane before changing the k0s version: %w", err)
+	}
+
+	return path, nil
+}
+
+// cancelSwap returns a drained node to service after a refusal that changed
+// nothing.
+func (s *Server) cancelSwap(ctx context.Context, drained bool, cause error) error {
+	if !drained {
+		return fmt.Errorf("%w; nothing was changed", cause)
+	}
+
+	if err := s.lifecycle.Uncordon(ctx); err != nil {
+		return fmt.Errorf("%w; nothing was changed, but the node could not be "+
+			"returned to service: %w; uncordon it with `cctl uncordon`", cause, err)
+	}
+
+	return fmt.Errorf("%w; nothing was changed and the node is back in service", cause)
+}
+
+// withSnapshot names the archive to restore from when k0s may not come back.
+func withSnapshot(err error, backup string) error {
+	if backup == "" {
+		return err
+	}
+
+	return fmt.Errorf("%w; the control plane snapshot taken before the stop is %s", err, backup)
 }
 
 // kubernetesPlan is what a version change would do, decided without doing it.
@@ -317,7 +390,7 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	running, err := s.swapKubernetesVersion(r.Context(), next)
+	swap, err := s.swapKubernetesVersion(r.Context(), next)
 	if errors.Is(err, ErrSwapInProgress) {
 		writeError(w, http.StatusConflict, err.Error())
 
@@ -358,10 +431,16 @@ func (s *Server) handleKubernetesVersion(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	reply := map[string]any{
 		"status":     status,
-		"kubernetes": running,
-	})
+		"kubernetes": swap.running,
+	}
+
+	if swap.backup != "" {
+		reply["backup"] = swap.backup
+	}
+
+	writeJSON(w, http.StatusOK, reply)
 }
 
 // handleKubernetesCheck answers whether this node would accept a version,

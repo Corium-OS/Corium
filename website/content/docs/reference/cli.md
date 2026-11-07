@@ -349,6 +349,11 @@ nothing is lost. If a pod disruption budget refuses the drain, the node cancels
 the change and does not force it. Expect this apply to take minutes, not
 seconds.
 
+On a controller, the node takes a `k0s backup` between the drain and the stop.
+`cctl apply` prints its path as `snapshot`. If the snapshot fails, the node
+cancels the change and uncordons itself. See
+[upgrades](/docs/guides/upgrades/#a-controller-snapshots-its-datastore-first).
+
 There is no automatic rollback if k0s does not come back. The node stops,
 reports the reason, and stays cordoned. A minor upgrade can migrate state on its
 way up, and k0s does not support moving back a minor at all. On a node whose
@@ -766,6 +771,7 @@ Checking 5 nodes can move to k0s v1.36.4+k0s.1
 
 [1/5] node-1:7443 (controller)
         on k0s v1.35.8+k0s.1, moving to v1.36.4+k0s.1
+        snapshot /var/lib/corium/backups/corium-backup-20261101T120000Z.tar.gz
         up on k0s v1.36.4+k0s.1
 [2/5] node-2:7443 (controller)
 ...
@@ -800,6 +806,11 @@ the node drains, stops k0s, swaps the extension, and comes back, without a
 reboot. If a pod disruption budget refuses the drain, the node cancels the
 change and does not force it.
 
+A controller takes a `k0s backup` between the drain and the stop. The rollout
+prints the archive's path on the node's `snapshot` line. If the snapshot fails,
+the node cancels the change and uncordons itself, and the rollout stops. See
+[upgrades](/docs/guides/upgrades/#a-controller-snapshots-its-datastore-first).
+
 > **A stopped rollout is a safe state.** Like `cctl upgrade`, this command stops
 > at the first node that fails. But unlike `cctl upgrade`, its half-finished
 > state is one that k0s explicitly supports: controllers one minor ahead of
@@ -811,7 +822,8 @@ stays cordoned and says why. k0s does not support downgrading a minor, so an
 unrequested reversal can make a recoverable problem permanent.
 
 `--json` prints one report when the rollout ends, whether it succeeded or not.
-The exit status still tells you which.
+The exit status still tells you which. A controller's entry has `backup`: the
+snapshot it took before the stop.
 
 ```console
 $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2 --json 2>/dev/null
@@ -819,7 +831,7 @@ $ cctl k8s upgrade --version v1.36.4+k0s.1 --controllers node-1 --workers node-2
   "version": "v1.36.4+k0s.1",
   "dryRun": false,
   "nodes": [
-    {"address": "node-1:7443", "stage": "controller", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "moved"},
+    {"address": "node-1:7443", "stage": "controller", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "moved", "backup": "/var/lib/corium/backups/corium-backup-20261101T120000Z.tar.gz"},
     {"address": "node-2:7443", "stage": "worker", "from": "v1.35.8+k0s.1", "to": "v1.36.4+k0s.1", "result": "failed", "error": "..."}
   ]
 }

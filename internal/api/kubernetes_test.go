@@ -128,8 +128,92 @@ func TestSwapToTheRunningVersionDoesNothing(t *testing.T) {
 		t.Fatalf("swapKubernetesVersion() error = %v", err)
 	}
 
-	if got != "v1.36.4+k0s.0" {
-		t.Errorf("got %q, want the floor v1.36.4+k0s.0", got)
+	if got.running != "v1.36.4+k0s.0" {
+		t.Errorf("got %q, want the floor v1.36.4+k0s.0", got.running)
+	}
+
+	if got.backup != "" {
+		t.Errorf("a no-op swap took a snapshot: %s", got.backup)
+	}
+}
+
+// fakeK0s stands in for k0s backup, running script.
+func fakeK0s(t *testing.T, script string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "k0s")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil { // #nosec G306 -- a test executable
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// TestSnapshotBeforeSwap covers which roles hold a datastore worth saving, and
+// that a failed snapshot is an error rather than a swap without one.
+func TestSnapshotBeforeSwap(t *testing.T) {
+	t.Parallel()
+
+	ca := newAuthority(t)
+
+	tests := []struct {
+		name       string
+		role       config.Role
+		script     string
+		wantBackup bool
+		wantErr    bool
+	}{
+		{name: "single, on kine/SQLite", role: config.RoleSingle,
+			script: `printf '\037\213'`, wantBackup: true},
+		{name: "controller, on etcd", role: config.RoleController,
+			script: `printf '\037\213'`, wantBackup: true},
+		{name: "controller+worker", role: config.RoleControllerWorker,
+			script: `printf '\037\213'`, wantBackup: true},
+		{name: "a worker has no datastore", role: config.RoleWorker,
+			script: `exit 1`},
+		{name: "k0s refuses", role: config.RoleController,
+			script: `echo 'unable to detect cluster status' >&2; exit 1`, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := serverWithWindow(t, ca)
+			server.k0sBinary = fakeK0s(t, test.script)
+			dir := filepath.Join(t.TempDir(), "backups")
+
+			path, err := server.snapshotBeforeSwap(context.Background(), &config.Config{
+				Role:   test.role,
+				Backup: config.Backup{Path: dir},
+			})
+
+			if (err != nil) != test.wantErr {
+				t.Fatalf("snapshotBeforeSwap() error = %v, want error %v", err, test.wantErr)
+			}
+
+			if test.wantBackup != (path != "") {
+				t.Fatalf("snapshotBeforeSwap() = %q, want a snapshot %v", path, test.wantBackup)
+			}
+
+			if test.wantBackup && filepath.Dir(path) != dir {
+				t.Errorf("snapshot written to %s, want it under backup.path %s", path, dir)
+			}
+		})
+	}
+}
+
+// TestCancelSwapSaysNothingChanged pins the message an operator acts on when a
+// snapshot fails on a node that could not drain.
+func TestCancelSwapSaysNothingChanged(t *testing.T) {
+	t.Parallel()
+
+	server := serverWithWindow(t, newAuthority(t))
+	cause := errors.New("snapshot failed")
+
+	err := server.cancelSwap(context.Background(), false, cause)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Errorf("cancelSwap() = %v, want it to wrap the cause and say nothing changed", err)
 	}
 }
 
@@ -242,6 +326,11 @@ func TestSwapOutlivesTheClient(t *testing.T) {
 	server := serverWithWindow(t, newAuthority(t))
 	server.Lifecycle(&lifecycle.Manager{Run: run, Dir: t.TempDir(), Hostname: "node-01"})
 
+	// The snapshot runs after the client left too; a canceled one would
+	// cancel the swap before the stop.
+	server.k0sBinary = fakeK0s(t, `printf '\037\213'`)
+	backups := t.TempDir()
+
 	floor, err := k0s.ParseVersion("v1.36.4+k0s.0")
 	if err != nil {
 		t.Fatal(err)
@@ -255,9 +344,14 @@ func TestSwapOutlivesTheClient(t *testing.T) {
 	// Fails at Activate, which finds nothing downloaded; what matters is that
 	// it got there with a live context.
 	_, err = server.commitSwap(clientCtx,
-		kubernetesPlan{active: floor, requested: next}, config.RoleSingle)
+		kubernetesPlan{active: floor, requested: next},
+		&config.Config{Role: config.RoleSingle, Backup: config.Backup{Path: backups}})
 	if errors.Is(err, context.Canceled) {
 		t.Fatalf("the swap stopped with its client: %v", err)
+	}
+
+	if err == nil || !strings.Contains(err.Error(), "snapshot taken before the stop is "+backups) {
+		t.Errorf("swap error = %v, want it to name the snapshot under %s", err, backups)
 	}
 
 	recorded, readErr := os.ReadFile(calls)

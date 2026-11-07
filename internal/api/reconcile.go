@@ -64,6 +64,9 @@ type reconcileResult struct {
 
 	// kubernetes is the k0s version now running, when the apply changed it.
 	kubernetes string
+
+	// backup is the snapshot taken before that change, if any.
+	backup string
 }
 
 // reconcile re-applies the safe subset of a document to a node that has already
@@ -156,13 +159,14 @@ func (s *Server) reconcile(ctx context.Context, next *config.Config, document []
 	// It applies to every role: a worker has a k0s binary underneath it too,
 	// even though it renders no k0s.yaml of its own.
 	if plan.Kubernetes {
-		version, err := s.swapKubernetesVersion(ctx, next)
+		swap, err := s.swapKubernetesVersion(ctx, next)
 		if err != nil {
 			return reconcileResult{}, err
 		}
 
 		result.changed = append(result.changed, "kubernetes")
-		result.kubernetes = version
+		result.kubernetes = swap.running
+		result.backup = swap.backup
 		result.restarted = k0s.ServiceName(next.Role)
 	}
 
