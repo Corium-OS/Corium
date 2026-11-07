@@ -1388,13 +1388,15 @@ OS. The OS version and the Kubernetes version are independent, but not without
 limits.
 
 k0s has stricter skew rules than upstream Kubernetes: one minor at a time,
-controllers before workers, and no return to an earlier minor. Corium refuses a
-change that breaks these rules, and names the rule, before it stops anything.
-Thus a node does not find out during an upgrade that k0s will not start. A
-controller also checks the kubelets it serves. It refuses a minor that would
-leave one of them two minors behind, and names that kubelet. A rollback of a
-Kubernetes version is not free, as an OS rollback is. A rollback is a second
-forward operation, and k0s does not support a downgrade of a minor version.
+controllers before workers, and no return to an earlier minor. A node that has
+never run k0s can start on any version in the window, even one below the floor.
+Corium refuses a change that breaks these rules, and names the rule, before it
+stops anything. Thus a node does not find out during an upgrade that k0s will
+not start. A controller also checks the kubelets it serves. It refuses a minor
+that would leave one of them two minors behind, and names that kubelet. A
+rollback of a Kubernetes version is not free, as an OS rollback is. A rollback
+is a second forward operation, and k0s does not support a downgrade of a minor
+version.
 
 For an air-gapped site, set `mirror` to a registry that the node can connect to.
 A mirror changes where an artifact comes from. It does not remove the need for a
