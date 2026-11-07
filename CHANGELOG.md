@@ -83,6 +83,20 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   stopped. The node now carries the change through on its own, and refuses a
   second one with a 409 while it runs.
 
+- **A Kubernetes version change made through the API now takes effect.** Since
+  0.4.0, `cctl k8s upgrade`, `cctl apply` with `kubernetes.version` and
+  `POST /v1/kubernetes` reported the new version, but k0s restarted on the old
+  one. The API merged the extension in its own mount namespace, which the k0s
+  service does not see. The merge now goes through systemd, and the node checks
+  the binary that actually started. If it is not the requested one, the change
+  fails and a drained node stays cordoned.
+
+  **If you changed a Kubernetes version this way on 0.4.0 or 0.5.0**, the node
+  still runs the old version and loads the new one at its next reboot. Reboot
+  those nodes one at a time, controllers first, and wait for each to be Ready
+  before the next. `kubectl get nodes` shows the version each kubelet really
+  runs, and `kubectl version` the API server's.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added

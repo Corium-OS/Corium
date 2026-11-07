@@ -140,6 +140,11 @@ func (s *Server) commitSwap(
 			requested, running), backup)
 	}
 
+	// The merged metadata is not proof: the binary systemd started is.
+	if err := checkExecuting(ctx, role, requested, drained); err != nil {
+		return kubernetesSwap{}, withSnapshot(err, backup)
+	}
+
 	swap := kubernetesSwap{running: running.Raw, backup: backup}
 
 	if drained {
@@ -239,6 +244,27 @@ func withSnapshot(err error, backup string) error {
 	}
 
 	return fmt.Errorf("%w; the control plane snapshot taken before the stop is %s", err, backup)
+}
+
+// runsMergedBinary asks the host whether the service runs the merged k0s. A
+// variable so tests can stand in for systemd.
+var runsMergedBinary = k0s.RunsMergedBinary
+
+// checkExecuting refuses a swap whose service did not start the merged binary,
+// and leaves the node out of service if it was taken out.
+func checkExecuting(ctx context.Context, role config.Role, requested k0s.Version, drained bool) error {
+	state := "it was not drained"
+	if drained {
+		state = "it stays cordoned"
+	}
+
+	if err := runsMergedBinary(ctx, role); err != nil {
+		return fmt.Errorf(
+			"k0s %s is merged, but %s: %w; %s. Reboot the node to load the merged version",
+			requested, k0s.ServiceName(role), err, state)
+	}
+
+	return nil
 }
 
 // kubernetesPlan is what a version change would do, decided without doing it.
