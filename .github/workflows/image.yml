@@ -230,7 +230,7 @@ jobs:
         # action is what signs the images nodes will trust, so it gets a
         # narrower pin than the rest -- and cosign-installer publishes no v4
         # tag anyway, only full versions.
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, not the v3 default.
           #
@@ -422,7 +422,7 @@ jobs:
           echo "digest=${image}@${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, not v3: the same reason the base job pins it -- v3 writes
           # signatures as OCI referrers, and containers-policy enforcement only
@@ -591,7 +591,7 @@ jobs:
           find output -type f -printf '%s\t%p\n'
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, for the same reason the image uses it: v3 writes
           # signatures as OCI referrers, and GHCR does not implement the
@@ -599,7 +599,7 @@ jobs:
           cosign-release: v2.6.5
 
       - name: Install oras
-        uses: oras-project/setup-oras@v2.0.1
+        uses: oras-project/setup-oras@v2.0.3
         with:
           # The newest release this action knows about. It carries a table of
           # versions and their checksums, so the CLI version is capped by the
@@ -764,7 +764,7 @@ jobs:
             ./build/scripts/cctl-dist.sh
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, for the same reason the image and the artefacts use it.
           cosign-release: v2.6.5

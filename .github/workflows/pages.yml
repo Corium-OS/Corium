@@ -47,7 +47,7 @@ jobs:
           sudo install -m 0755 /tmp/hugo /usr/local/bin/hugo
           hugo version
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: website/package.json
           cache: npm
