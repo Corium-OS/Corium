@@ -106,7 +106,7 @@ jobs:
           tail -200 console.log || true
           echo "::endgroup::"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: node-console
@@ -204,7 +204,7 @@ jobs:
           sudo cat dnsmasq.log || true
           echo "::endgroup::"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rollout-consoles

@@ -24,7 +24,7 @@ concurrency:
 env:
   # Pinned rather than "latest": a site that silently changes how it renders
   # because a runner picked up a new Hugo is a bad surprise.
-  HUGO_VERSION: 0.166.0
+  HUGO_VERSION: 0.169.0
 
 jobs:
   build:
@@ -47,7 +47,7 @@ jobs:
           sudo install -m 0755 /tmp/hugo /usr/local/bin/hugo
           hugo version
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: website/package.json
           cache: npm

@@ -19,14 +19,14 @@ go = "1.27"
 golangci-lint = "2.15.0"
 # Hugo's SCSS pipeline exists only in the extended build, which the registry
 # publishes under its own name. Plain `hugo` cannot build this site.
-hugo-extended = "0.166.0"
+hugo-extended = "0.169.0"
 # website/package.json declares a floor; this is the version you actually get.
 node = "24"
 # Not in the registry under any name, so it is built from source. This entry is
 # the reason the file exists: `mise run fmt` used to fail outright on a machine
 # that had never installed goimports by hand, and nothing in the repository
 # said it was needed.
-"go:golang.org/x/tools/cmd/goimports" = "0.50.0"
+"go:golang.org/x/tools/cmd/goimports" = "0.52.0"
 
 [env]
 # These reproduce make's `?=`: a value already in the environment wins, so

@@ -154,7 +154,7 @@ jobs:
 
       - name: Log in to the registry
         if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -162,7 +162,7 @@ jobs:
 
       - name: Install oras
         if: needs.plan.outputs.publish == 'true'
-        uses: oras-project/setup-oras@v2.0.1
+        uses: oras-project/setup-oras@v2.0.3
         with:
           # The newest release this action knows about; see the same pin in
           # image.yml for why it is capped by the action rather than by ORAS.
@@ -170,7 +170,7 @@ jobs:
 
       - name: Install cosign
         if: needs.plan.outputs.publish == 'true'
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, not the v3 default, for the reason image.yml records:
           # v3 only attaches signatures as OCI referrers, and containers-policy
