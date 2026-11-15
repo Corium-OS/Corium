@@ -19,6 +19,7 @@ import (
 	"github.com/Corium-OS/Corium/internal/access"
 	"github.com/Corium-OS/Corium/internal/api"
 	"github.com/Corium-OS/Corium/internal/etcd"
+	"github.com/Corium-OS/Corium/internal/k0s"
 	"github.com/Corium-OS/Corium/internal/nodeinfo"
 	"github.com/Corium-OS/Corium/internal/systemd"
 	"github.com/Corium-OS/Corium/internal/upgrade"
@@ -713,25 +714,29 @@ type KubernetesChange struct {
 var ErrUnknownRoute = errors.New("the node does not know this route")
 
 // KubernetesCheck asks a node whether it would accept a version, changing
-// nothing. It reports the version the node runs now.
-func (c *Client) KubernetesCheck(ctx context.Context, version, mirror string) (string, error) {
+// nothing. It reports the version the node runs now and, from a controller,
+// the kubelets that would be left one minor behind.
+func (c *Client) KubernetesCheck(
+	ctx context.Context, version, mirror string,
+) (string, []k0s.Kubelet, error) {
 	request, err := json.Marshal(map[string]string{
 		"version": version,
 		"mirror":  mirror,
 	})
 	if err != nil {
-		return "", fmt.Errorf("encoding the request: %w", err)
+		return "", nil, fmt.Errorf("encoding the request: %w", err)
 	}
 
 	var reply struct {
-		Kubernetes string `json:"kubernetes"`
+		Kubernetes string        `json:"kubernetes"`
+		Lagging    []k0s.Kubelet `json:"lagging"`
 	}
 
 	if err := c.call(ctx, http.MethodPost, "/v1/kubernetes/check", request, &reply); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	return reply.Kubernetes, nil
+	return reply.Kubernetes, reply.Lagging, nil
 }
 
 // UpgradeCheck asks a node whether it would stage an image, pulling nothing.

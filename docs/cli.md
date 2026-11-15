@@ -795,6 +795,12 @@ The etcd member of a moved controller gets up to five minutes to catch up. See
 stays one minor behind. k0s allows this, so the rollout succeeds. At the next
 minor, the worker would be two minors behind, and k0s does not allow that. The
 controller refuses that change and names the worker. Move the worker first.
+The first time, the preflight already warns you about such a worker. It finds
+it in the kubelets that the controllers report:
+
+```console
+  warning: node-6 (kubelet v1.35.8+k0s) is not in this rollout; it will stay behind, and controllers will refuse the next minor until it moves
+```
 
 Each node downloads the extension *before* it goes out of service. So an
 unreachable registry, or a signature that does not verify, costs nothing. Then

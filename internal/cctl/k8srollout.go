@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -218,6 +219,11 @@ func (r *KubernetesRollout) preflight(
 	refused := 0
 	r.Results = make([]KubernetesNodeResult, 0, total)
 
+	// Hostnames are the names nodes register under, so a lagging kubelet whose
+	// name is not among them is a node this rollout was not given.
+	listed := map[string]bool{}
+	lagging := map[string]k0s.Kubelet{}
+
 	for _, stage := range stages {
 		for _, address := range stage.nodes {
 			result := KubernetesNodeResult{
@@ -234,16 +240,21 @@ func (r *KubernetesRollout) preflight(
 				continue
 			}
 
-			client, running, err := r.checkOne(ctx, address, stage.name, &cluster, roles)
-			clients[address] = client
-			result.From = running
+			check := r.checkOne(ctx, address, stage.name, &cluster, roles)
+			clients[address] = check.client
+			listed[check.hostname] = true
+			result.From = check.running
 
-			switch {
+			for _, kubelet := range check.lagging {
+				lagging[kubelet.Name] = kubelet
+			}
+
+			switch err := check.err; {
 			case errors.Is(err, ErrUnknownRoute):
 				r.say("  %s (%s): on k0s %s; predates the check, it will check when moved\n",
-					address, stage.name, displayVersion(running))
+					address, stage.name, displayVersion(check.running))
 
-				if running == r.Version {
+				if check.running == r.Version {
 					result.Result = ResultSkipped
 				}
 			case err != nil:
@@ -251,12 +262,12 @@ func (r *KubernetesRollout) preflight(
 				refused++
 
 				result.Result, result.Error = ResultRefused, err.Error()
-			case running == r.Version:
-				r.say("  %s (%s): already on k0s %s\n", address, stage.name, running)
+			case check.running == r.Version:
+				r.say("  %s (%s): already on k0s %s\n", address, stage.name, check.running)
 
 				result.Result = ResultSkipped
 			default:
-				r.say("  %s (%s): on k0s %s\n", address, stage.name, running)
+				r.say("  %s (%s): on k0s %s\n", address, stage.name, check.running)
 			}
 
 			r.Results = append(r.Results, result)
@@ -277,6 +288,8 @@ func (r *KubernetesRollout) preflight(
 		return nil, nil, fmt.Errorf("%s; bring them to one minor before moving to %s. Nothing was changed",
 			mixed, r.Version)
 	}
+
+	r.warnUnlisted(listed, lagging)
 
 	return clients, roles, nil
 }
@@ -320,31 +333,62 @@ func mixedMinors(results []KubernetesNodeResult) string {
 	return "the nodes still to move are on different minors: " + strings.Join(groups, "; ")
 }
 
+// warnUnlisted names the kubelets a controller reported behind the target minor
+// that no listed node accounts for. They are legal now and block the next minor.
+func (r *KubernetesRollout) warnUnlisted(listed map[string]bool, lagging map[string]k0s.Kubelet) {
+	names := make([]string, 0, len(lagging))
+
+	for name := range lagging {
+		if !listed[name] {
+			names = append(names, name)
+		}
+	}
+
+	sort.Strings(names)
+
+	for _, name := range names {
+		r.say("  warning: %s (kubelet %s) is not in this rollout; it will stay behind, "+
+			"and controllers will refuse the next minor until it moves\n",
+			name, lagging[name].Version)
+	}
+}
+
+// nodeCheck is what the preflight learned about one node.
+type nodeCheck struct {
+	client   *Client
+	hostname string
+	running  string
+	lagging  []k0s.Kubelet
+	err      error
+}
+
 // checkOne reads a node and asks it to validate the version. cluster carries
 // the first cluster name seen, which every other node must share; roles
 // collects what each node says it is.
 func (r *KubernetesRollout) checkOne(
 	ctx context.Context, address, stage string, cluster *string, roles map[string]string,
-) (*Client, string, error) {
+) nodeCheck {
 	client, node, err := inspect(ctx, r.Connect, address, cluster)
 	if node != nil {
 		roles[address] = node.Role
 	}
 
 	if err != nil {
-		return client, "", err
+		return nodeCheck{client: client, err: err}
 	}
 
-	if err := roleFits(node.Role, stage); err != nil {
-		return client, "", err
+	check := nodeCheck{client: client, hostname: node.Hostname}
+
+	if check.err = roleFits(node.Role, stage); check.err != nil {
+		return check
 	}
 
-	running, err := client.KubernetesCheck(ctx, r.Version, r.Mirror)
-	if errors.Is(err, ErrUnknownRoute) {
-		return client, node.Kubernetes.Version, err
+	check.running, check.lagging, check.err = client.KubernetesCheck(ctx, r.Version, r.Mirror)
+	if errors.Is(check.err, ErrUnknownRoute) {
+		check.running = node.Kubernetes.Version
 	}
 
-	return client, running, err
+	return check
 }
 
 // roleFits refuses a node listed in the wrong stage, which would break the
