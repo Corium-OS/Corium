@@ -78,9 +78,10 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   and names the worker. `POST /v1/kubernetes/check` returns the kubelets left
   one minor behind. See ADR 12.
 
-- **The k0s floor is v1.36.5+k0s.0** (Kubernetes 1.36.5, etcd 3.6.16). A node
-  that sets no `kubernetes.version` moves to it with the next image.
-  v1.34.12+k0s.0, v1.35.9+k0s.0 and v1.36.5+k0s.0 join the window; the releases
+- **The k0s floor is v1.36.6+k0s.0** (Kubernetes 1.36.6, etcd 3.6.16,
+  containerd 2.3.6). A node that sets no `kubernetes.version` moves to it with
+  the next image. v1.34.12+k0s.0, v1.34.13+k0s.0, v1.35.9+k0s.0,
+  v1.35.10+k0s.0, v1.36.5+k0s.0 and v1.36.6+k0s.0 join the window; the releases
   already in it stay, so a configuration pinning one keeps working.
 
 ### Fixed
