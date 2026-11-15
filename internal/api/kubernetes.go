@@ -62,6 +62,10 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 		return kubernetesSwap{running: active.Raw}, nil
 	}
 
+	if _, err := s.checkKubelets(ctx, next.Role, plan); err != nil {
+		return kubernetesSwap{}, err
+	}
+
 	// Before anything is stopped. See the note above.
 	if err := k0s.Fetch(ctx, requested, next.Kubernetes.Mirror); err != nil {
 		return kubernetesSwap{}, err
@@ -147,6 +151,15 @@ func (s *Server) commitSwap(
 
 	swap := kubernetesSwap{running: running.Raw, backup: backup}
 
+	// A controller is not back until its API server answers. Without a Node of
+	// its own it is never drained, so nothing below would wait, and the next
+	// node of a rollout would move while this control plane is still down.
+	if role != config.RoleWorker && !drained {
+		if err := s.waitFor(ctx, s.canListNodes); err != nil {
+			return swap, fmt.Errorf("k0s %s is running, but %w", running, err)
+		}
+	}
+
 	if drained {
 		// Wait for the control plane before asking it for anything. On a
 		// controller -- and every single-node cluster is one -- the API server
@@ -160,7 +173,7 @@ func (s *Server) commitSwap(
 		// not one", which is untrue and sends an operator looking at roles
 		// instead of at timing. Found by the end-to-end test, which is the only
 		// place a real control plane is restarted.
-		if err := s.waitForClusterAccess(ctx); err != nil {
+		if err := s.waitFor(ctx, s.lifecycle.CanReachCluster); err != nil {
 			return swap, fmt.Errorf(
 				"k0s %s is running, but %w; uncordon it with `cctl uncordon`",
 				running, err)
@@ -310,6 +323,29 @@ func (s *Server) checkKubernetesVersion(next *config.Config) (kubernetesPlan, er
 	return kubernetesPlan{window: window, active: active, requested: requested}, nil
 }
 
+// checkKubelets refuses a minor move on a controller that would put a kubelet
+// outside k0s's skew rules, and returns those left one minor behind (ADR 12).
+//
+// A controller that cannot list its nodes goes ahead: blocking there would keep
+// a broken control plane from being upgraded out of its problem.
+func (s *Server) checkKubelets(
+	ctx context.Context, role config.Role, plan kubernetesPlan,
+) ([]k0s.Kubelet, error) {
+	if role == config.RoleWorker || plan.active.SameMinor(plan.requested) {
+		return nil, nil
+	}
+
+	kubelets, err := s.lifecycle.Kubelets(ctx)
+	if err != nil {
+		slog.Warn("could not check the kubelets' versions before a minor change",
+			"error", err)
+
+		return nil, nil
+	}
+
+	return k0s.CheckKubelets(plan.requested, kubelets)
+}
+
 // clusterSettleTimeout bounds how long a restarted control plane is given to
 // answer before the node gives up on returning itself to service. Generous
 // because the cost of being wrong is asymmetric: a node left cordoned needs a
@@ -319,25 +355,24 @@ const clusterSettleTimeout = 5 * time.Minute
 // clusterPollInterval is how often it asks.
 const clusterPollInterval = 5 * time.Second
 
-// waitForClusterAccess blocks until this node can act on its own Node object.
+// waitFor blocks until ready reports true, or the control plane has had
+// clusterSettleTimeout to come back.
 //
 // It exists because a version change restarts the very control plane the node
-// then needs in order to put itself back into service.
-func (s *Server) waitForClusterAccess(ctx context.Context) error {
+// then needs, to put itself back into service or to answer the next node.
+func (s *Server) waitFor(ctx context.Context, ready func(context.Context) bool) error {
 	deadline := time.Now().Add(clusterSettleTimeout)
 
 	ticker := time.NewTicker(clusterPollInterval)
 	defer ticker.Stop()
 
 	for {
-		if s.lifecycle.CanReachCluster(ctx) {
+		if ready(ctx) {
 			return nil
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf(
-				"its control plane did not answer within %s, so the node could "+
-					"not be returned to service", clusterSettleTimeout)
+			return fmt.Errorf("its control plane did not answer within %s", clusterSettleTimeout)
 		}
 
 		select {
@@ -346,6 +381,14 @@ func (s *Server) waitForClusterAccess(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// canListNodes reports whether this node's API server answers with its admin
+// credentials, which a controller without a Node object cannot show otherwise.
+func (s *Server) canListNodes(ctx context.Context) bool {
+	_, err := s.lifecycle.Kubelets(ctx)
+
+	return err == nil
 }
 
 // drainForSwap takes the node out of service, and reports whether it did.
@@ -487,15 +530,28 @@ func (s *Server) handleKubernetesCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lagging, err := s.checkKubelets(r.Context(), next.Role, plan)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+
+		return
+	}
+
 	status := "would-change"
 	if plan.active.Raw == plan.requested.Raw {
 		status = "unchanged"
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"status":     status,
 		"kubernetes": plan.active.Raw,
-	})
+	}
+
+	if len(lagging) > 0 {
+		response["lagging"] = lagging
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 // readKubernetesRequest builds the configuration a version request would

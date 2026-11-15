@@ -8,6 +8,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Corium-OS/Corium/internal/k0s"
 )
 
 // StateDir is Corium's own state, the part of it this package erases.
@@ -101,6 +104,42 @@ func (m *Manager) CanReachCluster(ctx context.Context) bool {
 	_, err = m.run(ctx, commandTimeout, "k0s", "kubectl", "get", "node", node)
 
 	return err == nil
+}
+
+// Kubelets lists every Node in the cluster with the kubelet version it reports.
+// Only a controller holds the credentials to ask.
+func (m *Manager) Kubelets(ctx context.Context) ([]k0s.Kubelet, error) {
+	output, err := m.run(ctx, commandTimeout, "k0s", "kubectl", "get", "nodes", "-o", "json")
+	if err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
+	}
+
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				NodeInfo struct {
+					KubeletVersion string `json:"kubeletVersion"`
+				} `json:"nodeInfo"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+
+	if err := json.Unmarshal(output, &list); err != nil {
+		return nil, fmt.Errorf("reading the node list: %w", err)
+	}
+
+	kubelets := make([]k0s.Kubelet, 0, len(list.Items))
+	for _, item := range list.Items {
+		kubelets = append(kubelets, k0s.Kubelet{
+			Name:    item.Metadata.Name,
+			Version: item.Status.NodeInfo.KubeletVersion,
+		})
+	}
+
+	return kubelets, nil
 }
 
 // Cordon stops new pods being scheduled here.

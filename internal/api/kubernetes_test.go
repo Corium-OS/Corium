@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Corium-OS/Corium/internal/config"
@@ -357,5 +358,125 @@ func TestSwapOutlivesTheClient(t *testing.T) {
 	recorded, readErr := os.ReadFile(calls)
 	if readErr != nil || !strings.HasPrefix(string(recorded), "stop ") {
 		t.Fatalf("k0s was never stopped after the client left (swap error = %v)", err)
+	}
+}
+
+// minorWindow puts the floor one minor below the top of the window, so a
+// minor move is reachable on a node with no extension merged.
+const minorWindow = `K0S_FLOOR=v1.35.8+k0s.1
+
+v1.34.11+k0s.1
+v1.35.8+k0s.1
+v1.36.4+k0s.0
+`
+
+const (
+	strandedWorker = `{"items":[
+		{"metadata":{"name":"c1"},"status":{"nodeInfo":{"kubeletVersion":"v1.35.8+k0s"}}},
+		{"metadata":{"name":"forgotten"},"status":{"nodeInfo":{"kubeletVersion":"v1.34.11+k0s"}}}]}`
+	laggingWorker = `{"items":[
+		{"metadata":{"name":"c1"},"status":{"nodeInfo":{"kubeletVersion":"v1.35.8+k0s"}}}]}`
+)
+
+// serverWithKubelets is a node on 1.35 whose cluster reports the kubelets given.
+func serverWithKubelets(t *testing.T, ca *authority, kubelets string, asked *atomic.Bool) *Server {
+	t.Helper()
+
+	server := serverWithWindow(t, ca)
+
+	if err := os.WriteFile(server.k0sWindowPath, []byte(minorWindow), 0o600); err != nil {
+		t.Fatalf("writing the window: %v", err)
+	}
+
+	server.Lifecycle(&lifecycle.Manager{
+		Dir: t.TempDir(),
+		Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") != "kubectl get nodes -o json" {
+				return nil, errors.New("unexpected command")
+			}
+
+			asked.Store(true)
+
+			return []byte(kubelets), nil
+		},
+	})
+
+	return server
+}
+
+// TestAControllerRefusesToStrandAKubelet is ADR 12: a minor move that would
+// leave a worker two minors behind is refused before anything is fetched.
+func TestAControllerRefusesToStrandAKubelet(t *testing.T) {
+	t.Parallel()
+
+	var asked atomic.Bool
+
+	server := serverWithKubelets(t, newAuthority(t), strandedWorker, &asked)
+
+	_, err := server.swapKubernetesVersion(context.Background(), &config.Config{
+		Role:       config.RoleController,
+		Kubernetes: config.Kubernetes{Version: "v1.36.4+k0s.0"},
+	})
+
+	if !errors.Is(err, k0s.ErrSkew) || !strings.Contains(err.Error(), "forgotten (v1.34.11+k0s)") {
+		t.Fatalf("error = %v, want a skew refusal naming the forgotten worker", err)
+	}
+}
+
+// TestAWorkerDoesNotAskForKubelets: it holds no credentials to list them.
+func TestAWorkerDoesNotAskForKubelets(t *testing.T) {
+	t.Parallel()
+
+	var asked atomic.Bool
+
+	server := serverWithKubelets(t, newAuthority(t), strandedWorker, &asked)
+
+	plan, err := server.checkKubernetesVersion(&config.Config{
+		Role:       config.RoleWorker,
+		Kubernetes: config.Kubernetes{Version: "v1.36.4+k0s.0"},
+	})
+	if err != nil {
+		t.Fatalf("checkKubernetesVersion() error = %v", err)
+	}
+
+	if _, err := server.checkKubelets(context.Background(), config.RoleWorker, plan); err != nil {
+		t.Errorf("checkKubelets() error = %v", err)
+	}
+
+	if asked.Load() {
+		t.Error("a worker listed the cluster's nodes")
+	}
+}
+
+// TestCheckReportsLaggingKubelets is what cctl warns from.
+func TestCheckReportsLaggingKubelets(t *testing.T) {
+	t.Parallel()
+
+	ca := newAuthority(t)
+
+	var asked atomic.Bool
+
+	server := serverWithKubelets(t, ca, laggingWorker, &asked)
+
+	if err := os.WriteFile(server.configPath, []byte(aDocument), 0o600); err != nil {
+		t.Fatalf("seeding the configuration: %v", err)
+	}
+
+	address := serveOn(t, server)
+	admin := client(t, server.store, ca.issue(t, RoleAdmin))
+
+	status, body := postRaw(t, admin, "https://"+address+"/v1/kubernetes/check",
+		`{"version":"v1.36.4+k0s.0"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d (%v)", status, body)
+	}
+
+	lagging, _ := body["lagging"].([]any)
+	if len(lagging) != 1 {
+		t.Fatalf("lagging = %v, want c1", body["lagging"])
+	}
+
+	if entry, _ := lagging[0].(map[string]any); entry["name"] != "c1" {
+		t.Errorf("lagging = %v, want c1", lagging)
 	}
 }

@@ -800,6 +800,11 @@ version is a mix.
 The etcd member of a moved controller gets up to five minutes to catch up. See
 [etcd around controllers](#etcd-around-controllers).
 
+**A controller refuses to strand a worker.** If you leave a worker out, it
+stays one minor behind. k0s allows this, so the rollout succeeds. At the next
+minor, the worker would be two minors behind, and k0s does not allow that. The
+controller refuses that change and names the worker. Move the worker first.
+
 Each node downloads the extension *before* it goes out of service. So an
 unreachable registry, or a signature that does not verify, costs nothing. Then
 the node drains, stops k0s, swaps the extension, and comes back, without a
