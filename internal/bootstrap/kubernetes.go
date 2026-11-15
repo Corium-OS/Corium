@@ -2,8 +2,11 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 
 	"github.com/Corium-OS/Corium/internal/config"
 	"github.com/Corium-OS/Corium/internal/k0s"
@@ -65,11 +68,12 @@ func applyKubernetesVersion(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 
-	// The skew rules are k0s's, and they are checked even here, where the node
-	// has no cluster yet. A single-node cluster bootstrapping straight onto a
-	// version two minors from its floor would come up, and then be a node whose
-	// binary and whose staged payload disagree about what they support.
-	if err := k0s.CheckSkew(active, version); err != nil {
+	hasState, err := k0sHasState(k0sStateDir)
+	if err != nil {
+		return err
+	}
+
+	if err := checkBootstrapSkew(active, version, hasState); err != nil {
 		return err
 	}
 
@@ -111,4 +115,43 @@ func applyKubernetesVersion(ctx context.Context, cfg *config.Config) error {
 	slog.Info("k0s version applied", "version", version, "was", active)
 
 	return nil
+}
+
+// k0sStateDir is where k0s keeps what a minor change could break. A variable so
+// tests can point it elsewhere.
+var k0sStateDir = "/var/lib/k0s"
+
+// checkBootstrapSkew applies k0s's skew rules only where there is something
+// for them to protect. A node that never ran k0s has no datastore or kubelet
+// state to migrate, so starting below the floor is not a downgrade: it may take
+// any version in the window. That is what lets a cluster be built on an older
+// minor than the image's floor. See ADR 10, section 3.
+func checkBootstrapSkew(active, requested k0s.Version, hasState bool) error {
+	if !hasState {
+		return nil
+	}
+
+	return k0s.CheckSkew(active, requested)
+}
+
+// k0sHasState reports whether k0s has written anything to dir beyond what
+// Corium places there before k0s first starts: the staged binaries, which the
+// version change clears anyway, and the manifests.
+func k0sHasState(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", dir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.Name() != "bin" && entry.Name() != "manifests" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

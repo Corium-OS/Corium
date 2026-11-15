@@ -105,6 +105,11 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   before the next. `kubectl get nodes` shows the version each kubelet really
   runs, and `kubectl version` the API server's.
 
+- **A new node can start on a Kubernetes version below the floor.** A node
+  pinning, say, 1.34 on an image whose floor is 1.36 refused to bootstrap,
+  treating it as a downgrade, so every minor below the floor was unreachable.
+  The skew rules now apply only once k0s has state on the node.
+
 ## [0.5.0] - 2026-09-29
 
 ### Added
