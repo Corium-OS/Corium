@@ -24,7 +24,7 @@ concurrency:
 env:
   # Pinned rather than "latest": a site that silently changes how it renders
   # because a runner picked up a new Hugo is a bad surprise.
-  HUGO_VERSION: 0.166.0
+  HUGO_VERSION: 0.169.0
 
 jobs:
   build:
