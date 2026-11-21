@@ -1422,17 +1422,17 @@ design.
 ### The air-gap bundle
 
 A node that pulls an extension through `mirror` also pulls the air-gap bundle of
-the same version, from the sibling repository `<mirror>-airgap` —
-`registry.internal.example/corium/k0s-airgap` in the example above, and
-`ghcr.io/corium-os/k0s-airgap` when no mirror is set. **A mirror must carry both
-repositories**: one that serves only `<mirror>` fails the bundle pull, named by
+the same version, from the sibling repository `<mirror>-airgap`
+(`registry.internal.example/corium/k0s-airgap` in the example above, and
+`ghcr.io/corium-os/k0s-airgap` when no mirror is set). A mirror must carry both
+repositories: one that serves only `<mirror>` fails the bundle pull, named by
 the reference it tried. See [ADR 13](adr/0013-airgap-bundle.md).
 
-The bundle is the k0s system images of exactly the version the node runs —
-pause, kube-proxy, CoreDNS, the konnectivity agent, the CNI and the rest —
-published and signed like the extension, and verified by the same
-`policy.json`. The node places it in `/var/lib/k0s/images` before k0s starts,
-and k0s imports it into containerd when the worker starts
+The bundle is the k0s system images of exactly the version the node runs (pause,
+kube-proxy, CoreDNS, the konnectivity agent, the CNI and the rest), published
+and signed like the extension, and verified by the same `policy.json`. The node
+places it in `/var/lib/k0s/images` before k0s starts, and k0s imports it into
+containerd when the worker starts
 ([k0s: air-gap install](https://docs.k0sproject.io/stable/airgap-install/)).
 Only roles that run a kubelet get it: `single`, `controller+worker` and
 `worker`. A controller-only node does not need it. When the version changes,
@@ -1442,14 +1442,15 @@ version change before the node is drained.
 
 Two limits, stated plainly:
 
-- **Helm add-ons are not in the bundle.** An air-gapped node still needs its
+- Helm add-ons are not in the bundle. An air-gapped node still needs its
   charts and their images from the internal registry. Use `k0s.patch` to point
   `spec.images` at it, and set `spec.images.default_pull_policy: Never` there
   too if you want the hard guarantee that nothing is ever pulled.
-- **The floor is not covered.** A node that sets no `version` runs the image's
-  floor and needs no network for the binary — but a bundle baked into the image
-  would match only that floor, so Corium does not bake one. A fully offline node
-  that also sets no version is a variant-image question, not a `corium:` field.
+- The floor is not covered. A node that sets no `version` runs the image's
+  floor and needs no network for the binary. A bundle baked into the image
+  would match only that floor, so Corium does not bake one. A fully offline
+  node that also sets no version is a variant-image question, not a `corium:`
+  field.
 
 ## 4. How the hostname is settled
 

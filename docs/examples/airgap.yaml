@@ -3,7 +3,7 @@
 # A node on a network with no route to a public registry, pinned to a
 # Kubernetes version that is not the floor of its image.
 #
-# `mirror` points at the site's internal registry, which must carry BOTH
+# `mirror` points at the site's internal registry, which must carry both
 # repositories: corium/k0s for the signed system extension, and its sibling
 # corium/k0s-airgap for the air-gap bundle of the same version. The node pulls
 # both before k0s starts and places the bundle in /var/lib/k0s/images, where

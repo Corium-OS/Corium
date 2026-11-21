@@ -139,8 +139,8 @@ Passthrough is not a lower tier for forgotten settings. See
 
 A bundle baked into the image with a `COPY` matches only the floor version. Since
 ADR 10 the version a node runs is no longer the image's, so a baked bundle is
-wrong on every node that pins another version — the bundle has to travel with
-the version, which is what the row above does.
+wrong on every node that pins another version. The bundle has to travel with the
+version, which is what the row above does.
 
 ### Disks
 
