@@ -5,10 +5,15 @@
 # compromised release — this file is the trust anchor and changing it is a
 # reviewable event.
 #
-# There is nothing to copy from upstream even if we wanted to: a k0s release
-# carries the bare binaries and 345-byte cosign signatures with no bundle or
-# certificate beside them. Neither a checksum file nor a verifiable signature is
-# published. Read the diff; it is the only control there is.
+# There is nothing to copy from upstream for the binaries even if we wanted to:
+# a k0s release carries the bare binaries and 345-byte cosign signatures with no
+# bundle or certificate beside them. Neither a checksum file nor a verifiable
+# signature is published for them. Read the diff; it is the only control there
+# is. The air-gap bundle is the exception: GitHub publishes a sha256 digest for
+# every release asset, and the fourth column pins that digest. The publishing
+# workflow downloads the bundle and checks the bytes against this column before
+# it signs and republishes the artefact, so the pin is what stands between
+# upstream's release and the artefact a node pulls.
 #
 # This file pins two different things, and the distinction is ADR 10's:
 #
@@ -24,28 +29,33 @@
 #   legitimately spans two. The third is the one an operator can move to without
 #   first taking an OS upgrade they did not ask for.
 #
+# Each row is: version, architecture, sha256 of the k0s binary, sha256 of the
+# k0s air-gap bundle for that version and architecture. The bundle is what ADR
+# 13 delivers alongside the extension: the system images of exactly the version
+# a node runs, for a node with no route to a public registry.
+#
 # Refresh the floor or add a version with: mise run k0s-window vX.Y.Z+k0s.N
 
 K0S_FLOOR=v1.36.6+k0s.0
 
-# version         arch    sha256
-v1.34.11+k0s.1    amd64   a93f1983f7424e2bc64d56adda733971198fd432d3de9abdf8e368fc68b5e07b
-v1.34.11+k0s.1    arm64   33c748f04f91eb65209f36663a679b94af505b6c9a237429ff1a39f954d32921
-v1.34.12+k0s.0    amd64   8536acf929fc7cd6f687c9a63d84606525fde6fc216a1a081b4a016e0b3dc21e
-v1.34.12+k0s.0    arm64   75e0ef9d94ac365df5a46314e5c9be8e4038f22bffef9076933d0561e06c9b34
-v1.34.13+k0s.0    amd64   7f8451d818d0f961d1072904000abb757eea22986b2075b8d57a816938119581
-v1.34.13+k0s.0    arm64   2287331f70261b71962745f71d73099f6260d878d2d4c5a8cc1d599e3cab8bd2
-v1.35.10+k0s.0    amd64   cffc330d6fff587d2ce8add8e8ffdcd94e88aa09a4c15cc315ff0de341e4231a
-v1.35.10+k0s.0    arm64   03eafc226f80035cc0d5e67955662f6780a1df6b49bc2d067ac70f6485e2e154
-v1.35.8+k0s.1     amd64   09e5c5b9ba0a6218fe46dafde799ccd62270f83fe5c3ea695beb1b4098baed67
-v1.35.8+k0s.1     arm64   76a91efef3af3a0cd4214c54d04db2e0be3da0d2136e2c5f434bf3146031d22d
-v1.35.9+k0s.0     amd64   517b88e10665c35fd546fcb9d9d358be1f480ec3d8f2e7d18ef588831eae64fb
-v1.35.9+k0s.0     arm64   e644aea496c41febdc55754d8589a326267c22179fdc3418a52cea401a9ec5c4
-v1.36.4+k0s.0     amd64   ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f
-v1.36.4+k0s.0     arm64   6301f64d98f9e4f6fbc2892bc66d137bb4ad5840685300772d8391614d47b8aa
-v1.36.4+k0s.1     amd64   18c304d53cdd70095e99c6b859b269b4fef0bb84579d7e7185271a9135694a31
-v1.36.4+k0s.1     arm64   04f685c8c9c29262da64acf26fd928452f19d449ac58729592f686f915882319
-v1.36.5+k0s.0     amd64   377cdb372f37a3c23f1f6072e4f11838b45b463b458f2afdd0c2607157fbe04f
-v1.36.5+k0s.0     arm64   88d730866e610fe6ad32e877bf79ed10eafd48fe14e699fff6f5133c11d598b7
-v1.36.6+k0s.0     amd64   60bac39d4ed8292adb8576a55866389cde4700f9be7d152587e15f8aa67c12fc
-v1.36.6+k0s.0     arm64   cf4763c6c0e08b9c53b3c3ecd7f35f7bee50aff2a2347fa5a8cc4c47ab489b2f
+# version         arch    sha256 (binary)                                                  sha256 (air-gap bundle)
+v1.34.11+k0s.1    amd64   a93f1983f7424e2bc64d56adda733971198fd432d3de9abdf8e368fc68b5e07b b51975821eeca1f8ba4cd863851ff9eaf2a91c5a10a53950bf47237495169dbd
+v1.34.11+k0s.1    arm64   33c748f04f91eb65209f36663a679b94af505b6c9a237429ff1a39f954d32921 7914c1a7e203418fa363d1f10337cecc2206e7c4f3e1ef3db07c3880aeec69fa
+v1.34.12+k0s.0    amd64   8536acf929fc7cd6f687c9a63d84606525fde6fc216a1a081b4a016e0b3dc21e 2ea080cc2bbe839bbed2f813a27aef0c630e7529ed626e3d96d95e5ea55384e7
+v1.34.12+k0s.0    arm64   75e0ef9d94ac365df5a46314e5c9be8e4038f22bffef9076933d0561e06c9b34 5948da23ad0b52ec734e99a36bce79ea263a65a1a6c57d544157db4b00364915
+v1.34.13+k0s.0    amd64   7f8451d818d0f961d1072904000abb757eea22986b2075b8d57a816938119581 4ec5ea167e4687de824ffa865607ec636bcd2801217f99660234952c10ef1bd8
+v1.34.13+k0s.0    arm64   2287331f70261b71962745f71d73099f6260d878d2d4c5a8cc1d599e3cab8bd2 2114c26a2fd849636d1025b212a60dac417f0396b83317c13e2ff548f2b5bfff
+v1.35.10+k0s.0    amd64   cffc330d6fff587d2ce8add8e8ffdcd94e88aa09a4c15cc315ff0de341e4231a 342ec31c9877624966d92331dc977e2730c359322dbc22e7735434a0a3fe061b
+v1.35.10+k0s.0    arm64   03eafc226f80035cc0d5e67955662f6780a1df6b49bc2d067ac70f6485e2e154 850bf9cae3215d5adcb1f3c2dd71c6544c39eb12d4600483787b84c0ff39321
+v1.35.8+k0s.1     amd64   09e5c5b9ba0a6218fe46dafde799ccd62270f83fe5c3ea695beb1b4098baed67 24c8cecd44c1a853cf6c90244a60971251a9c3b31ebadb19138bbb4e9e9fbb87
+v1.35.8+k0s.1     arm64   76a91efef3af3a0cd4214c54d04db2e0be3da0d2136e2c5f434bf3146031d22d e6bd156baa072429b27ed5ddfc9ca7b289f770a6d6b9f5327f154284c08649ad
+v1.35.9+k0s.0     amd64   517b88e10665c35fd546fcb9d9d358be1f480ec3d8f2e7d18ef588831eae64fb 5c228c23abf6b4572ed2a76cb7ef3b63c75fc0cb3347aba1aaa49be93744c12f
+v1.35.9+k0s.0     arm64   e644aea496c41febdc55754d8589a326267c22179fdc3418a52cea401a9ec5c4 4383ed1735583b5164e007aa899e74f3957c0516e5048d5b1c8a5443b56e23d0
+v1.36.4+k0s.0     amd64   ca1e9e68107335846e8296777fce2ccd654284e6265b4b5d32c34ead872af98f 23746c2d4f2fdbfe353f5c9f81b5567e8904fa354fb2de5bf4efd6742f302415
+v1.36.4+k0s.0     arm64   6301f64d98f9e4f6fbc2892bc66d137bb4ad5840685300772d8391614d47b8aa e9f96d0f57c8b3dc446bafc65a38c0c6b0c9d5ffff108bf6980d996b30a50227
+v1.36.4+k0s.1     amd64   18c304d53cdd70095e99c6b859b269b4fef0bb84579d7e7185271a9135694a31 c9195e7ed8343df5f7cfa306c74034087c958030e1c71940b220d93d1c925d71
+v1.36.4+k0s.1     arm64   04f685c8c9c29262da64acf26fd928452f19d449ac58729592f686f915882319 be2420f3da562c383b98879e3503483c00bb77763a4c2443ba3636f0c25a6f03
+v1.36.5+k0s.0     amd64   377cdb372f37a3c23f1f6072e4f11838b45b463b458f2afdd0c2607157fbe04f 1b091b4f3a432743940b3cfe1e53f309395b7c72cba1c7130fc2e271af607f43
+v1.36.5+k0s.0     arm64   88d730866e610fe6ad32e877bf79ed10eafd48fe14e699fff6f5133c11d598b7 ea87f5559a8e7370a36e616341daa81092d699f58901aa758789b79155f2baef
+v1.36.6+k0s.0     amd64   60bac39d4ed8292adb8576a55866389cde4700f9be7d152587e15f8aa67c12fc 9f0c2e3554167e81f55b8e36ee530c6d2cc642823b5ce2729ca91046e994b533
+v1.36.6+k0s.0     arm64   cf4763c6c0e08b9c53b3c3ecd7f35f7bee50aff2a2347fa5a8cc4c47ab489b2f 6f43926ce5e2eb0c55b6606fb5ff66adc6e644c8a746b55f863b857da677918f

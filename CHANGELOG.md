@@ -12,6 +12,20 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+### Added
+
+- **Air-gapped nodes run the system images of the Kubernetes version they
+  actually run.** A node that pins a `kubernetes.version` through
+  `kubernetes.mirror` now also pulls the k0s air-gap bundle of that exact
+  version, from the sibling repository `<mirror>-airgap`
+  (`ghcr.io/corium-os/k0s-airgap` by default), published and signed like the
+  extension and verified by the same `policy.json`. The bundle lands in
+  `/var/lib/k0s/images` before k0s starts, on every role that runs a kubelet,
+  and the previous version's bundle is removed on a version change. A mirror
+  must now carry both repositories. Helm add-ons are not in the bundle. See
+  [ADR 13](docs/adr/0013-airgap-bundle.md) and
+  [reference §3.20](docs/reference.md#320-kubernetes).
+
 ## [0.6.0] - 2026-11-21
 
 ### Added

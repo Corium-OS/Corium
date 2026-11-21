@@ -81,6 +81,20 @@ func applyKubernetesVersion(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
+	// The bundle travels with the version, not with the image (ADR 13): a
+	// node that pulls an extension through a mirror also pulls that version's
+	// air-gap bundle, so a node with no route to a public registry runs the
+	// system images of the k0s it actually runs. Only a role with a kubelet
+	// needs it -- k0s imports bundles from <data-dir>/images on the worker
+	// side, and upstream ships controller-only nodes without one. It lands
+	// here because applyKubernetesVersion runs before k0s is installed, and
+	// k0s imports what is in the directory when the worker starts.
+	if cfg.Role.IsWorker() {
+		if err := k0s.FetchBundle(ctx, version, cfg.Kubernetes.Mirror); err != nil {
+			return err
+		}
+	}
+
 	if err := k0s.Activate(ctx, version); err != nil {
 		return err
 	}
@@ -91,6 +105,13 @@ func applyKubernetesVersion(ctx context.Context, cfg *config.Config) error {
 	// not a failure anybody enjoys diagnosing. On a first boot there is usually
 	// nothing here to remove.
 	if err := k0s.ClearStaged(); err != nil {
+		return err
+	}
+
+	// The previous version's bundle goes with its staged binaries: same rule,
+	// same reason -- /var must not collect one several-hundred-MB tarball per
+	// minor (ADR 13).
+	if err := k0s.ClearBundles(k0s.ImageDir, version); err != nil {
 		return err
 	}
 

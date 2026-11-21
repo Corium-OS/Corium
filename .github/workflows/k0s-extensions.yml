@@ -35,6 +35,10 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   REPOSITORY: corium-os/k0s
+  # The air-gap bundle's repository: the extension repository with "-airgap"
+  # appended, which is the mapping internal/k0s.BundleReference applies to a
+  # custom mirror. The two have to agree.
+  BUNDLE_REPOSITORY: corium-os/k0s-airgap
 
 jobs:
   # The window lives in build/k0s.lock and nowhere else, so the matrix is read
@@ -68,8 +72,9 @@ jobs:
           requested="${{ inputs.version }}"
 
           # Comments are excluded explicitly: a prose line in the lock file can
-          # have three fields too.
-          versions="$(awk '!/^#/ && NF == 3 { print $1 }' build/k0s.lock | sort -u)"
+          # have several fields too. A row carries the binary's checksum and
+          # the air-gap bundle's (ADR 13); the version is still field one.
+          versions="$(awk '!/^#/ && NF >= 3 { print $1 }' build/k0s.lock | sort -u)"
 
           if [ -n "${requested}" ]; then
             if ! printf '%s\n' "${versions}" | grep -qxF "${requested}"; then
@@ -94,6 +99,35 @@ jobs:
             echo
             printf '%s\n' "${versions}" | sed 's/^/- /'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Every pinned bundle checksum is checked against the digest GitHub
+      # publishes for the release asset, on pull requests too: the pin is the
+      # trust anchor, and a row that disagrees with upstream must fail here
+      # rather than at publish time. No download -- this reads the API only.
+      - name: Check the pinned bundle checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          while read -r version arch pinned; do
+            encoded="$(printf '%s' "${version}" | sed 's/+/%2B/g')"
+
+            # The asset's name changed across releases (k0s-airgap-bundle-<v>-<arch>
+            # early, k0s-airgap-bundle-<v>-linux-<arch>.tar later), so it is matched
+            # by shape, not by a name this workflow would have to track.
+            published="$(gh api "repos/k0sproject/k0s/releases/tags/${encoded}" --jq \
+              --arg v "${version}" --arg a "${arch}" \
+              '[(.assets[]
+                 | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
+                 | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
+                 | .digest)][0] // ""')"
+
+            if [ "sha256:${pinned}" != "${published}" ]; then
+              echo "::error::${version} (${arch}): build/k0s.lock pins sha256:${pinned}, upstream publishes ${published:-no such asset}" >&2
+              exit 1
+            fi
+          done < <(awk '!/^#/ && NF >= 4 { print $1, $2, $4 }' build/k0s.lock)
 
   publish:
     name: ${{ matrix.version }} (${{ matrix.arch }})
@@ -268,3 +302,119 @@ jobs:
           fi
 
           echo "pulled ${reference} and recovered the extension byte for byte"
+
+      # The air-gap bundle for the same version and architecture, republished as
+      # its own signed artefact in the sibling repository. It travels with the
+      # version, not with the image (ADR 13): a node that pulls the extension
+      # pulls this too, and a node with no route to a public registry gets the
+      # system images of the k0s version it actually runs from /var/lib/k0s/images.
+      - name: Fetch the upstream bundle and check its pin
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          version="${{ matrix.version }}"
+          arch="${{ matrix.arch }}"
+          encoded="$(printf '%s' "${version}" | sed 's/+/%2B/g')"
+
+          # Resolved from the release rather than hard-coded: the asset name
+          # changed across releases. See the check in the plan job.
+          asset="$(gh api "repos/k0sproject/k0s/releases/tags/${encoded}" --jq \
+            --arg v "${version}" --arg a "${arch}" \
+            '[(.assets[]
+               | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
+               | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
+               | .name)][0] // ""')"
+
+          if [ -z "${asset}" ]; then
+            echo "::error::no air-gap bundle asset for ${version} (${arch})" >&2
+            exit 1
+          fi
+
+          url="https://github.com/k0sproject/k0s/releases/download/${encoded}/${asset}"
+          echo "downloading ${url} (several hundred MB)"
+          curl --fail --location --retry 3 --retry-delay 5 --output "${asset}" "${url}"
+
+          # The trust anchor is the lock file, not the download: the bytes must
+          # match the pinned checksum before anything is signed and published.
+          pinned="$(awk -v v="${version}" -v a="${arch}" '$1 == v && $2 == a { print $4 }' build/k0s.lock)"
+          got="$(sha256sum "${asset}" | cut -d' ' -f1)"
+
+          if [ "${got}" != "${pinned}" ]; then
+            echo "::error::${asset}: sha256 ${got}, but build/k0s.lock pins ${pinned}" >&2
+            exit 1
+          fi
+
+          echo "${got}  ${asset}" | sha256sum --check
+          echo "BUNDLE_ASSET=${asset}" >> "${GITHUB_ENV}"
+
+      - name: Publish and sign the bundle
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -eu
+
+          repository="${REGISTRY}/${BUNDLE_REPOSITORY}"
+
+          # Same tag scheme as the extension: a registry tag may not contain
+          # '+', so it becomes '_', then the architecture. internal/k0s.BundleReference
+          # builds the reference a node pulls; the two have to agree.
+          version="${{ matrix.version }}"
+          tag="${version//+/_}-${{ matrix.arch }}"
+
+          oras push \
+            --artifact-type application/vnd.corium.k0s-airgap-bundle.v1 \
+            "${repository}:${tag}" \
+            "${BUNDLE_ASSET}:application/vnd.corium.k0s-airgap-bundle.layer.v1+tar"
+
+          # Signed by digest, twice, for the same reasons as the extension:
+          # keyless proves which workflow run produced this, the key signature
+          # is the one a node's policy.json can enforce.
+          digest="$(oras manifest fetch --descriptor "${repository}:${tag}" | jq -r .digest)"
+          reference="${repository}@${digest}"
+
+          cosign sign --yes "${reference}"
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${reference}"
+
+          {
+            echo "### Bundle ${version} (${{ matrix.arch }})"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`${repository}:${tag}\` |"
+            echo "| Digest | \`${digest}\` |"
+            echo "| Size | $(du -h "${BUNDLE_ASSET}" | cut -f1) |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Same proof as for the extension: the artefact a node will pull is one
+      # skopeo can read, and the blob it carries is the bundle whose checksum
+      # was just verified -- the exact transport internal/k0s.FetchBundle uses.
+      - name: Check a node could pull the bundle
+        if: needs.plan.outputs.publish == 'true'
+        run: |
+          set -eu
+
+          version="${{ matrix.version }}"
+          tag="${version//+/_}-${{ matrix.arch }}"
+          reference="${REGISTRY}/${BUNDLE_REPOSITORY}:${tag}"
+
+          skopeo copy --insecure-policy "docker://${reference}" dir:pulled-bundle
+
+          blob="$(jq -r '.layers[0].digest | split(":")[1]' pulled-bundle/manifest.json)"
+          layers="$(jq -r '.layers | length' pulled-bundle/manifest.json)"
+
+          if [ "${layers}" != "1" ]; then
+            echo "::error::bundle artefact carries ${layers} blobs, the node expects exactly 1" >&2
+            exit 1
+          fi
+
+          if ! cmp -s "pulled-bundle/${blob}" "${BUNDLE_ASSET}"; then
+            echo "::error::the pulled blob differs from the bundle that was verified" >&2
+            exit 1
+          fi
+
+          echo "pulled ${reference} and recovered the bundle byte for byte"

@@ -45,6 +45,7 @@ See [HA cluster](install/ha-cluster.md) for the procedure that uses these files.
 | [`stretched-worker.yaml`](examples/stretched-worker.yaml) | A worker on the other site of that cluster |
 | [`raid.yaml`](examples/raid.yaml) | A node that mirrors its two spare disks and puts the Kubernetes state on the array. See [Software RAID](raid.md) |
 | [`kubernetes-version.yaml`](examples/kubernetes-version.yaml) | A node pinned to a Kubernetes version that is not the floor of its image, pulled from an internal mirror. See [ADR 10](adr/0010-kubernetes-version-axis.md) |
+| [`airgap.yaml`](examples/airgap.yaml) | A node on a network with no route to a public registry: the version's signed air-gap bundle is pulled from the mirror's sibling `k0s-airgap` repository into `/var/lib/k0s/images` before k0s starts. See [ADR 13](adr/0013-airgap-bundle.md) |
 
 ## Day two
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestTheImagePolicyRequiresASignatureForExtensions ties the mirror this
+// TestTheImagePolicyRequiresASignatureForExtensions ties the mirrors this
 // package pulls from to the signing policy the image ships.
 //
 // It exists because the two were configured separately and got out of step, in
@@ -41,32 +41,35 @@ func TestTheImagePolicyRequiresASignatureForExtensions(t *testing.T) {
 		t.Fatalf("parsing the shipped policy: %v", err)
 	}
 
-	// The scope is the repository, without the tag Reference adds.
-	repository := DefaultMirror
-
-	rules, ok := policy.Transports["docker"][repository]
-	if !ok {
-		t.Fatalf("policy.json has no rule for %s, so the node's default "+
-			"(insecureAcceptAnything) applies and extensions are pulled "+
-			"unverified; add a sigstoreSigned rule for it", repository)
-	}
-
-	if len(rules) == 0 {
-		t.Fatalf("policy.json has an empty rule list for %s", repository)
-	}
-
-	for _, rule := range rules {
-		if rule.Type != "sigstoreSigned" {
-			t.Errorf("%s is gated by %q, which demands no signature",
-				repository, rule.Type)
+	// The scope is the repository, without the tag Reference and
+	// BundleReference add. Both default artefact repositories are checked,
+	// because the bundle is pulled through the same skopeo call as the
+	// extension and must be held to the same requirement (ADR 13).
+	for _, repository := range []string{DefaultMirror, DefaultBundleMirror} {
+		rules, ok := policy.Transports["docker"][repository]
+		if !ok {
+			t.Fatalf("policy.json has no rule for %s, so the node's default "+
+				"(insecureAcceptAnything) applies and artefacts are pulled "+
+				"unverified; add a sigstoreSigned rule for it", repository)
 		}
 
-		// A keyless rule cannot be enforced on a node: policy matches a signer
-		// by subjectEmail and a GitHub Actions certificate carries a URI. The
-		// key is what makes the requirement real.
-		if !strings.HasSuffix(rule.KeyPath, "cosign.pub") {
-			t.Errorf("%s is gated by a rule with keyPath %q, want the shipped "+
-				"public key", repository, rule.KeyPath)
+		if len(rules) == 0 {
+			t.Fatalf("policy.json has an empty rule list for %s", repository)
+		}
+
+		for _, rule := range rules {
+			if rule.Type != "sigstoreSigned" {
+				t.Errorf("%s is gated by %q, which demands no signature",
+					repository, rule.Type)
+			}
+
+			// A keyless rule cannot be enforced on a node: policy matches a signer
+			// by subjectEmail and a GitHub Actions certificate carries a URI. The
+			// key is what makes the requirement real.
+			if !strings.HasSuffix(rule.KeyPath, "cosign.pub") {
+				t.Errorf("%s is gated by a rule with keyPath %q, want the shipped "+
+					"public key", repository, rule.KeyPath)
+			}
 		}
 	}
 }

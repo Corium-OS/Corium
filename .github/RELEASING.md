@@ -46,7 +46,10 @@ They are published by `.github/workflows/k0s-extensions.yml`, which runs when
 `build/k0s.lock` changes on `main` — not on a tag — and takes its matrix from
 the lock file itself. Adding a version to the window is therefore one
 `mise run k0s-window vX.Y.Z+k0s.N`, reviewed as a diff of checksums, and merging
-it publishes and signs the artefact.
+it publishes and signs the artefact. The same run publishes and signs the
+air-gap bundle for the version into the sibling `k0s-airgap` repository
+(ADR 13), after checking the downloaded bytes against the bundle checksum the
+lock file now carries in its fourth column.
 
 What *is* a release concern is the floor. `K0S_FLOOR` decides which version is
 baked into `/usr/bin/k0s`, so changing that line changes what every node built
@@ -189,8 +192,15 @@ coverage than it has is worse than a short one.
   and not a measurement.
 - **Every cloud-init datasource but Proxmox's.** Eight are listed as
   supported on the strength of cloud-init supporting them.
-- **Calico, Helm add-ons, air-gapped bundles, and `join.tokenFrom` over HTTPS
+- **Calico, Helm add-ons, and `join.tokenFrom` over HTTPS
   with an auth file.** Modelled and rendered correctly, never run in anger.
+- **An air-gapped node on a non-floor `kubernetes.version`.** Bootstrap a node
+  whose only route is an internal registry serving both `k0s` and `k0s-airgap`,
+  then `cctl k8s upgrade` it one minor. Every kube-system pod must be `Running`
+  with no image pulled from outside. The bundle artefact itself is exercised in
+  CI: `k0s-extensions.yml` checks every pin in `build/k0s.lock` against the
+  upstream release, downloads, verifies, signs and republishes each bundle, and
+  proves a node's skopeo transport can pull it back byte for byte.
 
 ### Things a machine can check, that CI does not
 

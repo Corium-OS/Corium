@@ -1,0 +1,46 @@
+#cloud-config
+#
+# A node on a network with no route to a public registry, pinned to a
+# Kubernetes version that is not the floor of its image.
+#
+# `mirror` points at the site's internal registry, which must carry BOTH
+# repositories: corium/k0s for the signed system extension, and its sibling
+# corium/k0s-airgap for the air-gap bundle of the same version. The node pulls
+# both before k0s starts and places the bundle in /var/lib/k0s/images, where
+# k0s imports it into containerd when the worker starts. Both artefacts are
+# verified by the node's policy.json, exactly like an OS image.
+#
+# Helm add-ons are NOT in the bundle: their charts and images must be reachable
+# from the internal registry too. See docs/adr/0013-airgap-bundle.md and
+# docs/reference.md §3.20.
+
+corium:
+  role: single
+
+  kubernetes:
+    # A k0s release tag from the window the image supports. The bundle pulled
+    # alongside the extension carries the system images of exactly this
+    # version.
+    version: v1.36.4+k0s.1
+
+    # The internal registry, as a repository with no tag and no digest:
+    # `version` above selects the artefact inside it. The bundle comes from
+    # registry.internal.example/corium/k0s-airgap.
+    mirror: registry.internal.example/corium/k0s
+
+  # Optional, but the usual thing on an air-gapped site: forbid image pulls
+  # outright. Everything k0s needs at the system level is already in the bundle;
+  # add-on charts and their images must be reachable from the internal registry
+  # (mirror the upstream registries into it and configure containerd through
+  # this same patch if your charts come from them).
+  k0s:
+    patch:
+      spec:
+        images:
+          default_pull_policy: Never
+
+users:
+  - name: core
+    groups: [wheel]
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACEME operator@example.com

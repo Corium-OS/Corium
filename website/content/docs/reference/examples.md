@@ -54,6 +54,7 @@ See [HA cluster](/docs/install/ha-cluster/) for the procedure that uses these fi
 | [`stretched-worker.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/stretched-worker.yaml) | A worker on the other site of that cluster |
 | [`raid.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/raid.yaml) | A node that mirrors its two spare disks and puts the Kubernetes state on the array. See [Software RAID](/docs/guides/raid/) |
 | [`kubernetes-version.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/kubernetes-version.yaml) | A node pinned to a Kubernetes version that is not the floor of its image, pulled from an internal mirror. See [ADR 10](/docs/decisions/adr-0010-kubernetes-version-axis/) |
+| [`airgap.yaml`](https://github.com/Corium-OS/Corium/blob/main/docs/examples/airgap.yaml) | A node on a network with no route to a public registry: the version's signed air-gap bundle is pulled from the mirror's sibling `k0s-airgap` repository into `/var/lib/k0s/images` before k0s starts. See [ADR 13](/docs/decisions/adr-0013-airgap-bundle/) |
 
 ## Day two
 

@@ -144,6 +144,12 @@ Passthrough is not a lower tier for forgotten settings. See
 | Supported window | n/a | Three Kubernetes minors per image, listed in `/usr/lib/corium/k0s.window`. To get a different minor, upgrade the OS |
 | Skew enforcement | n/a | One minor at a time, and no move back to an older minor. These are the k0s rules. Corium refuses a change that breaks them, names the rule, and stops nothing |
 | Rolling a version back | n/a | Not free, as an OS rollback is. k0s does not support a downgrade of a minor, so a revert is a second forward move |
+| Air-gapped image bundle | `kubernetes.version` + `kubernetes.mirror` | The k0s air-gap bundle for exactly the version the node runs is published beside the extension, in the sibling repository `<mirror>-airgap`, and pulled with it into `/var/lib/k0s/images` before k0s starts. A mirror must carry both repositories. Helm charts and their images are not in the bundle; they must be reachable from the internal registry. See [ADR 13](/docs/decisions/adr-0013-airgap-bundle/) |
+
+A bundle baked into the image with a `COPY` matches only the floor version. Since
+ADR 10 the version a node runs is no longer the image's, so a baked bundle is
+wrong on every node that pins another version — the bundle has to travel with
+the version, which is what the row above does.
 
 ### Disks
 
@@ -384,7 +390,6 @@ are wrong.
 
 | Missing | Notes |
 |---|---|
-| **Air-gapped bundles** | k0s supports [air-gap installs](https://docs.k0sproject.io/stable/airgap-install/) with an image bundle in `<data-dir>/images/`. You can already bake a bundle into the Corium image with a `COPY`. But there is no `corium:` field for it, and it is not tested |
 | **Worker profiles as a modelled field** | Reachable through the patch |
 
 

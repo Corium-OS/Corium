@@ -71,6 +71,17 @@ func (s *Server) swapKubernetesVersion(ctx context.Context, next *config.Config)
 		return kubernetesSwap{}, err
 	}
 
+	// On a role with a kubelet, the version's air-gap bundle is pulled
+	// alongside the extension (ADR 13), for the same reason and at the same
+	// point: a mirror that does not carry the sibling k0s-airgap repository
+	// fails here, while the node is still in service, rather than after the
+	// drain with a k0s that has no images to run.
+	if next.Role.IsWorker() {
+		if err := k0s.FetchBundle(ctx, requested, next.Kubernetes.Mirror); err != nil {
+			return kubernetesSwap{}, err
+		}
+	}
+
 	return s.commitSwap(ctx, plan, next)
 }
 
@@ -119,6 +130,13 @@ func (s *Server) commitSwap(
 	}
 
 	if err := k0s.ClearStaged(); err != nil {
+		return kubernetesSwap{}, withSnapshot(err, backup)
+	}
+
+	// The old version's bundle is removed before the start, not after: k0s
+	// imports what is in <data-dir>/images when the worker starts, and the
+	// node must come up on the new version's images only (ADR 13).
+	if err := k0s.ClearBundles(k0s.ImageDir, requested); err != nil {
 		return kubernetesSwap{}, withSnapshot(err, backup)
 	}
 
