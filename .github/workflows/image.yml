@@ -290,6 +290,11 @@ jobs:
     # was built but not pushed, so there is no digest to derive from. This
     # deliberately does not gate ZFS behind a tag the way `artefacts` does: the
     # variant should track the base on every publish, security rebuilds included.
+    #
+    # The job also skips itself, with the reason on the run, when the base
+    # kernel is newer than the pinned OpenZFS release supports. The first step
+    # below is that check, and it is why this job can be green without having
+    # published anything.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
@@ -309,7 +314,88 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check the base kernel is one OpenZFS supports
+        id: compat
+        run: |
+          set -euo pipefail
+
+          # OpenZFS refuses to configure against a kernel newer than the one its
+          # release declares as supported, and Fedora's kernel moves faster than
+          # OpenZFS releases do. That is not a broken commit: between the hour a
+          # kernel goes stable and the release that catches up with it, the
+          # variant cannot be built at all, and failing for it would leave main
+          # red over something no change in this repository can fix.
+          #
+          # So ask first, and skip the build with the reason on the run when the
+          # answer is no. Skipping is not a silent pass: a node on the variant
+          # stops receiving OS updates, Fedora security fixes included, until a
+          # release supports the kernel, which is why it warns rather than only
+          # summarising.
+
+          # The Containerfile owns which release is compiled -- the build is
+          # deliberately given no ZFS_VERSION -- so the pin is read from there
+          # rather than duplicated here.
+          zfs_version="$(sed -n 's/^ARG ZFS_VERSION=//p' deploy/zfs/Containerfile | tail -1)"
+          if [ -z "${zfs_version}" ]; then
+            echo "::warning::no ARG ZFS_VERSION in deploy/zfs/Containerfile; building without the kernel check"
+            echo "supported=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Neither lookup may turn a build into a skip: a registry or network
+          # hiccup says nothing about whether the kernel is supported. Both fall
+          # back to building, where configure refuses an unsupported kernel with
+          # its own message rather than having been silenced here.
+          if ! kernel="$(podman run --rm --entrypoint rpm \
+              "${{ needs.build.outputs.digest }}" \
+              -q --qf '%{VERSION}' kernel | tail -1)" || [ -z "${kernel}" ]; then
+            echo "::warning::could not read the base image's kernel; building without the kernel check"
+            echo "supported=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Linux-Maximum is the ceiling the release was tested against, and it
+          # is in the release's own META file -- the same file configure reads,
+          # from the same tag the build downloads.
+          if ! zfs_max="$(curl -fsSL "https://raw.githubusercontent.com/openzfs/zfs/zfs-${zfs_version}/META" \
+              | sed -n 's/^Linux-Maximum:[[:space:]]*//p' | tail -1)" || [ -z "${zfs_max}" ]; then
+            echo "::warning::could not read Linux-Maximum for OpenZFS ${zfs_version}; building without the kernel check"
+            echo "supported=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Only major and minor matter: OpenZFS supports a series, not a patch.
+          kernel_series="$(printf '%s' "${kernel}" | cut -d. -f1,2)"
+
+          # The ceiling is inclusive, so the kernel is supported when it sorts at
+          # or below it. `sort -V` orders dotted versions as versions, which is
+          # what keeps 7.10 above 7.9 instead of below it.
+          if [ "$(printf '%s\n%s\n' "${zfs_max}" "${kernel_series}" | sort -V | tail -1)" = "${zfs_max}" ]; then
+            echo "OpenZFS ${zfs_version} supports Linux up to ${zfs_max}; the base image ships ${kernel}."
+            echo "supported=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "::warning::OpenZFS ${zfs_version} supports Linux up to ${zfs_max}, but the base image ships ${kernel}: not publishing the ZFS variant until a release supports this kernel"
+          {
+            echo "### ZFS variant: not built"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| OpenZFS | \`${zfs_version}\` |"
+            echo "| OpenZFS supports | \`<= ${zfs_max}\` |"
+            echo "| Base kernel | \`${kernel}\` |"
+            echo
+            echo "Nothing was published for this build. A node on \`corium-zfs\` stays"
+            echo "on the last image published for it and receives no OS updates --"
+            echo "Fedora security fixes included -- until a newer OpenZFS release"
+            echo "supports this kernel. Raise \`ARG ZFS_VERSION\` in"
+            echo "\`deploy/zfs/Containerfile\` to that release and this job builds again."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "supported=false" >> "${GITHUB_OUTPUT}"
+
       - name: Build
+        if: steps.compat.outputs.supported == 'true'
         run: |
           # FROM the base by digest, not by tag: the ZFS module is compiled
           # against the kernel this exact image ships, and a module built against
@@ -339,6 +425,7 @@ jobs:
           done
 
       - name: Inspect what was produced
+        if: steps.compat.outputs.supported == 'true'
         run: |
           # The module cannot be loaded here -- a CI runner is not running this
           # image's kernel -- so `zfs version`, which auto-loads the kmod, would
@@ -363,6 +450,7 @@ jobs:
           echo "image size: $(podman images --format '{{.Size}}' localhost/corium-zfs:ci)"
 
       - name: Log in to the registry
+        if: steps.compat.outputs.supported == 'true'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -371,6 +459,7 @@ jobs:
 
       - name: Push
         id: push
+        if: steps.compat.outputs.supported == 'true'
         run: |
           image="${REGISTRY}/${ZFS_IMAGE_NAME}"
           version="${{ needs.build.outputs.version }}"
@@ -422,6 +511,7 @@ jobs:
           echo "digest=${image}@${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Install cosign
+        if: steps.compat.outputs.supported == 'true'
         uses: sigstore/cosign-installer@v4.1.3
         with:
           # cosign v2, not v3: the same reason the base job pins it -- v3 writes
@@ -430,6 +520,7 @@ jobs:
           cosign-release: v2.6.5
 
       - name: Sign the image
+        if: steps.compat.outputs.supported == 'true'
         run: |
           digest="${{ steps.push.outputs.digest }}"
 
@@ -447,6 +538,7 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
 
       - name: Summary
+        if: steps.compat.outputs.supported == 'true'
         run: |
           {
             echo "### ZFS variant"

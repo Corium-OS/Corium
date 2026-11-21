@@ -84,6 +84,20 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
   v1.35.10+k0s.0, v1.36.5+k0s.0 and v1.36.6+k0s.0 join the window; the releases
   already in it stay, so a configuration pinning one keeps working.
 
+- **The ZFS variant is skipped, with the reason, while Fedora's kernel is
+  newer than OpenZFS supports.** Fedora 44 moved to kernel 7.3 and no OpenZFS
+  release declares support for it — 2.4.4, the newest, caps at
+  `Linux-Maximum 7.2` — so every `corium-zfs` build failed in `configure` and
+  the image workflow went red over something no change here could fix. The
+  workflow now reads the base image's kernel and the pinned release's ceiling
+  before building, and when the kernel is over it, publishes nothing and puts
+  the numbers and the reason on the run; a build that fails past that point is
+  a real regression again. Nothing is published for the variant until a release
+  supports the kernel, so a node on `corium-zfs` stays on the last image
+  published for it and receives no OS updates meanwhile, Fedora security fixes
+  included. Raising `ARG ZFS_VERSION` in `deploy/zfs/Containerfile` to that
+  release ends it, and the next run builds. The base image is unaffected.
+
 ### Fixed
 
 - **A Kubernetes version change finishes even if `cctl` goes away.** A client

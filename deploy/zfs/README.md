@@ -52,6 +52,19 @@ If the build fails in `configure` complaining about the kernel, the OpenZFS
 release you asked for predates the base image's kernel. Raise `ZFS_VERSION` to a
 release that supports it.
 
+Sometimes there is no such release yet. Fedora's kernel can go stable before
+OpenZFS ships support for it, and then nothing here builds against the current
+base at all: Fedora 44's 7.3, for instance, is newer than the newest release's
+`Linux-Maximum`. The variant lags in that case rather than forcing it. CI reads
+the base image's kernel and the pinned release's ceiling before it builds, and
+when the kernel is over the ceiling it skips the variant and puts the numbers
+and the reason on the run instead of failing. No `corium-zfs` image is
+published until a release supports the kernel, which means a node on the
+variant keeps the last image published for it and receives no OS updates,
+Fedora security fixes included, in the meantime. Raising `ZFS_VERSION` to the
+release that catches up ends it, and the next run builds again. The base image
+is not affected either way: it is the variant that waits.
+
 The image you build is **not signed**, exactly as the appliance image is not;
 see [deploy/appliance/README.md](../appliance/README.md) for what that means for
 `bootc upgrade` and how to add your own signing scope.

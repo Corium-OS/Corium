@@ -22,6 +22,10 @@ ARG BASE=ghcr.io/corium-os/corium:latest
 # faster than OpenZFS. If the build fails in configure with a message about an
 # unsupported kernel, this is the knob. The default tracks the newest kernel the
 # current base image ships; bump it whenever that kernel outgrows this release.
+#
+# When no release supports the base kernel yet, there is nothing to bump to and
+# CI skips publishing the variant instead of failing on it; read the paragraph
+# on that in README.md beside this file. Raising this is what ends the wait.
 ARG ZFS_VERSION=2.3.9
 
 # ---------------------------------------------------------------------------
