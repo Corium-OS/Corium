@@ -116,12 +116,16 @@ jobs:
             # The asset's name changed across releases (k0s-airgap-bundle-<v>-<arch>
             # early, k0s-airgap-bundle-<v>-linux-<arch>.tar later), so it is matched
             # by shape, not by a name this workflow would have to track.
-            published="$(gh api "repos/k0sproject/k0s/releases/tags/${encoded}" --jq \
-              --arg v "${version}" --arg a "${arch}" \
-              '[(.assets[]
-                 | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
-                 | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
-                 | .digest)][0] // ""')"
+            # curl rather than gh api because the jq variables go to jq, not to gh.
+            published="$(curl -fsS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/k0sproject/k0s/releases/tags/${encoded}" \
+              | jq -r --arg v "${version}" --arg a "${arch}" \
+                '[(.assets[]
+                   | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
+                   | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
+                   | .digest)][0] // ""')"
 
             if [ "sha256:${pinned}" != "${published}" ]; then
               echo "::error::${version} (${arch}): build/k0s.lock pins sha256:${pinned}, upstream publishes ${published:-no such asset}" >&2
@@ -321,12 +325,15 @@ jobs:
 
           # Resolved from the release rather than hard-coded: the asset name
           # changed across releases. See the check in the plan job.
-          asset="$(gh api "repos/k0sproject/k0s/releases/tags/${encoded}" --jq \
-            --arg v "${version}" --arg a "${arch}" \
-            '[(.assets[]
-               | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
-               | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
-               | .name)][0] // ""')"
+          asset="$(curl -fsS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/k0sproject/k0s/releases/tags/${encoded}" \
+            | jq -r --arg v "${version}" --arg a "${arch}" \
+              '[(.assets[]
+                 | select(.name | startswith("k0s-airgap-bundle-\($v)-"))
+                 | select(.name | endswith("-\($a)") or endswith("-linux-\($a).tar"))
+                 | .name)][0] // ""')"
 
           if [ -z "${asset}" ]; then
             echo "::error::no air-gap bundle asset for ${version} (${arch})" >&2
