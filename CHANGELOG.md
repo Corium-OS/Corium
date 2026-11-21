@@ -12,6 +12,8 @@ is covered in [upgrades](docs/upgrades.md#choosing-what-to-track).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-21
+
 ### Added
 
 - **Rollouts no longer take a controller out while etcd is short a member.**
@@ -867,7 +869,8 @@ the node is described in cloud-init.
   turns it into a disk image is pinned to a floating tag, so two runs against
   the same digest may not produce identical bytes.
 
-[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Corium-OS/Corium/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Corium-OS/Corium/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Corium-OS/Corium/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Corium-OS/Corium/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/Corium-OS/Corium/compare/v0.3.5...v0.3.6

@@ -50,7 +50,7 @@ boot. Corium follows this rule for its own state, and the rule is necessary.
 In this example, you want `node_exporter` on every node.
 
 ```dockerfile
-FROM ghcr.io/corium-os/corium:0.5.0
+FROM ghcr.io/corium-os/corium:0.6.0
 
 ARG VERSION=1.10.0
 ARG SHA256=a1b2c3...   # the checksum you looked up, pinned here
@@ -122,8 +122,8 @@ d /var/lib/node-exporter 0750 root root -
 > that you build, and you can fix them only from the console.
 
 ```bash
-podman build --tag ghcr.io/you/corium:0.5.0-1 --file Containerfile .
-podman push ghcr.io/you/corium:0.5.0-1
+podman build --tag ghcr.io/you/corium:0.6.0-1 --file Containerfile .
+podman push ghcr.io/you/corium:0.6.0-1
 ```
 
 The build ends with the lint. If the lint passes, that step prints nothing and
@@ -154,7 +154,7 @@ gives its own image:
 
 ```bash
 cosign generate-key-pair
-cosign sign --key cosign.key ghcr.io/you/corium:0.5.0-1
+cosign sign --key cosign.key ghcr.io/you/corium:0.6.0-1
 ```
 
 Then make your image require the signature. Add your repository to the policy
@@ -198,7 +198,7 @@ A derived image is an image. All the tools that move a node to a new image work
 without changes:
 
 ```bash
-cctl upgrade node-a node-b --image ghcr.io/you/corium:0.5.0-1
+cctl upgrade node-a node-b --image ghcr.io/you/corium:0.6.0-1
 ```
 
 The command upgrades one node at a time. It stops at the first node that does
@@ -224,7 +224,7 @@ or to the machine. `/usr/lib/systemd/system` belongs to the image.
 runs. The agent looks broken, but it is only turned off.
 
 **Deriving from `latest`.** Your build stops being reproducible when Corium
-publishes a new release. Pin the version that you tested, `0.5.0` and not
+publishes a new release. Pin the version that you tested, `0.6.0` and not
 `latest`, and change it only on purpose.
 
 **Skipping `bootc container lint`.** It is the cheapest check available, and it

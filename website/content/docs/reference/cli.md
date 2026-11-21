@@ -11,7 +11,7 @@ toc: true
 
 `cctl` manages Corium nodes. It reads their state, runs their upgrades, and
 controls which of them obey you. This page tracks `main`. The current stable
-release is **0.5.0**. If a command is newer than the release that you run, the
+release is **0.6.0**. If a command is newer than the release that you run, the
 page gives the version that introduced it.
 
 | Command | Role | What it does | Section |
@@ -48,7 +48,7 @@ as the binary knows it.
 belongs in an operating system image. A node ships `corium-agent`, which does
 the local work, and `corium-apid`, which answers `cctl` over the network.
 
-Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'`. In zsh,
+Install it with `mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.6.0'`. In zsh,
 the quotes are necessary. The version is required. You can also download an
 archive from the
 [release page](https://github.com/Corium-OS/Corium/releases/latest).
@@ -690,8 +690,8 @@ removes every key that the API trusted. See ADR 5.
 > half-upgraded cluster.
 
 ```console
-$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.5
-Checking 3 nodes can move to ghcr.io/corium-os/corium:0.5
+$ cctl upgrade node-1 node-2 node-3 --image ghcr.io/corium-os/corium:0.6
+Checking 3 nodes can move to ghcr.io/corium-os/corium:0.6
   node-1:7443: on ghcr.io/corium-os/corium:0.4
   ...
 
@@ -1047,7 +1047,7 @@ Two things to know:
 
 ```console
 $ cctl version
-cctl 0.5.0 (a2575f3)
+cctl 0.6.0 (a2575f3)
 ```
 
 The build writes the version and the short commit into the binary at link time.

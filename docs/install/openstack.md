@@ -21,8 +21,8 @@ this one item correct before anything else.
 ## 1. Register the image
 
 ```bash
-openstack image create corium-0.5.0 \
-  --file corium-0.5.0-x86_64.qcow2 --disk-format qcow2 --container-format bare \
+openstack image create corium-0.6.0 \
+  --file corium-0.6.0-x86_64.qcow2 --disk-format qcow2 --container-format bare \
   --property hw_firmware_type=uefi \
   --property hw_machine_type=q35 \
   --property hw_disk_bus=virtio \
@@ -36,7 +36,7 @@ Some Glance installations can import the image directly from a URL. Then you do
 not upload 1.5 GB from your laptop:
 
 ```bash
-openstack image create corium-0.5.0 --import \
+openstack image create corium-0.6.0 --import \
   --import-method web-download --uri https://<the URL from the release notes>
 ```
 
@@ -85,7 +85,7 @@ image.
 
 ```bash
 openstack server create corium \
-  --image corium-0.5.0 --flavor <a flavor with 4 GB or more> \
+  --image corium-0.6.0 --flavor <a flavor with 4 GB or more> \
   --key-name corium --security-group corium \
   --network <your external network> \
   --user-data corium.yaml --wait
@@ -126,7 +126,7 @@ the image to the size of the flavor disk, without a request.
 
 ```bash
 openstack server delete corium --wait
-openstack image delete corium-0.5.0
+openstack image delete corium-0.6.0
 openstack security group delete corium
 openstack keypair delete corium
 ```

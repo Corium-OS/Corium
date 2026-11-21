@@ -21,7 +21,7 @@ Two things make ZFS different from RAID. Know them before you start.
 ## Build the image first
 
 ```bash
-IMAGE=ghcr.io/corium-os/corium:0.5.0 mise run zfs-image
+IMAGE=ghcr.io/corium-os/corium:0.6.0 mise run zfs-image
 ```
 
 [deploy/zfs/README.md](../deploy/zfs/README.md) gives the reasons, the build

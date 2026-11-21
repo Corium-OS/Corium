@@ -15,7 +15,7 @@ fifth step shows how to manage the node without SSH.
 If you are in a hurry, this is the short version:
 
 ```bash
-oras pull ghcr.io/corium-os/corium-qcow2:0.5.0   # download a ready-made disk
+oras pull ghcr.io/corium-os/corium-qcow2:0.6.0   # download a ready-made disk
 printf '#cloud-config\ncorium:\n  role: single\n' > node.yaml
 # boot the disk with node.yaml as cloud-init user-data
 ```
@@ -50,8 +50,8 @@ Pull the artefact for the platform where the node will run:
 
 | Artefact | Pull it with | Use it for |
 |---|---|---|
-| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.5.0` | Proxmox, KVM, libvirt |
-| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.5.0` | Bare metal. Installs unattended. See [bare metal](/docs/install/baremetal/) |
+| qcow2 disk | `oras pull ghcr.io/corium-os/corium-qcow2:0.6.0` | Proxmox, KVM, libvirt |
+| Installer ISO | `oras pull ghcr.io/corium-os/corium-iso:0.6.0` | Bare metal. Installs unattended. See [bare metal](/docs/install/baremetal/) |
 
 The tag above is only an example. **The
 [release page](https://github.com/Corium-OS/Corium/releases/latest) of each
@@ -63,7 +63,7 @@ If you do not have `oras`, `curl` or a browser download also works. See
 the file you received is the file that the release published:
 
 ```bash
-cosign verify ghcr.io/corium-os/corium-qcow2:0.5.0 \
+cosign verify ghcr.io/corium-os/corium-qcow2:0.6.0 \
   --certificate-identity-regexp 'https://github.com/Corium-OS/Corium/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -229,7 +229,7 @@ Install `cctl` on your own machine. Each release includes archives for Linux and
 macOS, on amd64 and arm64:
 
 ```bash
-mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.5.0'
+mise use -g 'github:Corium-OS/Corium[exe=cctl]@0.6.0'
 ```
 
 You must keep the quotes and the version. See
@@ -403,7 +403,7 @@ survive an upgrade.
 To publish it:
 
 ```bash
-REGISTRY=ghcr.io/you IMAGE_TAG=0.5.0-1 mise run push
+REGISTRY=ghcr.io/you IMAGE_TAG=0.6.0-1 mise run push
 ```
 
 ### Turn it into a disk

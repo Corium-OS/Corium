@@ -46,7 +46,7 @@ you do not want Go on a hypervisor, do not run the build, skip the validation
 in step 3, and download only the script:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v0.5.0/deploy/proxmox/create-vm.sh
+curl -fsSLO https://raw.githubusercontent.com/Corium-OS/Corium/v0.6.0/deploy/proxmox/create-vm.sh
 chmod +x create-vm.sh
 ```
 
@@ -56,7 +56,7 @@ Run this on the Proxmox host, so that the file is where you need it:
 
 ```bash
 cd /var/lib/vz/template
-curl -fLO https://corium.b-cdn.net/corium-0.5.0-x86_64.qcow2
+curl -fLO https://corium.b-cdn.net/corium-0.6.0-x86_64.qcow2
 ```
 
 The [release notes](https://github.com/Corium-OS/Corium/releases/latest) give
@@ -66,7 +66,7 @@ real run, 1.5 GB took 15 seconds.
 ## 2. Check what you downloaded
 
 ```bash
-sha256sum /var/lib/vz/template/corium-0.5.0-x86_64.qcow2
+sha256sum /var/lib/vz/template/corium-0.6.0-x86_64.qcow2
 ```
 
 Compare the result with the hash in the release notes. If they match, you have
@@ -114,7 +114,7 @@ corium-agent validate /root/corium-node.yaml
 
 ```bash
 VMID=900 VM_NAME=corium \
-  DISK_IMAGE=/var/lib/vz/template/corium-0.5.0-x86_64.qcow2 \
+  DISK_IMAGE=/var/lib/vz/template/corium-0.6.0-x86_64.qcow2 \
   CLOUD_CONFIG=/root/corium-node.yaml \
   MEMORY=6144 CORES=2 \
   /root/Corium/deploy/proxmox/create-vm.sh
@@ -156,7 +156,7 @@ ssh core@<address>
 
 ```console
 $ corium-agent version
-corium-agent 0.5.0 (a2575f3)
+corium-agent 0.6.0 (a2575f3)
 
 $ systemctl is-active corium-bootstrap k0scontroller
 active

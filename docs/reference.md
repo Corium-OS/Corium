@@ -2,7 +2,7 @@
 
 This page describes the configuration file: what it contains, where it comes
 from, and what Corium does with it. This page follows `main`. The current stable
-release is 0.5.0. A field that is newer than the release you run shows the
+release is 0.6.0. A field that is newer than the release you run shows the
 version that added it. The
 [changelog](https://github.com/Corium-OS/Corium/blob/main/CHANGELOG.md) lists
 these versions.

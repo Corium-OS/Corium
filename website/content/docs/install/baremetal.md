@@ -52,7 +52,7 @@ offline. You can also install without a seed, and that state is
 
 ## 1. Write the ISO to a stick
 
-Download `corium-0.5.0-x86_64.iso` and verify it. [downloads](/docs/install/downloads/)
+Download `corium-0.6.0-x86_64.iso` and verify it. [downloads](/docs/install/downloads/)
 gives all three download routes and the verification steps.
 
 **Run the listing command first. If `dd` writes to the wrong device, it destroys
@@ -61,14 +61,14 @@ that device.**
 ```bash
 # linux
 lsblk -o NAME,SIZE,MODEL,TRAN
-sudo dd if=corium-0.5.0-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sudo dd if=corium-0.6.0-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
 ```bash
 # macOS
 diskutil list
 diskutil unmountDisk /dev/diskN
-sudo dd if=corium-0.5.0-x86_64.iso of=/dev/rdiskN bs=4m
+sudo dd if=corium-0.6.0-x86_64.iso of=/dev/rdiskN bs=4m
 ```
 
 On macOS, use `/dev/rdiskN` and not `/dev/diskN`. For a write of this size, the
