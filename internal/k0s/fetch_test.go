@@ -84,17 +84,17 @@ func writeManifest(t *testing.T, layers []string, writeBlobs bool) string {
 	return dir
 }
 
-func TestExtensionBlob(t *testing.T) {
+func TestSingleBlob(t *testing.T) {
 	t.Parallel()
 
-	t.Run("one blob is the extension", func(t *testing.T) {
+	t.Run("one blob is the artefact", func(t *testing.T) {
 		t.Parallel()
 
 		dir := writeManifest(t, []string{"abc123"}, true)
 
-		got, err := extensionBlob(dir)
+		got, err := singleBlob(dir)
 		if err != nil {
-			t.Fatalf("extensionBlob: %v", err)
+			t.Fatalf("singleBlob: %v", err)
 		}
 
 		if want := filepath.Join(dir, "abc123"); got != want {
@@ -108,7 +108,7 @@ func TestExtensionBlob(t *testing.T) {
 		// Picking one would be a guess that works most of the time, which is
 		// the worst available behaviour: the time it guesses wrong, a node
 		// installs the wrong file and reports success.
-		if _, err := extensionBlob(writeManifest(t, []string{"a1", "b2"}, true)); err == nil {
+		if _, err := singleBlob(writeManifest(t, []string{"a1", "b2"}, true)); err == nil {
 			t.Fatal("a multi-layer artefact was accepted")
 		}
 	})
@@ -116,7 +116,7 @@ func TestExtensionBlob(t *testing.T) {
 	t.Run("no blob at all is refused", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := extensionBlob(writeManifest(t, nil, false))
+		_, err := singleBlob(writeManifest(t, nil, false))
 		if !errors.Is(err, ErrNoLayer) {
 			t.Fatalf("error is %v, want it to wrap ErrNoLayer", err)
 		}
@@ -125,7 +125,7 @@ func TestExtensionBlob(t *testing.T) {
 	t.Run("a manifest naming an uncopied blob is refused", func(t *testing.T) {
 		t.Parallel()
 
-		if _, err := extensionBlob(writeManifest(t, []string{"missing"}, false)); err == nil {
+		if _, err := singleBlob(writeManifest(t, []string{"missing"}, false)); err == nil {
 			t.Fatal("a manifest naming a blob that was not copied was accepted")
 		}
 	})
@@ -139,7 +139,7 @@ func TestExtensionBlob(t *testing.T) {
 			t.Fatalf("writing manifest: %v", err)
 		}
 
-		if _, err := extensionBlob(dir); !errors.Is(err, ErrNoLayer) {
+		if _, err := singleBlob(dir); !errors.Is(err, ErrNoLayer) {
 			t.Fatalf("error is %v, want it to wrap ErrNoLayer", err)
 		}
 	})
@@ -147,7 +147,7 @@ func TestExtensionBlob(t *testing.T) {
 	t.Run("a missing manifest is refused", func(t *testing.T) {
 		t.Parallel()
 
-		if _, err := extensionBlob(t.TempDir()); err == nil {
+		if _, err := singleBlob(t.TempDir()); err == nil {
 			t.Fatal("a directory with no manifest was accepted")
 		}
 	})

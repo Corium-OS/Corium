@@ -165,6 +165,12 @@ PAGES = [
      "ADR 12 — Rollout inventory", 1011,
      "Why a controller refuses a Kubernetes minor that would leave a kubelet two "
      "minors behind, and why cctl warns about workers left out of a rollout."),
+    ("adr/0013-airgap-bundle.md", "decisions",
+     "adr-0013-airgap-bundle",
+     "ADR 13 — Air-gap bundle", 1012,
+     "Why the k0s image bundle travels with the Kubernetes version as its own "
+     "signed artefact in a sibling registry repository, so an air-gapped node "
+     "runs the system images of the version it actually runs."),
 ]
 
 # Links between documents change shape on the site: docs/reference.md becomes

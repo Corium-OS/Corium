@@ -61,19 +61,7 @@ func Reference(mirror string, version Version) string {
 		mirror, strings.ReplaceAll(version.Raw, "+", "_"), runtime.GOARCH)
 }
 
-// Fetch downloads a k0s extension into the store, verified.
-//
-// Two checks happen inside skopeo rather than here, and both matter. The
-// signature policy gates the source before anything is read, so an artefact
-// nobody vouched for never reaches the disk. And every blob is digest-checked
-// as it is copied, independently of signatures, so a truncated or corrupted
-// download fails rather than installing an extension that will not merge.
-//
-// The copy lands in a `dir:` layout, which writes each blob verbatim under its
-// own hex digest -- no compression, no tar, no extraction. The extension image
-// is the blob. That is the whole reason this transport was chosen over pulling
-// an ordinary single-layer image, which would mean decompressing and untarring
-// 250 MB to recover one file that was already sitting there.
+// Fetch downloads a k0s extension into the store, verified. See ADR 10.
 func Fetch(ctx context.Context, version Version, mirror string) error {
 	if _, err := os.Stat(StoredImage(version)); err == nil {
 		slog.Info("k0s extension already downloaded", "version", version)
@@ -81,14 +69,42 @@ func Fetch(ctx context.Context, version Version, mirror string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(ExtensionStore, 0o700); err != nil {
-		return fmt.Errorf("creating the extension store: %w", err)
+	reference := Reference(mirror, version)
+	slog.Info("fetching the k0s extension", "version", version, "from", reference)
+
+	if err := copyArtefact(ctx, reference, ExtensionStore, StoredImage(version)); err != nil {
+		return err
 	}
 
-	// Staged inside the store rather than in /tmp: the image is a quarter of a
-	// gigabyte, /tmp is a tmpfs sized from RAM on this image, and a download
-	// that dies for want of memory on a small node is a confusing way to fail.
-	staging, err := os.MkdirTemp(ExtensionStore, ".fetch-*")
+	slog.Info("stored the k0s extension",
+		"version", version, "path", StoredImage(version))
+
+	return nil
+}
+
+// copyArtefact pulls one signed OCI artefact into dest, verified.
+//
+// Two checks happen inside skopeo rather than here, and both matter. The
+// signature policy gates the source before anything is read, so an artefact
+// nobody vouched for never reaches the disk. And every blob is digest-checked
+// as it is copied, independently of signatures, so a truncated or corrupted
+// download fails rather than installing an artefact that will not install.
+//
+// The copy lands in a `dir:` layout, which writes each blob verbatim under its
+// own hex digest -- no compression, no tar, no extraction. The artefact is the
+// blob. That is the whole reason this transport was chosen over pulling an
+// ordinary single-layer image, which would mean decompressing and untarring
+// hundreds of megabytes to recover one file that was already sitting there.
+//
+// stagingParent is on /var rather than /tmp on purpose: /tmp is a tmpfs sized
+// from RAM on this image, and a download that dies for want of memory on a
+// small node is a confusing way to fail.
+func copyArtefact(ctx context.Context, reference, stagingParent, dest string) error {
+	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
+		return fmt.Errorf("creating the staging parent: %w", err)
+	}
+
+	staging, err := os.MkdirTemp(stagingParent, ".fetch-*")
 	if err != nil {
 		return fmt.Errorf("creating a staging directory: %w", err)
 	}
@@ -100,9 +116,6 @@ func Fetch(ctx context.Context, version Version, mirror string) error {
 		}
 	}()
 
-	reference := Reference(mirror, version)
-	slog.Info("fetching the k0s extension", "version", version, "from", reference)
-
 	// No --insecure-policy, and that omission is the security control: with it
 	// skopeo accepts anything, and without it the node's own policy.json
 	// decides. It is not passed conditionally anywhere.
@@ -111,31 +124,28 @@ func Fetch(ctx context.Context, version Version, mirror string) error {
 		return fmt.Errorf("pulling %s: %w", reference, err)
 	}
 
-	blob, err := extensionBlob(staging)
+	blob, err := singleBlob(staging)
 	if err != nil {
 		return fmt.Errorf("%s: %w", reference, err)
 	}
 
 	// Renamed into place as the last step, so an interrupted fetch leaves no
 	// half-written file that a later run would mistake for a complete download.
-	if err := os.Rename(blob, StoredImage(version)); err != nil {
-		return fmt.Errorf("storing the extension: %w", err)
+	if err := os.Rename(blob, dest); err != nil {
+		return fmt.Errorf("storing the artefact: %w", err)
 	}
-
-	slog.Info("stored the k0s extension",
-		"version", version, "path", StoredImage(version))
 
 	return nil
 }
 
-// extensionBlob finds the single blob a copied artefact carries.
+// singleBlob finds the single blob a copied artefact carries.
 //
 // Exactly one is required rather than "the first" or "the biggest". An artefact
 // with several layers is not something this code knows how to install, and
 // picking one of them would be a guess that succeeds most of the time -- which
 // is the worst behaviour available, because the time it guesses wrong a node
 // installs the wrong file and reports success.
-func extensionBlob(dir string) (string, error) {
+func singleBlob(dir string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json")) // #nosec G304
 	if err != nil {
 		return "", fmt.Errorf("reading the artefact manifest: %w", err)
